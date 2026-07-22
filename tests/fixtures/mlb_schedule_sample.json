@@ -1,0 +1,33 @@
+{
+  "dates": [
+    {
+      "date": "2026-07-21",
+      "games": [
+        {
+          "gamePk": 824409,
+          "gameType": "R",
+          "season": "2026",
+          "gameDate": "2026-07-21T22:40:00Z",
+          "officialDate": "2026-07-21",
+          "status": {
+            "abstractGameState": "Preview",
+            "detailedState": "Scheduled"
+          },
+          "teams": {
+            "away": {
+              "team": {"id": 142, "name": "Minnesota Twins"},
+              "leagueRecord": {"wins": 49, "losses": 52, "pct": ".485"},
+              "probablePitcher": {"id": 696070, "fullName": "Kendry Rojas"}
+            },
+            "home": {
+              "team": {"id": 114, "name": "Cleveland Guardians"},
+              "leagueRecord": {"wins": 55, "losses": 46, "pct": ".545"},
+              "probablePitcher": {"id": 800048, "fullName": "Parker Messick"}
+            }
+          },
+          "venue": {"id": 5, "name": "Progressive Field"}
+        }
+      ]
+    }
+  ]
+}

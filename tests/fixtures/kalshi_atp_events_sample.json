@@ -1,0 +1,55 @@
+{
+  "events": [
+    {
+      "event_ticker": "KXATPMATCH-26JUL21MERJAC",
+      "series_ticker": "KXATPMATCH",
+      "title": "Merida vs Jacquet",
+      "sub_title": "Merida vs Jacquet (Jul 21)",
+      "product_metadata": {"competition": "ATP Estoril", "competition_scope": "Game"},
+      "markets": [
+        {
+          "ticker": "KXATPMATCH-26JUL21MERJAC-MER",
+          "event_ticker": "KXATPMATCH-26JUL21MERJAC",
+          "title": "Will Daniel Merida win the Merida vs Jacquet match?",
+          "status": "active",
+          "yes_sub_title": "Daniel Merida",
+          "no_sub_title": "Kyrian Jacquet",
+          "yes_bid_dollars": "0.6900",
+          "yes_ask_dollars": "0.7000",
+          "no_bid_dollars": "0.3000",
+          "no_ask_dollars": "0.3100",
+          "last_price_dollars": "0.7000",
+          "volume_fp": "2174.78",
+          "volume_24h_fp": "2132.41",
+          "open_interest_fp": "2200.33",
+          "liquidity_dollars": "0.0000",
+          "occurrence_datetime": "2026-07-21T15:10:00Z",
+          "close_time": "2026-08-04T12:10:00Z",
+          "expected_expiration_time": "2026-07-21T15:10:00Z",
+          "expiration_time": "2026-08-04T12:10:00Z"
+        },
+        {
+          "ticker": "KXATPMATCH-26JUL21MERJAC-JAC",
+          "event_ticker": "KXATPMATCH-26JUL21MERJAC",
+          "title": "Will Kyrian Jacquet win the Merida vs Jacquet match?",
+          "status": "active",
+          "yes_sub_title": "Kyrian Jacquet",
+          "no_sub_title": "Daniel Merida",
+          "yes_bid_dollars": "0.3000",
+          "yes_ask_dollars": "0.3100",
+          "no_bid_dollars": "0.6900",
+          "no_ask_dollars": "0.7000",
+          "last_price_dollars": "0.3000",
+          "volume_fp": "2174.78",
+          "volume_24h_fp": "2132.41",
+          "open_interest_fp": "2200.33",
+          "liquidity_dollars": "0.0000",
+          "occurrence_datetime": "2026-07-21T15:10:00Z",
+          "close_time": "2026-08-04T12:10:00Z",
+          "expected_expiration_time": "2026-07-21T15:10:00Z",
+          "expiration_time": "2026-08-04T12:10:00Z"
+        }
+      ]
+    }
+  ]
+}

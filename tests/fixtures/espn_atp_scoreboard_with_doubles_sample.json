@@ -1,0 +1,60 @@
+{
+  "events": [
+    {
+      "id": "310-2026",
+      "name": "Millennium Estoril Open",
+      "groupings": [
+        {
+          "grouping": {"displayName": "Men's Singles"},
+          "competitions": [
+            {
+              "id": "183099",
+              "date": "2026-07-21T12:30Z",
+              "status": {"type": {"name": "STATUS_SCHEDULED", "state": "pre", "completed": false}},
+              "competitors": [
+                {"homeAway": "home", "athlete": {"displayName": "Daniel Merida"}},
+                {"homeAway": "away", "athlete": {"displayName": "Kyrian Jacquet"}}
+              ]
+            }
+          ]
+        },
+        {
+          "grouping": {"displayName": "Men's Doubles"},
+          "competitions": [
+            {
+              "id": "183100",
+              "date": "2026-07-21T14:00Z",
+              "status": {"type": {"name": "STATUS_FINAL", "state": "post", "completed": true}},
+              "competitors": [
+                {
+                  "homeAway": "away",
+                  "type": "team",
+                  "winner": true,
+                  "roster": {
+                    "displayName": "Jean-Julien Rojer / Theodore Winegar",
+                    "athletes": [
+                      {"displayName": "Jean-Julien Rojer"},
+                      {"displayName": "Theodore Winegar"}
+                    ]
+                  }
+                },
+                {
+                  "homeAway": "home",
+                  "type": "team",
+                  "winner": false,
+                  "roster": {
+                    "displayName": "Some Other / Team Pair",
+                    "athletes": [
+                      {"displayName": "Some Other"},
+                      {"displayName": "Team Pair"}
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
