@@ -294,6 +294,19 @@ lados deben sumar 1. Se documenta como observación de calidad de mercado
    `EDGE_YES=None` (nunca se usa un precio inválido, nunca se clampa a 1.0
    en silencio).
 
+**Nota de resolución [Paso 3 cerrado, decisión explícita del usuario]:**
+la redacción anterior de §12/§13, que etiqueta estos "6 tests
+obligatorios" como pertenecientes al Paso 3, generaba una ambigüedad real
+con la tabla de arquitectura de §3 (que asigna `EDGE_YES`/`EDGE_NO` a
+`src/signals/edge.py`, Paso 8) — el plan nunca definió pseudocódigo de
+una función de EDGE, solo la fórmula. Se resuelve así: `src/pricing/market_pricing.py`
+(Paso 3) implementa únicamente `market_price_yes`/`market_price_no`; los
+6 escenarios se prueban ahí solo en la parte de `P_market_YES`/`P_market_NO`.
+Las aserciones de `EDGE_YES`/`EDGE_NO` de estos mismos 6 escenarios se
+implementan en el Paso 8 (`src/signals/edge.py`), reutilizando estas
+funciones como entrada. El criterio de aceptación #5 (§14) se satisface
+al cierre de la Fase 2, no al cierre del Paso 3.
+
 ---
 
 ## 8. Diseño del consenso no-vig **[REV2 — reformulado en dos pasos explícitos]**
