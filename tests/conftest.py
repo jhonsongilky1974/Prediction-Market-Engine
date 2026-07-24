@@ -46,3 +46,10 @@ def tmp_repository(tmp_path):
     from src.storage.repository import Repository
 
     return Repository(db_path=tmp_path / "test.db", raw_dir=tmp_path / "raw")
+
+
+@pytest.fixture
+def tmp_history_repository(tmp_path):
+    from src.storage.history_repository import HistoryRepository
+
+    return HistoryRepository(db_path=tmp_path / "history.db")

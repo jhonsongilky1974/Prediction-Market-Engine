@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.pipelines.mlb_pipeline import PipelineStepResult, run_mlb_pipeline
 from src.pipelines.tennis_pipeline import run_tennis_pipeline
+from src.storage.history_repository import HistoryRepository
 from src.storage.repository import Repository
 
 
@@ -105,10 +106,14 @@ def main() -> int:
     args = parser.parse_args()
 
     repo = Repository()
+    # Paso 0d: mismo archivo SQLite que `repo` (ver PLAN_PHASE2.md §11) --
+    # cada corrida real de este script pasa a dejar snapshot histórico,
+    # además del estado actual que ya guardaba `repo`.
+    hist_repo = HistoryRepository()
 
     mlb_date = args.mlb_date or _find_next_mlb_date_with_games()
     print(f"\n=== MLB end-to-end: date={mlb_date} ===")
-    mlb_result = run_mlb_pipeline(mlb_date, repository=repo, limit=1)
+    mlb_result = run_mlb_pipeline(mlb_date, repository=repo, history_repository=hist_repo, limit=1)
     for step in mlb_result.steps:
         status = "OK" if step.ok else f"FAIL ({step.error})"
         print(f"  [{step.source}] {step.step}: {status}" + (f" count={step.count}" if step.ok else ""))
@@ -128,7 +133,7 @@ def main() -> int:
 
     tennis_date = args.tennis_date or _find_next_tennis_date_with_matches(args.tour)
     print(f"\n=== TENIS end-to-end: tour={args.tour.upper()} date={tennis_date} ===")
-    tennis_result = run_tennis_pipeline(args.tour, tennis_date, repository=repo, limit=5)
+    tennis_result = run_tennis_pipeline(args.tour, tennis_date, repository=repo, history_repository=hist_repo, limit=5)
     for step in tennis_result.steps:
         status = "OK" if step.ok else f"FAIL ({step.error})"
         print(f"  [{step.source}] {step.step}: {status}" + (f" count={step.count}" if step.ok else ""))
@@ -172,6 +177,7 @@ def main() -> int:
 
     print(f"\nDB: {repo.db_path}")
     print(f"RAW dir: {repo.raw_dir}")
+    print(f"History DB (event_snapshots): {hist_repo.db_path}")
     return 0
 
 

@@ -17,6 +17,7 @@ from src.models.schemas import SourceStatus
 from src.normalization.mlb_normalizer import normalize_mlb_game
 from src.quality.completeness import compute_completeness_score, dedupe_missing_fields
 from src.quality.validators import annotate_duplicate_markets, validate_record
+from src.storage.history_repository import HistoryRepository
 from src.storage.repository import Repository
 
 
@@ -38,6 +39,7 @@ class MlbPipelineResult:
 def run_mlb_pipeline(
     date: str,
     repository: Optional[Repository] = None,
+    history_repository: Optional[HistoryRepository] = None,
     limit: Optional[int] = None,
     fetch_boxscore: bool = True,
     fetch_pitcher_stats: bool = True,
@@ -127,6 +129,10 @@ def run_mlb_pipeline(
     if repository is not None:
         for record in records:
             repository.save_normalized_record(record)
+            # Paso 0c: snapshot histórico append-only del MISMO record ya
+            # persistido -- nunca antes, nunca en su lugar (ver PLAN_PHASE2.md §11).
+            if history_repository is not None:
+                history_repository.save_event_snapshot(record, source="mlb_pipeline_run")
 
     steps.append(PipelineStepResult("pipeline", "normalized_records", True, count=len(records)))
     return MlbPipelineResult(records=records, steps=steps)
