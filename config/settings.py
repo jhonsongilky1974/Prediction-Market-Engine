@@ -14,6 +14,8 @@ DATA_RAW_DIR = PROJECT_ROOT / "data" / "raw"
 DATA_NORMALIZED_DIR = PROJECT_ROOT / "data" / "normalized"
 LOGS_DIR = PROJECT_ROOT / "logs"
 DB_PATH = PROJECT_ROOT / "data" / "engine.db"
+# Paso 5a: artefactos de modelo entrenado (joblib + metadata JSON sidecar).
+DATA_MODELS_DIR = PROJECT_ROOT / "data" / "models"
 
 
 @dataclass(frozen=True)
@@ -106,5 +108,5 @@ EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT = {
 # evento se marca NEEDS_REVIEW en vez de forzarse.
 EVENT_NAME_MATCH_MIN_CONFIDENCE = 0.72
 
-for _dir in (DATA_RAW_DIR, DATA_NORMALIZED_DIR, LOGS_DIR):
+for _dir in (DATA_RAW_DIR, DATA_NORMALIZED_DIR, LOGS_DIR, DATA_MODELS_DIR):
     _dir.mkdir(parents=True, exist_ok=True)

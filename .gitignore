@@ -6,6 +6,8 @@ data/raw/*
 !data/raw/.gitkeep
 data/normalized/*
 !data/normalized/.gitkeep
+data/models/*
+!data/models/.gitkeep
 data/engine.db
 data/.run_e2e.lock
 logs/*

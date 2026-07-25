@@ -290,6 +290,19 @@ class HistoryRepository:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_feature_snapshots(self) -> List[Dict[str, Any]]:
+        """Todos los feature_snapshots existentes, sin filtrar por evento --
+        a diferencia de `get_feature_snapshots_for_event` (pensado para
+        inspección de UN evento), este método es para quien necesita
+        recorrer TODO el histórico (p.ej. el dataset builder de Paso 5a/9,
+        que no sabe de antemano qué event_ids existen)."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM feature_snapshots ORDER BY computed_at ASC, id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # event_results (INSERT-only, tabla separada, nunca unida al escribir)
     # ------------------------------------------------------------------
@@ -333,5 +346,15 @@ class HistoryRepository:
             rows = conn.execute(
                 "SELECT * FROM event_results WHERE event_id = ? ORDER BY recorded_at ASC, id ASC",
                 (event_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_event_results(self) -> List[Dict[str, Any]]:
+        """Todos los event_results existentes, sin filtrar por evento --
+        ver docstring de `get_all_feature_snapshots`, mismo motivo."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM event_results ORDER BY recorded_at ASC, id ASC"
             ).fetchall()
         return [dict(r) for r in rows]

@@ -485,3 +485,37 @@ def test_event_start_time_and_captured_at_are_never_confused(tmp_path):
     assert snap["captured_at"] == captured.isoformat()
     assert snap["event_start_time"] == start.isoformat()
     assert snap["captured_at"] != snap["event_start_time"]
+
+
+def test_get_all_feature_snapshots_returns_across_all_events(tmp_path):
+    """A diferencia de get_feature_snapshots_for_event (un evento a la
+    vez), get_all_feature_snapshots recorre TODO el histórico -- lo que
+    necesita un dataset builder (Paso 5a/9) que no conoce de antemano los
+    event_ids existentes."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    for event_id in ("mlb_1", "mlb_2", "mlb_3"):
+        snap_id = hist.save_event_snapshot(_record(event_id=event_id), source="x", captured_at=t)
+        hist.save_feature_snapshot(
+            event_id=event_id,
+            event_snapshot_id=snap_id,
+            feature_set_version="v1",
+            data_cutoff_timestamp=t,
+            features={"foo": 1},
+            computed_at=t,
+        )
+
+    rows = hist.get_all_feature_snapshots()
+
+    assert {r["event_id"] for r in rows} == {"mlb_1", "mlb_2", "mlb_3"}
+
+
+def test_get_all_event_results_returns_across_all_events(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    for event_id in ("mlb_1", "mlb_2"):
+        hist.save_event_result(event_id=event_id, sport="MLB", result="PARTICIPANT_A_WON", source="x", recorded_at=t)
+
+    rows = hist.get_all_event_results()
+
+    assert {r["event_id"] for r in rows} == {"mlb_1", "mlb_2"}
