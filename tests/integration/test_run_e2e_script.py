@@ -37,6 +37,10 @@ def test_run_e2e_main_injects_history_repository_into_both_pipelines(monkeypatch
 
     monkeypatch.setattr(run_e2e_module, "Repository", fake_repository)
     monkeypatch.setattr(run_e2e_module, "HistoryRepository", fake_history_repository)
+    # Paso 0d, subfase de lock: sin esto, main() tomaría el LOCK_PATH real
+    # (data/.run_e2e.lock) -- se redirige a tmp_path por la misma razón que
+    # Repository/HistoryRepository de arriba, para no tocar `data/` real.
+    monkeypatch.setattr(run_e2e_module, "LOCK_PATH", tmp_path / "run_e2e.lock")
     monkeypatch.setattr(sys, "argv", ["run_e2e.py"])
 
     exit_code = run_e2e_module.main()

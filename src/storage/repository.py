@@ -69,7 +69,12 @@ class Repository:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        # timeout=30s (default de sqlite3 es 5s): tolera una espera breve
+        # si otra conexión tiene el archivo bloqueado, en vez de fallar con
+        # "database is locked" ante una colisión ocasional y pasajera.
+        # WAL no se activa: el patrón de un solo escritor a la vez ya está
+        # garantizado a nivel de proceso por scripts/pipeline_lock.py.
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
             yield conn
             conn.commit()
