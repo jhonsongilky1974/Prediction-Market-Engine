@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.prediction-market-engine.run-e2e-historical</string>
+
+    <!-- Paso 0d: captura horaria de histórico real (modo `historical`,
+         ver scripts/run_e2e.py). El lock de instancia única
+         (scripts/pipeline_lock.py) sigue activo en cada corrida -- si una
+         corrida anterior sigue en curso cuando launchd dispara la
+         siguiente, la nueva instancia sale limpia sin escribir nada. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/.venv/bin/python3</string>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/scripts/run_e2e.py</string>
+        <string>--mode</string>
+        <string>historical</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine</string>
+
+    <!-- Una ejecución cada hora (3600s), autorizado como frecuencia
+         inicial. RunAtLoad se deja en false a propósito: cargar el
+         LaunchAgent NO dispara una corrida real inmediata contra
+         data/engine.db -- solo lo arma para el próximo ciclo. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/run_e2e.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/run_e2e.stderr.log</string>
+</dict>
+</plist>
