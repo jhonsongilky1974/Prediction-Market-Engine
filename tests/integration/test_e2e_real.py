@@ -149,6 +149,31 @@ def test_mlb_elo_inference_works_on_real_pipeline_output(tmp_repository):
     assert output.p_model_yes is None
 
 
+def test_backtest_dataset_builds_honestly_on_real_mlb_pipeline_output_without_results(
+    tmp_repository, tmp_history_repository
+):
+    """Paso 9, prueba controlada real (E): confirma que
+    `build_backtest_dataset` no falla contra un `HistoryRepository`
+    alimentado por una corrida real del pipeline MLB. Sin `event_results`
+    reales sincronizados en este entorno, el dataset debe reportar
+    honestamente 0 filas (excluidas por "sin event_result todavía"), nunca
+    fabricar una etiqueta."""
+    from src.backtesting.dataset import build_backtest_dataset
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(
+        mlb_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    dataset = build_backtest_dataset(tmp_history_repository)
+
+    assert dataset.size == 0
+    assert any("sin event_result" in w for w in dataset.warnings)
+
+
 def test_edge_and_ev_compute_honestly_on_real_mlb_pipeline_output(tmp_repository):
     """Paso 8, prueba controlada real (E): confirma que
     `compute_edge_yes`/`compute_edge_no`/`compute_ev_yes_bruto`/

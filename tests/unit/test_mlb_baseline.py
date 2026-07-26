@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.features.mlb_features import MlbFeatureInputs
 from src.features.registry import CURRENT_FEATURE_SET_VERSION
 from src.models import registry as model_registry
@@ -22,6 +24,7 @@ from src.models.mlb_baseline import (
     _vectorize_features,
     build_mlb_training_dataset,
     predict_mlb_baseline,
+    predict_mlb_baseline_from_features,
     split_dataset_temporally,
     train_mlb_baseline_model,
 )
@@ -403,3 +406,66 @@ def test_train_threshold_evaluated_on_full_dataset_before_split(tmp_path):
     assert status == ModelStatus.TRAINED
     assert artifact.n_training_samples == 10
     assert artifact.n_train_samples < 10  # el split sí redujo el train real
+
+
+# ---------------------------------------------------------------------
+# predict_mlb_baseline_from_features (Paso 9): wrapper delgado para
+# inferencia histórica/backtesting -- misma implementación única que
+# predict_mlb_baseline, nunca duplicada, nunca un camino alternativo.
+# ---------------------------------------------------------------------
+
+
+def test_predict_from_features_returns_none_without_trained_artifact():
+    assert predict_mlb_baseline_from_features(_synthetic_features(), loaded_artifact=None) is None
+
+
+def test_predict_from_features_matches_predict_mlb_baseline_exactly(tmp_path):
+    """Mismo artefacto, mismas features -> predict_mlb_baseline_from_features
+    debe producir EXACTAMENTE el mismo p_model_yes que predict_mlb_baseline
+    (que las calcula en vivo vía compute_mlb_features) -- prueba directa de
+    que ambos puntos de entrada comparten una única implementación de
+    inferencia, no dos que puedan divergir."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(5):
+        _add_sample(hist, f"mlb_a{i}", t0 + timedelta(minutes=i), result="PARTICIPANT_A_WON", era_a=2.5, era_b=5.0)
+    for i in range(5):
+        _add_sample(hist, f"mlb_b{i}", t0 + timedelta(minutes=100 + i), result="PARTICIPANT_B_WON", era_a=5.0, era_b=2.5)
+    models_dir = tmp_path / "models"
+    status, artifact, _ = train_mlb_baseline_model(hist, models_dir=models_dir, min_samples=10)
+    assert status == ModelStatus.TRAINED
+    loaded = model_registry.load_latest_mlb_artifact(models_dir=models_dir)
+
+    record = _record("mlb_live_1")
+    inputs = MlbFeatureInputs()
+    cutoff = datetime.now(timezone.utc)
+
+    live_output = predict_mlb_baseline(record, inputs, cutoff, loaded_artifact=loaded)
+
+    # compute_mlb_features(record, MlbFeatureInputs(), cutoff) con inputs
+    # vacíos produce un dict de features todo-None -- exactamente lo que
+    # _vectorize_features traduciría a NaN en ambos caminos. Se replica ese
+    # mismo dict "vacío" como si viniera de un feature_snapshot histórico.
+    from src.features.mlb_features import compute_mlb_features
+
+    historical_features, _missing, _warnings = compute_mlb_features(record, inputs, cutoff)
+
+    p_from_features = predict_mlb_baseline_from_features(historical_features, loaded_artifact=loaded)
+
+    assert p_from_features == pytest.approx(live_output.p_model_yes)
+
+
+def test_predict_from_features_is_deterministic(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(5):
+        _add_sample(hist, f"mlb_a{i}", t0 + timedelta(minutes=i), result="PARTICIPANT_A_WON", era_a=2.5, era_b=5.0)
+    for i in range(5):
+        _add_sample(hist, f"mlb_b{i}", t0 + timedelta(minutes=100 + i), result="PARTICIPANT_B_WON", era_a=5.0, era_b=2.5)
+    models_dir = tmp_path / "models"
+    train_mlb_baseline_model(hist, models_dir=models_dir, min_samples=10)
+    loaded = model_registry.load_latest_mlb_artifact(models_dir=models_dir)
+
+    features = _synthetic_features(era_a=2.8, era_b=4.9)
+    results = {predict_mlb_baseline_from_features(features, loaded) for _ in range(20)}
+    assert len(results) == 1

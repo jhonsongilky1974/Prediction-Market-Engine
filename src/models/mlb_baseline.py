@@ -412,6 +412,19 @@ def train_mlb_baseline_model(
 # ---------------------------------------------------------------------
 
 
+def _predict_proba_from_vectorized_features(
+    model: Any, features: Dict[str, Any], feature_columns: List[str]
+) -> float:
+    """Núcleo ÚNICO de inferencia del baseline logreg: vectoriza (Paso 5a)
+    + `model.predict_proba`. Compartido, sin excepción, por
+    `predict_mlb_baseline` (en vivo) y `predict_mlb_baseline_from_features`
+    (histórico/backtesting, Paso 9) -- una sola implementación, nunca
+    duplicada, ningún camino alternativo de inferencia."""
+    row = _vectorize_features(features)
+    X = [[row.get(col, float("nan")) for col in feature_columns]]
+    return float(model.predict_proba(X)[0][1])
+
+
 def predict_mlb_baseline(
     record: NormalizedRecord,
     inputs: MlbFeatureInputs,
@@ -443,9 +456,7 @@ def predict_mlb_baseline(
         )
 
     model, artifact = loaded_artifact
-    row = _vectorize_features(features)
-    X = [[row.get(col, float("nan")) for col in artifact.feature_columns]]
-    p_participant_a_win = float(model.predict_proba(X)[0][1])
+    p_participant_a_win = _predict_proba_from_vectorized_features(model, features, artifact.feature_columns)
 
     return PModelOutput(
         p_model_yes=p_participant_a_win,
@@ -457,3 +468,23 @@ def predict_mlb_baseline(
         missing_features=missing,
         warnings=feature_warnings,
     )
+
+
+def predict_mlb_baseline_from_features(
+    features: Dict[str, Any],
+    loaded_artifact: Optional[Tuple[Any, MlbTrainedArtifact]],
+) -> Optional[float]:
+    """Wrapper delgado para inferencia histórica/backtesting (Paso 9).
+    Aplica EXACTAMENTE el mismo núcleo de inferencia que
+    `predict_mlb_baseline` (`_predict_proba_from_vectorized_features`),
+    partiendo de un dict de features YA calculado (p.ej. desde
+    `feature_snapshots`) en vez de recalcularlo en vivo vía
+    `compute_mlb_features` -- imposible para un evento ya pasado, que no
+    tiene `MlbFeatureInputs` en vivo. No duplica lógica ni crea un camino
+    de inferencia alternativo: es el mismo código, con otra fuente para
+    `features`. Sin artefacto entrenado -> `None`, honesto, nunca
+    fabricado."""
+    if loaded_artifact is None:
+        return None
+    model, artifact = loaded_artifact
+    return _predict_proba_from_vectorized_features(model, features, artifact.feature_columns)
