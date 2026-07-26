@@ -5,7 +5,14 @@ Endpoints validados (ver instrucciones de Fase 1):
   GET /api/v1/game/{gamePk}/boxscore
   GET /api/v1.1/game/{gamePk}/feed/live
   GET /api/v1/teams/{id}/roster
-  GET /api/v1/people/{id}/stats
+  GET /api/v1/people/{id}/stats[?stats=season|gameLog]
+
+Endpoints validados en la subfase de wiring de feature_snapshots (Paso 5b,
+Bloque 1 -- ver PLAN_PHASE2.md §1.1, ya documentados ahí como disponibles
+pero nunca antes expuestos por este conector):
+  GET /api/v1/people/{id}/stats?stats=statSplits&sitCodes=vr,vl&group=pitching
+  GET /api/v1/teams/{id}/roster?rosterType=injuredList
+  GET /api/v1/teams/{id}/stats?stats=season&group=hitting
 """
 from __future__ import annotations
 
@@ -53,6 +60,36 @@ class MlbConnector:
             f"{self.base_url}/api/v1/people/{person_id}/stats",
             params=params,
             endpoint_label=f"people_stats_{person_id}_{group}",
+        )
+
+    def get_person_handedness_splits(self, person_id: int, group: str = "pitching") -> FetchResult:
+        """`stats=statSplits&sitCodes=vr,vl` -- splits vs. bateadores diestros
+        (vr) / zurdos (vl). Método nuevo, aditivo: `get_person_stats` no se
+        modifica (firma y comportamiento existentes intactos)."""
+        params = {"stats": "statSplits", "sitCodes": "vr,vl", "group": group}
+        return self._client.get_json(
+            f"{self.base_url}/api/v1/people/{person_id}/stats",
+            params=params,
+            endpoint_label=f"people_handedness_splits_{person_id}_{group}",
+        )
+
+    def get_injured_list_roster(self, team_id: int) -> FetchResult:
+        """`rosterType=injuredList` -- método nuevo, aditivo: `get_roster`
+        no se modifica (firma y comportamiento existentes intactos)."""
+        return self._client.get_json(
+            f"{self.base_url}/api/v1/teams/{team_id}/roster",
+            params={"rosterType": "injuredList"},
+            endpoint_label=f"roster_il_{team_id}",
+        )
+
+    def get_team_stats(self, team_id: int, group: str = "hitting", stats_type: str = "season") -> FetchResult:
+        """`teams/{id}/stats` -- no existía ningún método para stats de
+        equipo en el conector hasta ahora."""
+        params = {"stats": stats_type, "group": group}
+        return self._client.get_json(
+            f"{self.base_url}/api/v1/teams/{team_id}/stats",
+            params=params,
+            endpoint_label=f"team_stats_{team_id}_{group}",
         )
 
     @staticmethod

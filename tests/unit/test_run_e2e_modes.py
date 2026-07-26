@@ -91,6 +91,19 @@ def _patch_no_network_dependencies(monkeypatch, mlb_games, tennis_matches):
         lambda self, person_id, group="pitching", stats_type="season": _fail("no stats in test"),
     )
     monkeypatch.setattr(
+        MlbConnector,
+        "get_person_handedness_splits",
+        lambda self, person_id, group="pitching": _fail("no splits in test"),
+    )
+    monkeypatch.setattr(
+        MlbConnector, "get_injured_list_roster", lambda self, team_id: _fail("no IL roster in test")
+    )
+    monkeypatch.setattr(
+        MlbConnector,
+        "get_team_stats",
+        lambda self, team_id, group="hitting", stats_type="season": _fail("no team stats in test"),
+    )
+    monkeypatch.setattr(
         EspnTennisConnector, "get_scoreboard", lambda self, tour, date: _ok(_tennis_scoreboard(tennis_matches))
     )
     monkeypatch.setattr(SofascoreConnector, "search", lambda self, query: _fail("sofascore blocked in test"))

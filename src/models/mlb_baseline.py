@@ -41,6 +41,12 @@ from src.storage.history_repository import HistoryRepository
 # evidencia, no congelado.
 DEFAULT_MIN_TRAINING_SAMPLES = 300
 
+# Paso 5b, Bloque 4: fracción del dataset (cronológicamente más reciente)
+# reservada para validación -- nunca aleatoria. No es el walk-forward
+# completo del futuro Paso 9 (§10 del plan), solo un split simple
+# train/validation, tal como se autorizó explícitamente para 5b.
+DEFAULT_VALIDATION_FRACTION = 0.2
+
 _VALID_RESULTS = {"PARTICIPANT_A_WON": 1, "PARTICIPANT_B_WON": 0}
 
 # ---------------------------------------------------------------------
@@ -229,6 +235,35 @@ def build_mlb_training_dataset(history_repository: HistoryRepository) -> MlbTrai
     return MlbTrainingDataset(samples=samples, feature_set_version=feature_set_version, warnings=warnings)
 
 
+def split_dataset_temporally(
+    dataset: MlbTrainingDataset, validation_fraction: float = DEFAULT_VALIDATION_FRACTION
+) -> Tuple[MlbTrainingDataset, MlbTrainingDataset]:
+    """Divide `dataset` en (train, validation) ordenando por
+    `data_cutoff_timestamp` -- NUNCA aleatorio (PLAN_PHASE2.md §10:
+    "Split temporal, nunca random"). La validación es siempre la porción
+    cronológicamente MÁS RECIENTE -- nunca se valida con datos del pasado
+    usando un modelo que en la práctica "vio" datos futuros respecto a
+    esa validación. Este es un split simple train/validation (lo pedido
+    para 5b), no el walk-forward completo del futuro Paso 9 -- pero
+    reutiliza la MISMA `build_mlb_training_dataset` como única fuente de
+    verdad, para que Paso 9 pueda construir su walk-forward encima de este
+    mismo dataset sin duplicar la lógica de filtrado/join."""
+    ordered = sorted(dataset.samples, key=lambda s: (s.data_cutoff_timestamp, s.event_id))
+    n_validation = round(len(ordered) * validation_fraction)
+    n_validation = max(1, min(n_validation, len(ordered) - 1)) if len(ordered) > 1 else 0
+
+    train_samples = ordered[: len(ordered) - n_validation]
+    validation_samples = ordered[len(ordered) - n_validation :]
+
+    train = MlbTrainingDataset(
+        samples=train_samples, feature_set_version=dataset.feature_set_version, warnings=[]
+    )
+    validation = MlbTrainingDataset(
+        samples=validation_samples, feature_set_version=dataset.feature_set_version, warnings=[]
+    )
+    return train, validation
+
+
 # ---------------------------------------------------------------------
 # 3. Training pipeline
 # ---------------------------------------------------------------------
@@ -241,24 +276,45 @@ class MlbTrainedArtifact:
     algorithm: str
     trained_at: datetime
     feature_set_version: str
-    n_training_samples: int
+    n_training_samples: int  # tamaño del dataset COMPLETO etiquetado (train+validation)
     feature_columns: List[str]
     file_path: Path
+    # Paso 5b, Bloque 4: split temporal + métricas sobre la porción de
+    # validación (nunca sobre training, para no reportar una métrica
+    # optimista de forma engañosa).
+    n_train_samples: int = 0
+    n_validation_samples: int = 0
+    validation_fraction: float = 0.0
+    accuracy: Optional[float] = None
+    log_loss: Optional[float] = None
+    brier_score: Optional[float] = None
 
 
 def train_mlb_baseline_model(
     history_repository: HistoryRepository,
     models_dir: Path = DATA_MODELS_DIR,
     min_samples: int = DEFAULT_MIN_TRAINING_SAMPLES,
+    validation_fraction: float = DEFAULT_VALIDATION_FRACTION,
     now: Optional[datetime] = None,
 ) -> Tuple[ModelStatus, Optional[MlbTrainedArtifact], List[str]]:
     """Training pipeline (Paso 5a/5b): SABE entrenar un baseline MLB
-    (regresión logística) apenas exista histórico etiquetado suficiente.
-    Nunca entrena con una muestra insuficiente -- devuelve
-    `INSUFFICIENT_HISTORY` de forma honesta, sin fabricar ningún modelo
-    (PLAN_PHASE2.md §5-B). scikit-learn solo se importa si el dataset ya
-    alcanzó el umbral -- una corrida por debajo del umbral no toca la
-    librería de ML en absoluto."""
+    (regresión logística, `class_weight="balanced"`) apenas exista
+    histórico etiquetado suficiente. Nunca entrena con una muestra
+    insuficiente -- devuelve `INSUFFICIENT_HISTORY` de forma honesta, sin
+    fabricar ningún modelo (PLAN_PHASE2.md §5-B). scikit-learn solo se
+    importa si el dataset ya alcanzó el umbral -- una corrida por debajo
+    del umbral no toca la librería de ML en absoluto.
+
+    El umbral `min_samples` se evalúa sobre el dataset COMPLETO (antes de
+    dividir train/validation) -- dividir primero y evaluar el umbral
+    después exigiría de facto un umbral mayor al pactado. Entrena
+    exclusivamente con la porción de train (split temporal, nunca
+    aleatorio, ver `split_dataset_temporally`) y evalúa
+    accuracy/log_loss/brier_score sobre la porción de validation -- nunca
+    sobre los mismos datos de entrenamiento, para no reportar una métrica
+    optimista de forma engañosa. Calibración de probabilidades (Platt/
+    Isotonic) queda deliberadamente diferida al Paso 9/10, no implementada
+    aquí."""
     dataset = build_mlb_training_dataset(history_repository)
     warnings = list(dataset.warnings)
 
@@ -269,26 +325,54 @@ def train_mlb_baseline_model(
         )
         return ModelStatus.INSUFFICIENT_HISTORY, None, warnings
 
+    train_dataset, validation_dataset = split_dataset_temporally(dataset, validation_fraction=validation_fraction)
+
     import joblib
     import numpy as np
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
-    X = np.array(
-        [[_vectorize_features(s.features).get(col, float("nan")) for col in MLB_FEATURE_COLUMNS] for s in dataset.samples]
-    )
-    y = np.array([s.label for s in dataset.samples])
+    def _to_matrix(samples):
+        return np.array(
+            [[_vectorize_features(s.features).get(col, float("nan")) for col in MLB_FEATURE_COLUMNS] for s in samples]
+        )
+
+    X_train = _to_matrix(train_dataset.samples)
+    y_train = np.array([s.label for s in train_dataset.samples])
+    X_val = _to_matrix(validation_dataset.samples)
+    y_val = np.array([s.label for s in validation_dataset.samples])
 
     pipeline = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
+            # class_weight="balanced": el plan no dice nada sobre balance
+            # de clases; se usa por defecto salvo razón técnica en
+            # contrario -- el desbalance real esperado en victorias
+            # visitante/local de MLB es leve, pero no hay motivo para no
+            # compensarlo dado que scikit-learn ya lo ofrece sin costo.
             ("scaler", StandardScaler()),
-            ("logreg", LogisticRegression(max_iter=1000)),
+            ("logreg", LogisticRegression(max_iter=1000, class_weight="balanced")),
         ]
     )
-    pipeline.fit(X, y)
+    pipeline.fit(X_train, y_train)
+
+    val_proba = pipeline.predict_proba(X_val)[:, 1]
+    val_pred = (val_proba >= 0.5).astype(int)
+
+    accuracy = float(accuracy_score(y_val, val_pred))
+    brier = float(brier_score_loss(y_val, val_proba))
+    try:
+        # labels=[0, 1] explícito: la validación puede, en datasets
+        # pequeños o desbalanceados en el tiempo, no contener ambas
+        # clases -- sin esto, log_loss lanzaría ValueError en vez de
+        # calcular igualmente contra las clases conocidas del problema.
+        logloss = float(log_loss(y_val, val_proba, labels=[0, 1]))
+    except ValueError as exc:
+        logloss = None
+        warnings.append(f"log_loss no pudo calcularse sobre la validación: {exc}")
 
     now = now or datetime.now(timezone.utc)
     model_version = f"mlb_baseline_logreg_v1_{now:%Y%m%dT%H%M%SZ}"
@@ -305,6 +389,12 @@ def train_mlb_baseline_model(
         n_training_samples=dataset.size,
         feature_columns=list(MLB_FEATURE_COLUMNS),
         file_path=file_path,
+        n_train_samples=train_dataset.size,
+        n_validation_samples=validation_dataset.size,
+        validation_fraction=validation_fraction,
+        accuracy=accuracy,
+        log_loss=logloss,
+        brier_score=brier,
     )
 
     # Import diferido (no a nivel de módulo) para evitar un ciclo:

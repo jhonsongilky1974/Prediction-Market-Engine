@@ -59,6 +59,7 @@ def test_mlb_pipeline_persists_event_snapshot_when_history_repository_configured
         history_repository=tmp_history_repository,
         fetch_boxscore=False,
         fetch_pitcher_stats=False,
+        fetch_features=False,
     )
     after = datetime.now(timezone.utc)
 
@@ -113,6 +114,7 @@ def test_mlb_pipeline_two_runs_preserve_two_snapshots_but_repository_stays_upser
         history_repository=tmp_history_repository,
         fetch_boxscore=False,
         fetch_pitcher_stats=False,
+        fetch_features=False,
     )
     run_mlb_pipeline("2026-07-21", **kwargs)
     result2 = run_mlb_pipeline("2026-07-21", **kwargs)

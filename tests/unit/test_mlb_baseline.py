@@ -1,14 +1,13 @@
-"""Tests del baseline MLB (Paso 5a): vectorización, dataset builder,
-training pipeline y contrato de inferencia. Todo contra `HistoryRepository`
-en `tmp_path` -- nunca `data/engine.db`.
+"""Tests del baseline MLB (Paso 5a/5b): vectorización, dataset builder,
+split temporal, training pipeline y contrato de inferencia. Todo contra
+`HistoryRepository` en `tmp_path` -- nunca `data/engine.db`.
 
-Nota de alcance (decisión arquitectónica ya aprobada, Ambigüedad A del
-Paso 5): `feature_snapshots` no tiene todavía ninguna tubería real de
-alimentación (nada en `mlb_pipeline.py` llama a
-`persist_mlb_feature_snapshot`) -- por eso estos tests construyen el
-histórico directamente vía `HistoryRepository`, igual que ya hacen los
-tests de `test_history_repository.py`, en vez de depender de una corrida
-real del pipeline.
+Nota de alcance: desde el Bloque 2 del Paso 5b, `run_mlb_pipeline` sí
+conecta `persist_mlb_feature_snapshot` a un flujo real (ver
+`tests/unit/test_mlb_pipeline_feature_wiring.py`). Estos tests siguen
+construyendo el histórico directamente vía `HistoryRepository` (más
+simple y determinista para probar el dataset builder/training pipeline en
+aislamiento), no porque la tubería real no exista.
 """
 from __future__ import annotations
 
@@ -23,6 +22,7 @@ from src.models.mlb_baseline import (
     _vectorize_features,
     build_mlb_training_dataset,
     predict_mlb_baseline,
+    split_dataset_temporally,
     train_mlb_baseline_model,
 )
 from src.models.schemas import NormalizedRecord, Sport
@@ -298,3 +298,108 @@ def test_predict_with_trained_artifact_returns_valid_probability(tmp_path):
     assert output.p_model_yes is not None
     assert 0.0 <= output.p_model_yes <= 1.0
     assert output.model_version == artifact.model_version
+
+
+# ---------------------------------------------------------------------
+# Split temporal (Paso 5b, Bloque 4)
+# ---------------------------------------------------------------------
+
+
+def test_split_dataset_temporally_validation_is_most_recent_and_never_random(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    # 10 muestras, insertadas en orden DESORDENADO a propósito -- el split
+    # debe depender solo de data_cutoff_timestamp, nunca del orden de
+    # inserción ni de azar.
+    insertion_order = [7, 2, 9, 0, 5, 3, 8, 1, 6, 4]
+    for i in insertion_order:
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        _add_sample(hist, f"mlb_{i}", t0 + timedelta(minutes=i), result=result)
+
+    dataset = build_mlb_training_dataset(hist)
+    assert dataset.size == 10
+
+    train, validation = split_dataset_temporally(dataset, validation_fraction=0.2)
+
+    assert train.size == 8
+    assert validation.size == 2
+    # las 2 muestras cronológicamente MÁS RECIENTES (minutos 8 y 9), sin
+    # importar el orden en que se insertaron.
+    assert {s.event_id for s in validation.samples} == {"mlb_8", "mlb_9"}
+    assert max(s.data_cutoff_timestamp for s in train.samples) < min(
+        s.data_cutoff_timestamp for s in validation.samples
+    )
+
+
+def test_split_dataset_temporally_is_deterministic_across_calls(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(10):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        _add_sample(hist, f"mlb_{i}", t0 + timedelta(minutes=i), result=result)
+    dataset = build_mlb_training_dataset(hist)
+
+    train1, val1 = split_dataset_temporally(dataset)
+    train2, val2 = split_dataset_temporally(dataset)
+
+    assert [s.event_id for s in train1.samples] == [s.event_id for s in train2.samples]
+    assert [s.event_id for s in val1.samples] == [s.event_id for s in val2.samples]
+
+
+# ---------------------------------------------------------------------
+# Métricas + class_weight (Paso 5b, Bloque 4)
+# ---------------------------------------------------------------------
+
+
+def test_train_evaluates_metrics_on_validation_split_not_training(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(20):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        era_a, era_b = (2.5, 5.0) if i % 2 == 0 else (5.0, 2.5)
+        _add_sample(hist, f"mlb_{i}", t0 + timedelta(minutes=i), result=result, era_a=era_a, era_b=era_b)
+
+    status, artifact, _ = train_mlb_baseline_model(hist, models_dir=tmp_path / "models", min_samples=20)
+
+    assert status == ModelStatus.TRAINED
+    assert artifact.n_training_samples == 20
+    assert artifact.n_train_samples + artifact.n_validation_samples == 20
+    assert artifact.n_validation_samples == 4  # round(20 * 0.2)
+    assert artifact.validation_fraction == 0.2
+    assert artifact.accuracy is not None and 0.0 <= artifact.accuracy <= 1.0
+    assert artifact.brier_score is not None and 0.0 <= artifact.brier_score <= 1.0
+    assert artifact.log_loss is not None and artifact.log_loss >= 0.0
+
+
+def test_train_uses_class_weight_balanced(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(20):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        _add_sample(hist, f"mlb_{i}", t0 + timedelta(minutes=i), result=result)
+
+    status, artifact, _ = train_mlb_baseline_model(hist, models_dir=tmp_path / "models", min_samples=20)
+    assert status == ModelStatus.TRAINED
+
+    import joblib
+
+    pipeline = joblib.load(artifact.file_path)
+    assert pipeline.named_steps["logreg"].class_weight == "balanced"
+
+
+def test_train_threshold_evaluated_on_full_dataset_before_split(tmp_path):
+    """min_samples se compara contra el dataset COMPLETO, no contra la
+    porción de train tras el split -- con exactamente min_samples muestras
+    debe entrenar (no INSUFFICIENT_HISTORY) aunque el train resultante tras
+    separar validación tenga menos que el umbral."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(10):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        _add_sample(hist, f"mlb_{i}", t0 + timedelta(minutes=i), result=result)
+
+    status, artifact, _ = train_mlb_baseline_model(hist, models_dir=tmp_path / "models", min_samples=10)
+
+    assert status == ModelStatus.TRAINED
+    assert artifact.n_training_samples == 10
+    assert artifact.n_train_samples < 10  # el split sí redujo el train real

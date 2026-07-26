@@ -65,7 +65,13 @@ def test_mlb_pipeline_history_wiring_reaches_history_repository_real(tmp_reposit
     pipeline MLB alcanza `HistoryRepository` de verdad, contra la API real,
     escribiendo únicamente en bases temporales (`tmp_path`) -- nunca en
     `data/engine.db`. No fabrica histórico pasado: `captured_at` es el
-    instante real de esta ejecución."""
+    instante real de esta ejecución.
+
+    Paso 5b, Bloque 2: además confirma que el wiring de `feature_snapshots`
+    (fetch_features=True por defecto cuando hay history_repository) también
+    alcanza la API real -- sin exigir valores no-None (el próximo juego
+    puede no tener probable pitcher confirmado todavía), solo que el
+    snapshot de features se haya creado."""
     mlb_date = _next_mlb_date_with_games()
     if mlb_date is None:
         pytest.skip("no hay juegos MLB próximos disponibles vía la API")
@@ -78,6 +84,9 @@ def test_mlb_pipeline_history_wiring_reaches_history_repository_real(tmp_reposit
     assert len(snapshots) == 1
     captured_at = datetime.fromisoformat(snapshots[0]["captured_at"])
     assert captured_at.tzinfo is not None
+
+    feature_snapshots = tmp_history_repository.get_feature_snapshots_for_event(record.event_id)
+    assert len(feature_snapshots) == 1
 
 
 def test_tennis_pipeline_history_wiring_reaches_history_repository_real(tmp_repository, tmp_history_repository):

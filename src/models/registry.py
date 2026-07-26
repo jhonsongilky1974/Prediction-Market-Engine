@@ -40,6 +40,12 @@ def save_artifact_metadata(artifact: MlbTrainedArtifact, models_dir: Path = DATA
         "n_training_samples": artifact.n_training_samples,
         "feature_columns": artifact.feature_columns,
         "file_path": str(artifact.file_path),
+        "n_train_samples": artifact.n_train_samples,
+        "n_validation_samples": artifact.n_validation_samples,
+        "validation_fraction": artifact.validation_fraction,
+        "accuracy": artifact.accuracy,
+        "log_loss": artifact.log_loss,
+        "brier_score": artifact.brier_score,
     }
     path = _metadata_path(models_dir, artifact.model_version)
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -79,5 +85,14 @@ def load_latest_mlb_artifact(models_dir: Path = DATA_MODELS_DIR) -> Optional[Tup
         n_training_samples=latest_data["n_training_samples"],
         feature_columns=latest_data["feature_columns"],
         file_path=Path(latest_data["file_path"]),
+        # .get(...) con default: metadata de artefactos guardados ANTES del
+        # Bloque 4 (Paso 5b) no tiene estos campos -- se cargan igual, sin
+        # fabricar valores, simplemente ausentes (0/None).
+        n_train_samples=latest_data.get("n_train_samples", 0),
+        n_validation_samples=latest_data.get("n_validation_samples", 0),
+        validation_fraction=latest_data.get("validation_fraction", 0.0),
+        accuracy=latest_data.get("accuracy"),
+        log_loss=latest_data.get("log_loss"),
+        brier_score=latest_data.get("brier_score"),
     )
     return model, artifact
