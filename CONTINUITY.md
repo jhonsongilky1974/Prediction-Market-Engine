@@ -1,21 +1,21 @@
 # DOCUMENTO MAESTRO DE CONTINUIDAD — Prediction-Market-Engine (Fase 2)
 
 Generado: 2026-07-23. Actualizado: 2026-07-24 (cierre de la subfase de
-automatización 0c/0d y del Paso 5a). **Actualizado de nuevo: 2026-07-26
-(cierre del Paso 5b, Bloques 1-5).** Propósito: única fuente de verdad
-para continuar este proyecto en una conversación nueva, sin acceso al
-historial de chat. Todo lo aquí escrito fue verificado contra el estado
-real del repositorio en el momento de cada actualización (comandos git,
-lectura de archivos, ejecución de tests, inspección directa de
+automatización 0c/0d y del Paso 5a). Actualizado: 2026-07-26 (cierre del
+Paso 5b, Bloques 1-5). **Actualizado de nuevo: 2026-07-26 (cierre del
+Paso 7 — Quality Score / Incertidumbre).** Propósito: única fuente de
+verdad para continuar este proyecto en una conversación nueva, sin acceso
+al historial de chat. Todo lo aquí escrito fue verificado contra el
+estado real del repositorio en el momento de cada actualización (comandos
+git, lectura de archivos, ejecución de tests, inspección directa de
 `data/engine.db`) — no reconstruido de memoria.
 
 ---
 
 ## 1. Estado actual del repositorio
 
-Working tree limpio salvo este mismo archivo en curso de actualización
-(`git status --short` → solo `CONTINUITY.md` como untracked/modified
-hasta que se commitee por separado, según §2 de la instrucción vigente).
+Working tree limpio (`git status --short` → sin salida), verificado
+inmediatamente antes de esta actualización.
 
 ## 2. Rama activa
 
@@ -27,25 +27,33 @@ sobre `main`.
 ## 3. Último commit completo de código (hash)
 
 ```
-8a155776b2a1bb9e4811f97886987b0c889b2269
+822d4dc9b69652842e3c83dbb3b2b44e38f8cd78
 ```
-Mensaje: `Phase 2 Step 5b, Blocks 1-5: feature_snapshots/event_results wiring + real training pipeline`
+Mensaje: `Phase 2 Step 7: uncertainty/confidence quality score (HEURISTIC_V1)`
 
-(Este mismo archivo `CONTINUITY.md` se commitea por separado inmediatamente
-después, en un commit propio que no toca código — ver §13, punto 23.)
+Este mismo archivo `CONTINUITY.md` se commitea por separado tras esta
+actualización (mismo patrón ya usado al cerrar el Paso 5b: un commit
+propio, sin tocar código).
 
 ## 4. Último paso completamente terminado
 
-**Paso 5b (Bloques 1-5) — COMPLETO, AUDITADO Y COMMITTEADO.** Conecta
-`feature_snapshots` y `event_results` a flujos reales (huecos que el
-Paso 5a había dejado honestamente documentados como bloqueantes) e
-implementa el training pipeline real con split temporal, métricas y
-`class_weight="balanced"`.
+**Paso 7 (Quality Score / Incertidumbre) — COMPLETO, AUDITADO Y
+COMMITTEADO.** Implementa `src/uncertainty/quality_score.py`
+(`confidence_method=HEURISTIC_V1`) según `PLAN_PHASE2.md` §9, precedido
+de un Design Proposal explícito revisado y aprobado por el usuario
+**antes** de escribir cualquier código (fórmulas, normalización,
+estrategia ante componente ausente, pesos iniciales y ejemplos numéricos
+completos, todos aprobados primero).
 
-No se ha iniciado ningún trabajo de un eventual "Paso 6" — y, de hecho,
-existe una ambigüedad de nombrado sin resolver sobre qué es exactamente
-"Paso 6" que debe aclararse ANTES de cualquier revisión contractual (ver
-nota en la instrucción vigente / próximo informe de preimplementación).
+**Nota de nombrado, ya resuelta**: al iniciar este trabajo hubo una
+discrepancia real entre "Paso 6" (como lo llamó el usuario) y el
+contenido efectivamente descrito, que coincidía textualmente con §9 del
+plan — que es el **Paso 7** en el orden de ejecución de §12, no el Paso 6
+real (que es "Elo simple MLB / Baseline 2", sin relación). Se reportó
+explícitamente, el usuario confirmó que el contenido correspondía al
+componente de incertidumbre/confianza, y desde entonces se trata como
+**Paso 7** sin ambigüedad. El Paso 6 real (Elo MLB) sigue íntegramente
+pendiente, sin iniciar.
 
 ## 5. Todos los commits (orden cronológico, `git log --reverse`)
 
@@ -61,171 +69,144 @@ nota en la instrucción vigente / próximo informe de preimplementación).
 | 8 | `7175b788d539cbd375728ca4628e2a3adc516d2c` | 2026-07-24 | Prepare Step 0d for automation: single-instance lock, historical capture mode, SQLite busy_timeout | phase-2-dev |
 | 9 | `f9318227a40336136fcff1120ea536b80d377dfd` | 2026-07-24 | Add LaunchAgent for hourly historical capture (Step 0d automation) | phase-2-dev |
 | 10 | `328e69c0acd392b2f67c2e3e09c83ff8ce7384ce` | 2026-07-24 | Phase 2 Step 5a: MLB model infrastructure (dataset builder, training pipeline, inference contract) | phase-2-dev |
-| 11 | `8a155776b2a1bb9e4811f97886987b0c889b2269` | 2026-07-26 | Phase 2 Step 5b, Blocks 1-5: feature_snapshots/event_results wiring + real training pipeline | phase-2-dev (HEAD actual) |
+| 11 | `8a155776b2a1bb9e4811f97886987b0c889b2269` | 2026-07-26 | Phase 2 Step 5b, Blocks 1-5: feature_snapshots/event_results wiring + real training pipeline | phase-2-dev |
+| 12 | `dce1e464357b912ec23ecda66ac2c057a2fb47c2` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 5b (Blocks 1-5) | phase-2-dev |
+| 13 | `822d4dc9b69652842e3c83dbb3b2b44e38f8cd78` | 2026-07-26 | Phase 2 Step 7: uncertainty/confidence quality score (HEURISTIC_V1) | phase-2-dev (HEAD actual) |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
 ```
 src/features/                                          [Fase 2]
   registry.py              CONSTRUIDO (Paso 1)
-  mlb_features.py           CONSTRUIDO (Paso 2)
-                             persist_mlb_feature_snapshot AHORA SÍ se invoca
-                             desde mlb_pipeline.py (Paso 5b, Bloque 2)
+  mlb_features.py           CONSTRUIDO (Paso 2, wireado en Paso 5b)
   tennis_features.py        PENDIENTE (Paso 11)
 
 src/models/                                             [Fase 2 -- Paso 5a+5b COMPLETOS]
-  base.py                   CONSTRUIDO -- ModelStatus, PModelOutput (contrato de salida)
-  mlb_baseline.py            CONSTRUIDO -- dataset builder, split temporal
-                             (split_dataset_temporally, cronológico), vectorización,
-                             training pipeline (scikit-learn, class_weight="balanced",
-                             métricas accuracy/log_loss/brier_score sobre validación),
-                             inference contract
-  registry.py                CONSTRUIDO -- model_version -> artefacto (joblib+json,
-                             incluye métricas) o ausente
+  base.py / mlb_baseline.py / registry.py    CONSTRUIDOS -- ver actualización anterior
+                             de este documento para el detalle completo
   tennis_baseline.py         NO EXISTE (Paso 11)
 
 src/pricing/                                            [Fase 2]
-  market_pricing.py         CONSTRUIDO (Paso 3)
-  no_vig.py                  CONSTRUIDO (Paso 4)
-  odds_consensus.py          CONSTRUIDO (Paso 4)
+  market_pricing.py / no_vig.py / odds_consensus.py    CONSTRUIDOS (Pasos 3-4)
 
-src/uncertainty/                                        [Fase 2 -- PENDIENTE]
-  quality_score.py           NO EXISTE -- ver nota de ambigüedad de nombrado en §4/§13
+src/uncertainty/                                        [Fase 2 -- Paso 7 COMPLETO]
+  quality_score.py           CONSTRUIDO -- compute_quality_score(), 7 componentes,
+                             confidence_method="HEURISTIC_V1", redistribución
+                             dinámica de pesos, ver §8/§9 abajo para el detalle exacto
 
 src/signals/                                            [Fase 2 -- PENDIENTE COMPLETO]
-  edge.py / expected_value.py / signal_schema.py   NO EXISTEN
+  edge.py / expected_value.py / signal_schema.py   NO EXISTEN (Pasos 8/12)
 
 src/storage/                                            [Fase 1 + Fase 2]
-  repository.py              FASE 1 + busy_timeout=30s explícito
-  history_repository.py      Paso 0a/0b + get_all_feature_snapshots()/get_all_event_results()
-                              (usados por el dataset builder, sin cambios en esta subfase)
+  repository.py / history_repository.py    Sin cambios desde el Paso 5b
 
 src/pipelines/                                          [Fase 1 + wiring Fase 2]
-  mlb_pipeline.py             AMPLIADO (Paso 5b, Bloque 2): además de
-                               event_snapshot, ahora TAMBIÉN llama a
-                               persist_mlb_feature_snapshot (fetch_features=True
-                               por defecto). bullpen_era_recent deliberadamente
-                               deshabilitado (reliever_game_logs vacío).
-                               opponent_dominant_hand y key_player_ids también
-                               None/vacío -- sin convención definida, honesto.
-  mlb_results_sync.py         NUEVO (Paso 5b, Bloque 3): sync_mlb_event_results(),
-                               reutiliza get_schedule() (sin endpoint nuevo),
-                               idempotente a nivel de llamador.
-  tennis_pipeline.py          Sin cambios en esta subfase.
+  mlb_pipeline.py / mlb_results_sync.py / tennis_pipeline.py    Sin cambios desde el Paso 5b
 
-src/connectors/mlb.py                                   AMPLIADO (Paso 5b, Bloque 1):
-  + get_person_handedness_splits(person_id)
-  + get_injured_list_roster(team_id)
-  + get_team_stats(team_id)
-  (get_roster/get_person_stats existentes, sin tocar)
+src/connectors/mlb.py                                   Sin cambios desde el Paso 5b (Bloque 1)
 
 src/backtesting/                                        [Fase 2 -- PENDIENTE]
-  dataset.py / splitter.py / metrics.py    NO EXISTEN -- pero split_dataset_temporally
-                              en mlb_baseline.py ya es la fuente de verdad que
-                              este futuro paso debería reutilizar, no duplicar.
+  NO EXISTE -- split_dataset_temporally (mlb_baseline.py, Paso 5b) ya es la
+  fuente de verdad que este futuro paso debería reutilizar
 
 src/evaluation/                                         [Fase 2 -- PENDIENTE]
   reports.py                 NO EXISTE
 
-scripts/
-  run_e2e.py                  Sin cambios en esta subfase.
-  pipeline_lock.py             Sin cambios en esta subfase.
-  sync_mlb_results.py          NUEVO (Paso 5b, Bloque 3) -- CLI manual, sin automatizar.
-  train_mlb_model.py           NUEVO (Paso 5b, Bloque 5) -- CLI manual, sin lock
-                               (solo lee HistoryRepository, escribe artefactos
-                               con nombre único en data/models/).
-  launchd/*.plist              Sin cambios -- ver §17, LaunchAgent DESCARGADO.
+scripts/                                                Sin cambios desde el Paso 5b
 ```
 
-Módulos de Fase 1 sin cambios de lógica interna (solo wiring aditivo
-donde aplica, verificado con `git diff` contra el commit baseline):
-`src/normalization/`, `src/matching/`, `src/quality/`, `src/models/schemas.py`.
-`src/connectors/mlb.py` recibió 3 métodos nuevos aditivos (Bloque 1) --
-los métodos ya existentes no se tocaron.
+Módulos de Fase 1/pasos ya cerrados **sin ningún cambio** en esta
+actualización: `src/connectors/`, `src/normalization/`, `src/matching/`,
+`src/quality/`, `src/models/schemas.py`, `src/pricing/`, `src/storage/`,
+`src/pipelines/`. `quality_score.py` los **importa y reutiliza**
+(`NormalizedRecord.data_quality`, `ConsensusNoVigResult`, `CORE_FIELDS`)
+pero no modifica ninguno — verificado explícitamente antes del commit
+(`git status --short` no mostró nada fuera de los 4 archivos nuevos).
 
-## 7. Árbol de directorios (delta desde la última actualización, 2026-07-24)
+## 7. Árbol de directorios (delta desde la última actualización)
 
-Nuevo desde entonces:
+Nuevo en esta actualización:
 ```
-scripts/sync_mlb_results.py                     [NUEVO]
-scripts/train_mlb_model.py                      [NUEVO]
-src/pipelines/mlb_results_sync.py                [NUEVO]
-tests/unit/test_mlb_connector.py                 [NUEVO]
-tests/unit/test_mlb_pipeline_feature_wiring.py   [NUEVO]
-tests/unit/test_mlb_results_sync.py              [NUEVO]
-tests/unit/test_train_mlb_model_script.py        [NUEVO]
-CONTINUITY.md                                    [este archivo, ahora versionado]
+src/uncertainty/__init__.py              [NUEVO]
+src/uncertainty/quality_score.py         [NUEVO]
+tests/unit/test_quality_score.py         [NUEVO]
 ```
-Modificados (sin archivos nuevos más allá de los listados arriba):
-`src/connectors/mlb.py`, `src/models/mlb_baseline.py`, `src/models/registry.py`,
-`src/pipelines/mlb_pipeline.py`, `tests/integration/test_e2e_real.py`,
-`tests/unit/test_mlb_baseline.py`, `tests/unit/test_pipeline_history_wiring.py`,
-`tests/unit/test_run_e2e_modes.py`.
+Modificado (sin archivos nuevos más allá de los listados arriba):
+`tests/integration/test_e2e_real.py` (+1 test real: `test_quality_score_computes_on_real_mlb_pipeline_output`).
 
-## 8. Responsabilidad de los módulos nuevos/ampliados en esta subfase
+## 8. Responsabilidad de `src/uncertainty/quality_score.py`
 
-- **`src/connectors/mlb.py`** (Bloque 1): `get_person_handedness_splits`/`get_injured_list_roster`/`get_team_stats`, aditivos, verificados contra la API real antes de usarse.
-- **`src/pipelines/mlb_pipeline.py`** (Bloque 2): `_fetch_mlb_feature_inputs()` construye `MlbFeatureInputs` por juego; `run_mlb_pipeline` gana `fetch_features: bool = True`, gateado también por `history_repository is not None`. Bug real encontrado y corregido durante el desarrollo: el `captured_at` del stat de pitcher reutilizado y el `data_cutoff_timestamp` no pueden ser el mismo objeto/valor (violaría la desigualdad estricta de `RawDataPoint.usable()`) -- se capturan en dos momentos distintos del bucle por diseño.
-- **`src/pipelines/mlb_results_sync.py`** (Bloque 3): `sync_mlb_event_results()` -- descubrimiento clave: el propio payload de `get_schedule()` ya incluye `teams.{away,home}.isWinner`/`score` para juegos `Final`, verificado en vivo -- no hizo falta ningún endpoint nuevo. Mapea `Final`+`isWinner``→PARTICIPANT_A_WON/B_WON`, `Postponed`/`Cancelled` tal cual, omite (nunca fabrica) resultados ambiguos o no decididos. Idempotente a nivel de llamador (`get_results_for_event` antes de insertar) -- `HistoryRepository.save_event_result` en sí sigue sin deduplicar nada, sin cambios en su contrato.
-- **`src/models/mlb_baseline.py`** (Bloque 4): `split_dataset_temporally()` -- cronológico, nunca aleatorio, validación siempre la porción más reciente; reutiliza `build_mlb_training_dataset` como única fuente de verdad (pensado para que el futuro Paso de backtesting construya su walk-forward encima sin duplicar lógica). `train_mlb_baseline_model()` ahora entrena solo con train, evalúa `accuracy`/`log_loss`/`brier_score` solo sobre validation, usa `class_weight="balanced"`. El umbral `min_samples` se sigue evaluando sobre el dataset COMPLETO, antes de dividir. Calibración de probabilidades deliberadamente diferida.
-- **`src/models/registry.py`**: metadata ampliada con los campos de split/métricas; carga hacia atrás compatible (`.get(..., default)`) con artefactos guardados antes de este bloque.
-- **`scripts/sync_mlb_results.py`** / **`scripts/train_mlb_model.py`**: CLIs manuales, sin conectar a ninguna automatización, sin lock propio (justificado explícitamente en cada docstring).
+`compute_quality_score(record, consensus=None, now=None, weights=None) -> QualityScoreOutput`.
+
+**7 componentes**, cada uno `Optional[float]` en [0,1] o `None` si no calculable (nunca fabricado):
+
+| Componente | Fórmula | Fuente |
+|---|---|---|
+| `data_completeness` | reutilizado directo | `record.data_quality.data_completeness_score` (Fase 1) |
+| `match_confidence_gap` | `clip((match_confidence - 0.72) / 0.28, 0, 1)` | ancla en `EVENT_NAME_MATCH_MIN_CONFIDENCE` ya existente |
+| `missing_critical` | `1 - (core_fields_ausentes / len(CORE_FIELDS))` | `CORE_FIELDS` ya existente (`src/quality/completeness.py`) — único componente que nunca es `None` en la práctica |
+| `bookmaker_dispersion` | `clip(1 - dispersion/0.10, 0, 1)` | `ConsensusNoVigResult.dispersion` (Paso 4) |
+| `sample_size` | `min(bookmaker_count/5, 1)` | `ConsensusNoVigResult.bookmaker_count` (interpretación aprobada: única "muestra" disponible a nivel de registro) |
+| `market_liquidity` | `min(volume_o_open_interest/50000, 1)` | `MarketData.volume` (principal) / `open_interest` (respaldo). **`liquidity` NUNCA se usa** — verificado contra datos reales: siempre 0. Umbral **50,000 marcado explícitamente como PROVISIONAL** en el código (solo 3 observaciones reales disponibles al diseñarlo, rango 5.4K-144K) |
+| `freshness` | `clip(1 - age_seconds/3600, 0, 1)` | antigüedad del timestamp más viejo en `record.data_quality.source_timestamps`, mismo patrón que Paso 4 |
+
+**Agregación**: promedio ponderado con **redistribución dinámica** del peso entre los componentes disponibles — `weights` de salida son los pesos ya renormalizados de ESE cálculo específico, no los estáticos de configuración. `confidence=None` solo si el peso total disponible es 0 (caso degenerado).
+
+**Pesos iniciales (`HEURISTIC_V1`, aprobados explícitamente, suman 1.00)**:
+`data_completeness=0.18, match_confidence_gap=0.22, missing_critical=0.18, bookmaker_dispersion=0.15, sample_size=0.10, market_liquidity=0.07, freshness=0.10`.
 
 ## 9. Invariantes del sistema — se mantienen todos los de la versión anterior, más:
 
-- El split train/validation es siempre cronológico (`data_cutoff_timestamp` ascendente) -- nunca `random.shuffle` ni equivalente. Verificado por test con orden de inserción deliberadamente desordenado.
-- Las métricas de entrenamiento (`accuracy`/`log_loss`/`brier_score`) se calculan EXCLUSIVAMENTE sobre la porción de validación, nunca sobre training -- para no reportar una cifra optimista de forma engañosa.
-- `event_results` mapeado desde `get_schedule()` nunca fabrica un ganador: si `isWinner` es ambiguo (ambos `True`, ambos `False`, o ausente) para un juego `Final`, se omite explícitamente, no se adivina.
-- Un segundo `sync_mlb_event_results()` sobre el mismo juego ya concluido no duplica la fila (idempotencia de llamador), sin que `HistoryRepository` en sí deduplique nada.
+- `confidence_method` es siempre exactamente `"HEURISTIC_V1"` — nunca se presenta como probabilidad calibrada.
+- Ningún componente de `quality_score` se fabrica cuando no es calculable — se excluye y su peso se redistribuye, verificado con test que recalcula el valor esperado de forma independiente.
+- `missing_critical` es, por diseño, el único de los 7 componentes que siempre es calculable (depende solo de `missing_fields`, que siempre existe) — garantiza que `confidence` casi nunca sea `None` bajo los pesos por defecto.
+- El campo `liquidity` de `MarketData` nunca se usa como base de `market_liquidity` (decisión basada en evidencia real, no en el Design Proposal en abstracto).
 
 ## 10. Reglas que nunca deben romperse
 
-Sin cambios respecto a la versión anterior. Confirmado de nuevo en esta subfase: ninguna automatización nueva conectada (`sync_mlb_results.py`/`train_mlb_model.py` son manuales); ninguna dependencia nueva añadida (sigue siendo solo `scikit-learn`, ya aprobado en 5a).
+Sin cambios respecto a la versión anterior. Confirmado de nuevo en esta actualización: ninguna dependencia nueva añadida; ningún módulo de Fase 1/pasos cerrados modificado (solo importado/reutilizado).
 
-## 11. Decisiones arquitectónicas tomadas durante el Paso 5b (Bloques 1-5)
+## 11. Decisiones arquitectónicas tomadas durante el Paso 7
 
-- **Bloque 1**: 3 métodos nuevos en `MlbConnector`, ninguno modifica los existentes. `pitcher_game_log` no necesitó método nuevo (`get_person_stats` ya soportaba `stats_type="gameLog"`).
-- **Bloque 2**: `bullpen_era_recent` deliberadamente deshabilitado por decisión explícita del usuario (costo de ~20+ llamadas extra por equipo/juego) -- preparado, no implementado. `opponent_dominant_hand`/`key_player_ids` sin convención definida por el plan -- se dejan `None`/vacío en vez de inventar una definición no respaldada.
-- **Bloque 3**: `event_results` se alimenta reutilizando `get_schedule()` mirando hacia el pasado -- ningún endpoint nuevo. Ventana de lookback por defecto: 3 días (hoy + 2 anteriores).
-- **Bloque 4**: split simple train/validation (no walk-forward completo, eso es un futuro paso de backtesting) pero construido para ser la base de ese walk-forward, no una implementación separada.
-- **Bloque 5**: sin lock en `train_mlb_model.py` -- solo lee `HistoryRepository`, escribe artefactos con nombre único (timestamp en `model_version`), sin riesgo de colisión de escritura real.
-- **Incidente de automatización durante el desarrollo**: el LaunchAgent (autorizado en la subfase anterior) se disparó por sí solo durante el Bloque 2, en producción real, usando el working tree en ese instante (`runs=1`, `exit 0`, sin daño). Se descargó (`launchctl bootout`) y permanece descargado a petición explícita del usuario -- ver §17.
+- **Interpretación de `sample_size`** = `bookmaker_count` — no hay otra fuente de "tamaño de muestra" a nivel de registro individual, decisión explícita del Design Proposal, aprobada.
+- **`market_liquidity` basado en `volume`/`open_interest`, nunca en `liquidity`** — decisión respaldada con evidencia real (consulta de solo lectura a los 93 `event_snapshots` ya existentes antes de proponer el umbral).
+- **Umbral de `market_liquidity` (50,000) marcado explícitamente como provisional** en el propio código — no se disfrazó de decisión definitiva.
+- **Pesos iniciales ajustados por el usuario** respecto a la primera propuesta del Design Proposal (`0.20/0.20/0.15/0.15/0.10/0.10/0.10` → `0.18/0.22/0.18/0.15/0.10/0.07/0.10`), con mayor énfasis relativo en `match_confidence_gap` y `missing_critical`, menor en `market_liquidity` (coherente con ser el umbral menos respaldado).
+- **`confidence=None` en vez de `0.0`** en el caso degenerado de peso total cero — consistente con "nunca fabricar", no un valor por defecto arbitrario.
 
 ## 12. Ambigüedades encontradas y resueltas (acumulado completo)
 
-Sin ambigüedades nuevas de tipo "A/B/C" en esta subfase (las decisiones de los Bloques 1-5 fueron autorizadas explícitamente bloque por bloque antes de programar, no encontradas a mitad de implementación). Las ambigüedades previas (Paso 3 EDGE, Paso 4 YES/NO, Paso 5a A/B/C) siguen documentadas sin cambios -- ver versión anterior de este documento / commits correspondientes.
+La discrepancia de nombrado "Paso 6 vs. Paso 7" (documentada en la actualización anterior de este archivo) queda **resuelta**: confirmado por el usuario que el trabajo corresponde al Paso 7 real. Sin ambigüedades nuevas de tipo "A/B/C" durante la implementación de Paso 7 — todas las decisiones de diseño (fórmulas, pesos, umbrales) fueron parte del Design Proposal explícitamente revisado y aprobado antes de escribir código, no encontradas a mitad de implementación.
 
-**Pendiente de resolver, señalada al cierre de esta actualización**: existe una discrepancia de nombrado entre lo que el usuario llamó "Paso 6" en la instrucción vigente y el contenido real que describió (que coincide textualmente con los componentes de §9 "Diseño de incertidumbre/confianza" de `PLAN_PHASE2.md`, que es el **Paso 7** en el orden de ejecución de §12 del plan -- "Paso 6" en ese mismo orden es "Elo simple MLB (Baseline 2)", algo completamente distinto). Esta discrepancia se reporta en el informe de preimplementación correspondiente, no se resuelve unilateralmente aquí.
+## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 29)
 
-## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 22)
+30. Confirmación explícita: el trabajo corresponde al Paso 7 (Quality Score/Incertidumbre), no a un "Paso 6" mal nombrado — se trata como Paso 7 desde ese momento.
+31. Instrucción de NO implementar fórmulas/pesos todavía — primero un Design Proposal completo (fórmulas de los 7 componentes, normalización, estrategia ante ausencia, pesos iniciales, fórmula de agregación, ejemplos numéricos) para revisión y aprobación previa.
+32. Aprobación del Design Proposal con un ajuste explícito de pesos iniciales (ver §11) + autorización de implementación completa (código + tests unitarios + integración) antes de solicitar nueva auditoría.
+33. Aprobación del informe técnico de implementación + solicitud de verificación final previa (únicamente `git diff --stat` / `git diff --cached --stat` / `git status --short` + 4 confirmaciones puntuales de alcance).
+34. Aprobación de la auditoría final + autorización de commit (`822d4dc`) + instrucción de ejecutar regresión rápida post-commit y entregar hash/mensaje/informe.
+35. Instrucción de NO reactivar el LaunchAgent — debe permanecer descargado hasta finalizar la Fase 2 completa (ampliación explícita respecto a la instrucción anterior, que solo cubría "durante desarrollo activo").
+36. Instrucción actual: actualizar este documento con el cierre del Paso 7.
 
-23. Aprobación del informe post-commit del Paso 5a + instrucción de continuar con el informe de preimplementación del Paso 5b (Bloques 1-5), sin programar hasta confirmar el plan.
-24. Confirmación del plan de 5 bloques propuesto, con un ajuste explícito: Bloque 2 debe dejar `bullpen_era_recent` deshabilitado (no implementar `reliever_game_logs` todavía).
-25. Autorización de continuar bloque a bloque "sin pausas salvo ambigüedad material o problema real" -- patrón seguido exactamente: tests + regresión completa al final de cada bloque, sin commit intermedio.
-26. Ante el hallazgo del LaunchAgent disparado en producción durante el desarrollo: autorización explícita de la Opción 2 (descargarlo temporalmente con `launchctl bootout`) mientras se terminan los Bloques 3-5, con instrucción de documentar después cómo reactivarlo.
-27. Aprobación de la auditoría final de los Bloques 1-5 + autorización de commit (`8a15577`).
-28. Instrucción de NO reactivar el LaunchAgent todavía -- debe permanecer descargado durante desarrollo activo.
-29. Instrucción actual: actualizar este documento (commit separado, solo este archivo) + iniciar revisión contractual de solo lectura de un "Paso 6" cuyo nombrado necesita aclararse primero (ver §12) antes de programar nada, con informe de preimplementación exhaustivo y autorización explícita pendiente antes de escribir código.
-
-## 14. Estado exacto de todos los tests (verificado en el cierre de esta subfase)
+## 14. Estado exacto de todos los tests (verificado en el cierre de esta actualización)
 
 ```
 .venv/bin/python -m pytest tests/ -q
-313 passed, 1 warning in ~16-17s
+346 passed, 1 warning in ~17s
 ```
-El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente, no relacionado. 22 tests nuevos en esta subfase (291 → 313): `test_mlb_connector.py` (5), `test_mlb_pipeline_feature_wiring.py` (2), `test_mlb_results_sync.py` (8), ampliaciones de `test_mlb_baseline.py` (+5: split temporal + métricas + class_weight + umbral pre-split), `test_train_mlb_model_script.py` (2), más los ajustes de compatibilidad en `test_pipeline_history_wiring.py`/`test_run_e2e_modes.py` (sin tests nuevos, solo mocks añadidos).
+El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente, no relacionado. 33 tests nuevos en esta actualización (313 → 346): 32 unitarios (`test_quality_score.py`, cubriendo cada componente por separado, el caso nombrado del plan "`P_model=0.64` con baja completeness ⇒ confidence bajo", redistribución de pesos verificada numéricamente, caso degenerado, y una integración cruzada sintética `normalize_mlb_game`→`compute_consensus_no_vig`→`compute_quality_score`) + 1 de integración real (`test_quality_score_computes_on_real_mlb_pipeline_output`, contra la API real de MLB).
 
 ## 15. Número total de tests existentes
 
-**313** (verificado con `pytest --collect-only`). Cero tests de pasos anteriores rotos o reducidos.
+**346** (verificado con `pytest --collect-only`). Cero tests de pasos anteriores rotos o reducidos.
 
 ## 16. Estado de la regresión completa
 
-Verde, sin excepciones, verificado en el cierre de esta subfase y de nuevo en la verificación post-commit. Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
+Verde, sin excepciones, verificado en el cierre de esta actualización y de nuevo post-commit. Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
 
 ## 17. Dependencias actuales
 
-Sin cambios respecto a la versión anterior -- ninguna dependencia nueva en el Paso 5b:
+Sin cambios — ninguna dependencia nueva en el Paso 7:
 ```
 requests>=2.32,<3
 pydantic>=2.11,<3
@@ -247,25 +228,26 @@ Sin cambios desde el cierre del Paso 3 (commit `32677d6`). Sigue terminando en *
 | Paso (numeración de `PLAN_PHASE2.md` §12) | Contenido | Estado |
 |---|---|---|
 | 5a | Infraestructura de modelo MLB | ✅ COMPLETO |
-| 5b | `feature_snapshots`/`event_results` wiring + training pipeline real | ✅ **COMPLETO** (este documento) |
-| 6 | Elo simple MLB (Baseline 2) | Pendiente -- **ver nota de ambigüedad §12/§4**: no confundir con el contenido de incertidumbre/confianza, que es el Paso 7 |
-| 7 | `src/uncertainty/quality_score.py` (§9: data_completeness, match_confidence_gap, missing_critical, bookmaker_dispersion, sample_size, market_liquidity, freshness) | Pendiente |
+| 5b | `feature_snapshots`/`event_results` wiring + training pipeline real | ✅ COMPLETO |
+| 7 | `src/uncertainty/quality_score.py` | ✅ **COMPLETO** (este documento) |
+| 6 | Elo simple MLB (Baseline 2) | Pendiente — sin iniciar, nombre ya sin ambigüedad (ver §4) |
 | 8 | `src/signals/edge.py` + `expected_value.py` | Pendiente |
 | 9 | `src/backtesting/` | Pendiente |
 | 10 | `src/evaluation/reports.py` | Pendiente |
 | 11 | Tenis (features + baseline) | Pendiente |
 | 12 | `src/signals/signal_schema.py` | Pendiente |
 
-## 21. Estado de la automatización (LaunchAgent) — actualizado
+(Orden de la tabla refleja el orden de cierre real, no el orden numérico del plan — Paso 7 se cerró antes que el Paso 6 real, por la razón de nombrado ya documentada en §4/§12.)
 
-- **DESCARGADO** (`launchctl bootout`), confirmado sin cargar. Permanece así por instrucción explícita del usuario mientras continúe el desarrollo activo.
-- Última vez que corrió: una sola vez, durante el Bloque 2 de esta subfase, disparado por su propio `StartInterval=3600` mientras el working tree tenía cambios en curso (`runs=1`, `exit code 0`, sin crash). Capturó 15 juegos MLB + 78 partidos de tenis reales, honestamente, con el código que hubiera en el working tree en ese instante -- no con el código final de los Bloques 1-5 (por eso `feature_snapshots`/`event_results` en `data/engine.db` siguen en 0, ver §22).
-- Para reactivarlo: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.prediction-market-engine.run-e2e-historical.plist`
+## 21. Estado de la automatización (LaunchAgent) — sin cambios operativos, alcance de la pausa ampliado
+
+- **DESCARGADO** (`launchctl bootout`), confirmado sin cargar en el cierre de esta actualización.
+- **Alcance de la pausa ampliado explícitamente por el usuario**: debe permanecer descargado **hasta finalizar la Fase 2 completa** (antes la instrucción cubría solo "durante desarrollo activo" de una subfase puntual) — ver §13, punto 35.
+- Sigue sin haber corrido más que la única vez ya documentada (Bloque 2 del Paso 5b, `runs=1`, `exit 0`) — ningún dato nuevo se ha acumulado en `data/engine.db` desde entonces.
+- Para reactivarlo (NO ejecutar sin autorización explícita, y ahora además sin autorización previa de "fin de Fase 2"): `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.prediction-market-engine.run-e2e-historical.plist`
 - Verificar estado: `launchctl print gui/$(id -u)/local.prediction-market-engine.run-e2e-historical`
-- Volver a descargar si hiciera falta: `launchctl bootout gui/$(id -u)/local.prediction-market-engine.run-e2e-historical`
-- **Riesgo aprendido, sin resolver todavía**: mientras apunte al working tree real, cualquier sesión de desarrollo con cambios sin commitear corre el mismo riesgo de que se dispare a mitad de una edición. Vale la pena decidir en algún momento si debe quedar descargado por defecto durante desarrollo activo, de forma más permanente que esta pausa puntual.
 
-## 22. Estado real de `data/engine.db` (verificado en el cierre de esta subfase)
+## 22. Estado real de `data/engine.db` (verificado en el cierre de esta actualización)
 
 ```
 event_snapshots     -> 93
@@ -273,26 +255,21 @@ feature_snapshots   -> 0
 event_results       -> 0
 normalized_records  -> 94
 ```
-`feature_snapshots`/`event_results` siguen en 0 pese a que el Bloque 2/3 ya conectaron la tubería real -- porque la única ejecución real ocurrida hasta ahora (el disparo accidental del LaunchAgent, ver §21) sucedió con código anterior a que esa tubería quedara completa. **La próxima vez que se ejecute `scripts/run_e2e.py --mode historical` (manualmente, o al reactivar el LaunchAgent) con el código ya committeado, `feature_snapshots` debería empezar a poblarse de verdad; `event_results` requiere además una corrida de `scripts/sync_mlb_results.py`, que sigue sin haberse ejecutado ni una vez contra la base real.**
+Sin cambios desde la última actualización — nada en el Paso 7 toca `data/engine.db` (ver §6, `quality_score.py` consume estructuras ya en memoria, no lee la base directamente). Sigue pendiente una primera ejecución real (`scripts/run_e2e.py --mode historical` + `scripts/sync_mlb_results.py`) con el código ya committeado para que `feature_snapshots`/`event_results` empiecen a poblarse — bloqueada mientras el LaunchAgent permanezca descargado y nadie ejecute los scripts manualmente.
 
 ## 23. Pendientes técnicos (deuda documentada, acumulado)
 
-Todos los de la versión anterior de este documento salvo los dos ya resueltos en esta subfase (conectar `persist_mlb_feature_snapshot` a un flujo real; mecanismo de alimentación de `event_results`), más:
-- `feature_snapshots`/`event_results` reales en `data/engine.db` siguen en 0 -- pendiente de una primera ejecución real con el código ya committeado (ver §22), no de más código.
-- WTA no cubierto por el LaunchAgent actual.
-- Sin deduplicación, retención, purga ni compresión de `event_snapshots`.
-- `bullpen_era_recent` deshabilitado (Bloque 2, decisión explícita) -- pendiente de una mejora futura si se decide implementar `reliever_game_logs`.
-- `opponent_dominant_hand`/`key_player_ids` sin convención definida -- features `pitcher_vs_opponent_handedness_ops`/`il_flag_key_players` seguirán `None` hasta que se decida.
-- Mapeo participante↔YES de un contrato de Kalshi específico sigue sin resolver (Ambigüedad #2 del Paso 4 / Ambigüedad C del Paso 5a).
-- Calibración de probabilidades diferida al Paso 9/10, como fue autorizado.
-- **Ambigüedad de nombrado "Paso 6" sin resolver** (ver §12) -- primer punto a aclarar antes de cualquier código nuevo.
+Todos los de la versión anterior de este documento, más:
+- Umbral de `market_liquidity` (50,000) en `quality_score.py` — provisional, revisar cuando haya más volumen real capturado (§8).
+- Pesos de `quality_score.py` siguen sin calibrar con evidencia (`HEURISTIC_V1` por diseño, no un defecto) — la calibración real es un paso futuro separado, no antes de tener histórico de resultados reales.
+- Paso 6 real (Elo MLB) sigue sin iniciar.
 
 ## 24. Todo lo que un chat nuevo debe saber antes de escribir una sola línea de código
 
-- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `8a155776b2a1bb9e4811f97886987b0c889b2269` o posterior) y `git status --short`.
-- **`feature_snapshots`/`event_results` YA tienen tubería de alimentación real (Bloques 2/3), pero `data/engine.db` real sigue mostrando 0 en ambas** -- no asumas que hay datos de entrenamiento reales sin verificarlo tú mismo (§22).
-- El LaunchAgent está DESCARGADO a propósito -- no lo reactives sin autorización explícita del usuario.
-- Antes de tocar cualquier "Paso 6": confirma con el usuario si se refiere al Paso 6 real de `PLAN_PHASE2.md` §12 (Elo MLB) o al Paso 7 (incertidumbre/`quality_score.py`) -- hay una discrepancia de nombrado sin resolver, ver §12.
-- Sigue el patrón de trabajo ya validado: revisión contractual antes de programar, ambigüedades reportadas (nunca resueltas por inferencia silenciosa), aprobación explícita antes de cada acción irreversible, auditoría antes de cierre, commit solo con autorización separada.
+- Verifica tú mismo el estado real antes de asumir nada de este documento — `git rev-parse HEAD` (debe ser `822d4dc9b69652842e3c83dbb3b2b44e38f8cd78` o posterior) y `git status --short`.
+- **`feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real** — la tubería existe (Paso 5b) pero no se ha ejecutado ni una vez con el código final (§22).
+- El LaunchAgent está DESCARGADO a propósito y debe permanecer así **hasta finalizar la Fase 2 completa** — no lo reactives sin autorización explícita nueva del usuario, ni asumas que "terminar un paso más" ya autoriza reactivarlo.
+- "Paso 6" y "Paso 7" ya no tienen ambigüedad: Paso 6 = Elo MLB (pendiente, sin iniciar), Paso 7 = Quality Score/Incertidumbre (completo, este documento).
+- `quality_score.py` no toca `data/engine.db`, `schemas.py`, `matching`, `pricing`, `storage` ni `pipelines` — solo los importa y reutiliza.
+- Sigue el patrón de trabajo ya validado: para pasos con fórmulas/pesos sin especificar en el plan (como fue este Paso 7), un Design Proposal explícito revisado ANTES de programar es el camino ya validado dos veces — no asumas que puedes saltarte esa fase en el próximo paso con huecos similares (p. ej., Paso 8 EDGE/EV o el propio Paso 6 Elo, que también tienen huecos de especificación).
 - Para correr tests: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
-- `p_model_yes` (cuando exista) es `P(participant_a gana)`, no el lado YES de un contrato de Kalshi específico.
