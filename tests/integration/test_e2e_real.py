@@ -104,3 +104,25 @@ def test_tennis_pipeline_history_wiring_reaches_history_repository_real(tmp_repo
     assert len(snapshots) == 1
     captured_at = datetime.fromisoformat(snapshots[0]["captured_at"])
     assert captured_at.tzinfo is not None
+
+
+def test_quality_score_computes_on_real_mlb_pipeline_output(tmp_repository):
+    """Paso 7, prueba controlada real (E): confirma que
+    `compute_quality_score` no falla y produce una salida válida sobre un
+    `NormalizedRecord` real de la API (sin `consensus`, ya que
+    `ODDS_API_KEY` no está configurada en este entorno -- ver Paso 4)."""
+    from src.uncertainty.quality_score import compute_quality_score
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(mlb_date, repository=tmp_repository, limit=1)
+    assert len(result.records) == 1
+    record = result.records[0]
+
+    score = compute_quality_score(record, consensus=None)
+
+    assert score.confidence_method == "HEURISTIC_V1"
+    assert score.components["missing_critical"] is not None  # siempre calculable
+    if score.confidence is not None:
+        assert 0.0 <= score.confidence <= 1.0
