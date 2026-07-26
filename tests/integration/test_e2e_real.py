@@ -147,3 +147,28 @@ def test_mlb_elo_inference_works_on_real_pipeline_output(tmp_repository):
 
     assert output.model_status == ModelStatus.MODEL_NOT_TRAINED
     assert output.p_model_yes is None
+
+
+def test_edge_and_ev_compute_honestly_on_real_mlb_pipeline_output(tmp_repository):
+    """Paso 8, prueba controlada real (E): confirma que
+    `compute_edge_yes`/`compute_edge_no`/`compute_ev_yes_bruto`/
+    `compute_ev_no_bruto` no fallan sobre un `NormalizedRecord` real de la
+    API. Sin modelo entrenado en este entorno -> EDGE/EV = None en
+    cascada, honesto, nunca fabricado."""
+    from src.models.mlb_elo import predict_mlb_elo
+    from src.signals.edge import compute_edge_no, compute_edge_yes
+    from src.signals.expected_value import compute_ev_no_bruto, compute_ev_yes_bruto
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(mlb_date, repository=tmp_repository, limit=1)
+    assert len(result.records) == 1
+    record = result.records[0]
+
+    model_output = predict_mlb_elo(record, loaded_artifact=None)
+
+    assert compute_edge_yes(model_output, record) is None
+    assert compute_edge_no(model_output, record) is None
+    assert compute_ev_yes_bruto(model_output, record) is None
+    assert compute_ev_no_bruto(model_output, record) is None
