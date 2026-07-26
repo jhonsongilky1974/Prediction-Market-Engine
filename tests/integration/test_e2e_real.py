@@ -126,3 +126,24 @@ def test_quality_score_computes_on_real_mlb_pipeline_output(tmp_repository):
     assert score.components["missing_critical"] is not None  # siempre calculable
     if score.confidence is not None:
         assert 0.0 <= score.confidence <= 1.0
+
+
+def test_mlb_elo_inference_works_on_real_pipeline_output(tmp_repository):
+    """Paso 6, prueba controlada real (E): confirma que `predict_mlb_elo`
+    no falla sobre un `NormalizedRecord` real de la API. Sin artefacto
+    entrenado todavía en este entorno (`loaded_artifact=None`) ->
+    `MODEL_NOT_TRAINED` honesto, nunca una probabilidad fabricada."""
+    from src.models.base import ModelStatus
+    from src.models.mlb_elo import predict_mlb_elo
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(mlb_date, repository=tmp_repository, limit=1)
+    assert len(result.records) == 1
+    record = result.records[0]
+
+    output = predict_mlb_elo(record, loaded_artifact=None)
+
+    assert output.model_status == ModelStatus.MODEL_NOT_TRAINED
+    assert output.p_model_yes is None

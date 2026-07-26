@@ -244,6 +244,19 @@ class HistoryRepository:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_event_snapshots(self) -> List[Dict[str, Any]]:
+        """Todos los event_snapshots existentes, sin filtrar por evento --
+        mismo motivo que `get_all_feature_snapshots`/`get_all_event_results`
+        (Paso 5b): el dataset builder de Elo (Paso 6) necesita recorrer
+        identidad de equipos/`event_start_time` de TODOS los eventos, no de
+        uno a la vez."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM event_snapshots ORDER BY captured_at ASC, id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # feature_snapshots (INSERT-only, aditiva, se activa desde el Paso 2)
     # ------------------------------------------------------------------

@@ -519,3 +519,16 @@ def test_get_all_event_results_returns_across_all_events(tmp_path):
     rows = hist.get_all_event_results()
 
     assert {r["event_id"] for r in rows} == {"mlb_1", "mlb_2"}
+
+
+def test_get_all_event_snapshots_returns_across_all_events(tmp_path):
+    """Paso 6: el dataset builder de Elo necesita recorrer identidad de
+    equipos de TODOS los eventos, no de uno a la vez."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    for event_id in ("mlb_1", "mlb_2", "mlb_3"):
+        hist.save_event_snapshot(_record(event_id=event_id), source="x", captured_at=t)
+
+    rows = hist.get_all_event_snapshots()
+
+    assert {r["event_id"] for r in rows} == {"mlb_1", "mlb_2", "mlb_3"}
