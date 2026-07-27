@@ -10,10 +10,35 @@ Paso 8 — EDGE_YES/EDGE_NO + Expected Value). Actualizado: 2026-07-26
 metrics). Actualizado: 2026-07-26 (cierre del Paso 10 — Comparación de
 baselines: Baseline 0 vs 1 vs 2). Actualizado: 2026-07-26 (cierre del
 Paso 11 — Baseline de tenis: features + infraestructura de modelo +
-sincronización de resultados). **Actualizado de nuevo: 2026-07-26 (cierre
-del Paso 12 — Esquema de señal: SignalInputs + SignalType/Side, sin
-lógica de umbral).** Propósito: única fuente de verdad para continuar
-este proyecto en una conversación nueva, sin acceso al historial de chat.
+sincronización de resultados). Actualizado: 2026-07-26 (cierre del
+Paso 12 — Esquema de señal: SignalInputs + SignalType/Side, sin lógica de
+umbral). **Actualizado de nuevo: 2026-07-26 — CIERRE FORMAL DE FASE 2.**
+Propósito: única fuente de verdad para continuar este proyecto en una
+conversación nueva, sin acceso al historial de chat.
+
+## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
+
+**Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
+`PLAN_PHASE2.md` §12 están completos, testeados (498 tests, 0
+regresiones) y committeados. El objetivo definido en `PLAN_PHASE2.md` se
+considera cumplido. Documentos formales del cierre:
+
+- `PLAN_PHASE2.md` §18 ("Estado final de implementación — Cierre formal
+  de Fase 2") — mapeo paso→commit, verificación de los 13 criterios de
+  aceptación de §14 contra el código real, y la excepción documentada al
+  criterio 12 (tres archivos de Fase 1 con extensiones aditivas
+  autorizadas: `repository.py`, `connectors/mlb.py`,
+  `normalization/tennis_normalizer.py`).
+- [`FASE2_CIERRE_FINAL.md`](FASE2_CIERRE_FINAL.md) — Informe Final de
+  Cierre: objetivos alcanzados, arquitectura final, componentes,
+  cobertura de pruebas, riesgos conocidos, alcance explícitamente
+  excluido, y recomendaciones para una futura Fase 3.
+
+**No existe ningún "Paso 13" en el plan.** Cualquier trabajo posterior
+(lógica de clasificación de umbrales ENTER/WATCH/PASS, o cualquier otro
+punto de las recomendaciones de Fase 3 en `FASE2_CIERRE_FINAL.md` §7)
+requiere una nueva propuesta y aprobación explícita del usuario antes de
+iniciarse — no está autorizado por el cierre de Fase 2 en sí.
 Todo lo aquí escrito fue verificado contra el estado real del repositorio
 en el momento de cada actualización (comandos git, lectura de archivos,
 ejecución de tests, inspección directa de `data/engine.db`) — no
@@ -39,6 +64,12 @@ sobre `main`.
 08daf2603bf25ec542f44a526f551c94118a423e
 ```
 Mensaje: `Phase 2 Step 12: signal schema (SignalInputs + SignalType/Side, no threshold logic)`
+
+Sigue siendo el último commit de **código** (`src/`/`tests/`). Después de
+este, dos commits puramente documentales formalizan el cierre de Fase 2
+(sin tocar `src/`/`tests/`): `57768b4` (§18 en `PLAN_PHASE2.md`) y el
+commit que añade este mismo cierre a `CONTINUITY.md` +
+`FASE2_CIERRE_FINAL.md`, ver §0.
 
 Este mismo archivo `CONTINUITY.md` se commitea por separado tras esta
 actualización (mismo patrón ya usado en los cierres anteriores).
@@ -110,7 +141,10 @@ calibrados" sin nueva decisión explícita).
 | 22 | `99e902968b3ec194fb698a170686a6386495ea1e` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 10 (baseline comparison reports) | phase-2-dev |
 | 23 | `d6fc559a28f3244d7f4ca1b97d66275dc1d70c60` | 2026-07-26 | Phase 2 Step 11: tennis baseline (features + model infra + results sync) | phase-2-dev |
 | 24 | `7e7d94536cc2d7360efee282850cf246c9a0d671` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 11 (tennis baseline) | phase-2-dev |
-| 25 | `08daf2603bf25ec542f44a526f551c94118a423e` | 2026-07-26 | Phase 2 Step 12: signal schema (SignalInputs + SignalType/Side, no threshold logic) | phase-2-dev (HEAD actual) |
+| 25 | `08daf2603bf25ec542f44a526f551c94118a423e` | 2026-07-26 | Phase 2 Step 12: signal schema (SignalInputs + SignalType/Side, no threshold logic) | phase-2-dev |
+| 26 | `05e6d9bcb6d694fae73fff8a693f22c69956b1d9` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 12 (signal schema) | phase-2-dev |
+| 27 | `57768b4445353e3b1bfb7be236f268f738a66e69` | 2026-07-26 | Formalize Phase 2 closure in PLAN_PHASE2.md | phase-2-dev |
+| 28 | (este commit, ver `git log` tras el cierre) | 2026-07-26 | Update CONTINUITY.md + add FASE2_CIERRE_FINAL.md: formal closure of Phase 2 | phase-2-dev (HEAD tras este cierre) |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
@@ -299,6 +333,8 @@ Paso 11 tuvo seis ambigüedades explícitas (A-F, ver historial previo de este d
 66. Presentación de las cuatro recomendaciones (A1/B2/C2/D3) con el método de 6 puntos y del Design Proposal completo del Paso 12.
 67. Instrucción de realizar una auditoría arquitectónica final de 6 propiedades (aditividad total, ausencia de ciclo de dependencias, ausencia de acoplamiento nuevo, reutilizable por futuros motores de clasificación, `SignalInputs` = solo datos, lógica de clasificación fuera del archivo) antes de autorizar la implementación.
 68. Aprobación explícita de la implementación tras la auditoría satisfactoria, con instrucción de ejecutar los tests correspondientes, realizar la auditoría post-implementación y actualizar `CONTINUITY.md`.
+69. Instrucción de seguir el proceso institucional antes de iniciar cualquier implementación nueva: confirmar repo limpio, confirmar commits del Paso 12, releer `CONTINUITY.md`, identificar el siguiente paso del plan, y elaborar el Design Proposal del "Paso 13" siguiendo la metodología institucional, sin escribir código hasta aprobación explícita.
+70. Tras reportar que `PLAN_PHASE2.md` §12 termina en el Paso 12 (no existe un Paso 13 definido) y presentar la discrepancia del criterio de aceptación #12 (§14) — repository.py/connectors/mlb.py/tennis_normalizer.py con cambios aditivos autorizados pero no "cero cambios" literal — el usuario declaró oficialmente cerrada la Fase 2, con instrucción explícita de: (1) formalizar el cierre, (2) actualizar `PLAN_PHASE2.md` reflejando el estado final real y documentando la excepción, (3) verificar consistencia entre `CONTINUITY.md` y `PLAN_PHASE2.md`, (4) no iniciar ningún Paso 13 ni funcionalidad nueva, y (5) preparar un Informe Final de Cierre (objetivos, arquitectura final, componentes, cobertura de pruebas, riesgos, alcance excluido, recomendaciones para Fase 3) — sin implementar nada hasta una nueva decisión de arquitectura.
 
 ## 14. Estado exacto de todos los tests (verificado en el cierre de esta actualización)
 
@@ -333,7 +369,15 @@ Sin cambios respecto a la versión anterior.
 
 ## 19. Estado de `PLAN_PHASE2.md`
 
-Sin cambios desde el cierre del Paso 3 (commit `32677d6`). Sigue terminando en **"PLAN FASE 2 CORREGIDO — ESPERANDO APROBACIÓN FINAL"**, cosmético/desactualizado, no corregido, no solicitado.
+**Actualizado en el cierre formal de Fase 2 (commit `57768b4`).** El
+texto de diseño original (secciones 1-17, Revisión 2) se conserva sin
+reescribir, como registro histórico de lo aprobado antes de implementar.
+Se añadió §18 ("Estado final de implementación — Cierre formal de Fase
+2"): mapeo paso→commit de los 13 pasos, verificación de los 13 criterios
+de §14 contra el código real, y la excepción documentada al criterio 12
+(ver §0 de este documento). La línea final ya no dice "ESPERANDO
+APROBACIÓN FINAL" — dice explícitamente **"FASE 2 CERRADA — IMPLEMENTADA,
+AUDITADA Y APROBADA (2026-07-26)"**.
 
 ## 20. Qué pasos quedan pendientes
 
@@ -379,15 +423,15 @@ Todos los de la versión anterior de este documento, más:
 
 ## 24. Todo lo que un chat nuevo debe saber antes de escribir una sola línea de código
 
-- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `08daf2603bf25ec542f44a526f551c94118a423e` o posterior) y `git status --short`.
-- **Pasos 0-12 están todos completos.** El plan oficial (`PLAN_PHASE2.md` §12) no enumera ningún paso posterior al 12 con nombre de archivo concreto -- el siguiente trabajo conceptual pendiente es la lógica de clasificación de umbrales (ENTER/WATCH/PASS real) sobre `SignalInputs`, explícitamente diferida y no autorizada todavía (§16).
-- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real (§22) -- tanto MLB como tenis seguirán en `MODEL_NOT_TRAINED`/`INSUFFICIENT_HISTORY` hasta que exista volumen real.
-- El LaunchAgent está DESCARGADO a propósito y debe permanecer así hasta finalizar la Fase 2 completa -- no lo reactives sin autorización explícita nueva.
-- **Ningún módulo cerrado fue modificado en el Paso 12** -- dos archivos nuevos únicamente (`src/signals/signal_schema.py`, `tests/unit/test_signal_schema.py`), verificado con `git diff --name-only HEAD` (vacío antes del commit).
+- **FASE 2 ESTÁ FORMALMENTE CERRADA (2026-07-26).** Verifica tú mismo antes de asumir nada de este documento -- `git rev-parse HEAD` y `git status --short` (debe estar limpio). El objetivo de `PLAN_PHASE2.md` se considera cumplido; ver §0 de este documento y `PLAN_PHASE2.md` §18 para el cierre formal completo, y [`FASE2_CIERRE_FINAL.md`](FASE2_CIERRE_FINAL.md) para el Informe Final de Cierre.
+- **No existe ningún "Paso 13" ni trabajo de Fase 3 autorizado.** El siguiente trabajo conceptual (lógica de clasificación de umbrales ENTER/WATCH/PASS sobre `SignalInputs`, reactivación del LaunchAgent, integración participante↔YES, configuración de `ODDS_API_KEY`, etc. -- ver recomendaciones en `FASE2_CIERRE_FINAL.md` §7) requiere una **nueva propuesta y aprobación explícita del usuario**, siguiendo el mismo proceso institucional (revisión contractual → ambigüedades con metodología de 6 puntos → Design Proposal → aprobación → implementación → tests → auditoría → commits separados). No inicies nada de eso sin esa aprobación nueva, aunque parezca una continuación natural.
+- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real (§22) -- tanto MLB como tenis seguirán en `MODEL_NOT_TRAINED`/`INSUFFICIENT_HISTORY` hasta que exista volumen real. Esto **no bloqueó** el cierre de Fase 2 -- `PLAN_PHASE2.md` §14 lo declara explícitamente aceptable.
+- El LaunchAgent sigue DESCARGADO. El cierre de Fase 2 no lo reactiva automáticamente -- sigue requiriendo autorización explícita nueva y separada (es la recomendación #1 de `FASE2_CIERRE_FINAL.md` §7 para una futura Fase 3, no una acción ya aprobada).
+- **Excepción documentada al criterio de aceptación #12** (`PLAN_PHASE2.md` §14): `repository.py`, `connectors/mlb.py` y `normalization/tennis_normalizer.py` tienen cambios aditivos reales respecto al baseline de Fase 1 (verificado con `git diff --stat`), cada uno autorizado individualmente en su paso correspondiente -- documentado explícitamente en `PLAN_PHASE2.md` §18.3, no oculto ni reescrito para "aparentar" cumplimiento literal.
 - **`SignalInputs` es por lado, nunca por evento** (`Side.YES`/`Side.NO` del mismo `event_id` son objetos independientes) -- mismo invariante "nunca cruzados" del Paso 8, reforzado a nivel de tipo.
 - **`SignalType` (ENTER/WATCH/PASS) vive separado de `SignalInputs`** -- ningún campo `signal_type` en el contenedor de datos, ninguna función en el proyecto lo calcula todavía. Un futuro motor de clasificación define su propio tipo de salida encima, sin modificar `signal_schema.py`.
 - **`tennis_baseline.py` tiene persistencia totalmente independiente de `registry.py`** (prefijo de archivo `tennis_baseline_*`) — nunca reutilizar/generalizar `registry.py` para tenis sin una nueva decisión explícita.
 - **Identidad de jugador de tenis = `competitor.id` de ESPN** (`model_inputs.context.participant_{a,b}_espn_id`), nunca nombre de texto — verificado estable contra la API real.
 - **`round.displayName`** (ESPN) es la fuente directa de `tournament_round_context` — verificado real, no bloqueado por SofaScore.
-- Patrón de trabajo ya validado en ocho pasos consecutivos (5b, 7, 6, 8, 9, 10, 11, 12): revisión contractual → (si hay ambigüedades) resolución punto por punto con metodología de 6 puntos → Design Proposal → aprobación explícita → (opcional, ya usado en el Paso 12) auditoría arquitectónica final de propiedades concretas antes de autorizar → implementación → tests → auditoría → commit separado de código → commit separado de `CONTINUITY.md`. Sigue este mismo patrón para cualquier trabajo futuro sobre clasificación de señales.
+- Patrón de trabajo ya validado en ocho pasos consecutivos de Fase 2 (5b, 7, 6, 8, 9, 10, 11, 12) y en el propio cierre de fase: revisión contractual → (si hay ambigüedades) resolución punto por punto con metodología de 6 puntos → Design Proposal → aprobación explícita → (cuando aplique) auditoría de propiedades concretas antes de autorizar → implementación → tests → auditoría → commit separado de código/contenido → commit separado de `CONTINUITY.md`. Sigue este mismo patrón para cualquier trabajo futuro, incluida una eventual Fase 3.
 - Para correr tests: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
