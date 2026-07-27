@@ -144,7 +144,7 @@ calibrados" sin nueva decisión explícita).
 | 25 | `08daf2603bf25ec542f44a526f551c94118a423e` | 2026-07-26 | Phase 2 Step 12: signal schema (SignalInputs + SignalType/Side, no threshold logic) | phase-2-dev |
 | 26 | `05e6d9bcb6d694fae73fff8a693f22c69956b1d9` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 12 (signal schema) | phase-2-dev |
 | 27 | `57768b4445353e3b1bfb7be236f268f738a66e69` | 2026-07-26 | Formalize Phase 2 closure in PLAN_PHASE2.md | phase-2-dev |
-| 28 | (este commit, ver `git log` tras el cierre) | 2026-07-26 | Update CONTINUITY.md + add FASE2_CIERRE_FINAL.md: formal closure of Phase 2 | phase-2-dev (HEAD tras este cierre) |
+| 28 | `016975f` (hash corto; commit self-referencial, ver `git log` para el completo) | 2026-07-26 | Update CONTINUITY.md + add FASE2_CIERRE_FINAL.md: formal closure of Phase 2 | phase-2-dev |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
