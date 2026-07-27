@@ -174,6 +174,51 @@ def test_backtest_dataset_builds_honestly_on_real_mlb_pipeline_output_without_re
     assert any("sin event_result" in w for w in dataset.warnings)
 
 
+def test_compare_baselines_builds_honestly_on_real_mlb_pipeline_output_without_results(
+    tmp_repository, tmp_history_repository
+):
+    """Paso 10, prueba controlada real (E): confirma que
+    `compare_baselines` no falla contra un `HistoryRepository` alimentado
+    por una corrida real del pipeline MLB. Sin `event_results` reales
+    sincronizados en este entorno, `walk_forward_splits` no produce
+    ningún fold (volumen insuficiente para los defaults documentados) --
+    los tres baselines deben reportar 0 predicciones honestamente, nunca
+    fabricar un resultado ni fallar."""
+    from src.backtesting.dataset import build_backtest_dataset
+    from src.evaluation.reports import compare_baselines
+    from src.models.mlb_baseline import predict_mlb_baseline_from_features, train_mlb_baseline_model
+    from src.models.mlb_elo import predict_mlb_elo, train_mlb_elo_model
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(
+        mlb_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    dataset = build_backtest_dataset(tmp_history_repository)
+    assert dataset.size == 0  # sin event_results reales sincronizados en este entorno
+
+    def fit_fn_1(history_repository, models_dir):
+        return train_mlb_baseline_model(history_repository, models_dir=models_dir)
+
+    def predict_fn_1(row, artifact):
+        return predict_mlb_baseline_from_features(row.features, artifact)
+
+    def fit_fn_2(history_repository, models_dir):
+        return train_mlb_elo_model(history_repository, models_dir=models_dir)
+
+    def predict_fn_2(row, artifact):
+        return predict_mlb_elo(row.record, artifact).p_model_yes
+
+    report = compare_baselines(tmp_history_repository, dataset, fit_fn_1, predict_fn_1, fit_fn_2, predict_fn_2)
+
+    for name in ("baseline_0_market", "baseline_1_logreg", "baseline_2_elo"):
+        assert report.baseline_reports[name].n_predictions == 0
+    assert any("0 predicciones" in w for w in report.warnings)
+
+
 def test_edge_and_ev_compute_honestly_on_real_mlb_pipeline_output(tmp_repository):
     """Paso 8, prueba controlada real (E): confirma que
     `compute_edge_yes`/`compute_edge_no`/`compute_ev_yes_bruto`/
