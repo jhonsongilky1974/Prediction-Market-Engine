@@ -1,8 +1,17 @@
 # Fase 2 — Plan Técnico: Capa Cuantitativa (P_model, P_market, Edge, Incertidumbre)
 
-Estado: **PROPUESTA — NO IMPLEMENTADA**. Ningún código de producción de Fase 2
-ha sido escrito todavía. Fase 1 permanece congelada en el commit
-`c5eb9e77d51eeebb2c6c114ebce1810074b7372b` como punto de restauración.
+Estado: **CERRADA — IMPLEMENTADA Y AUDITADA.** Cierre formal: 2026-07-26.
+Los Pasos 0-12 (§12) fueron implementados, testeados, auditados y
+committeados en su totalidad sobre `phase-2-dev`. Ver §18 ("Estado final
+de implementación — Cierre formal de Fase 2") para el mapeo completo
+paso→commit, la verificación de los 13 criterios de aceptación de §14, y
+las excepciones aceptadas. `CONTINUITY.md` es la fuente de verdad
+detallada para cualquier conversación nueva; este documento conserva el
+texto de diseño original (Revisión 2, sección por sección) como registro
+histórico de lo que se aprobó **antes** de implementar, sin reescribirlo
+retroactivamente para que coincida con el resultado final — cualquier
+desviación real respecto a lo aquí escrito está documentada
+explícitamente en §18, nunca oculta.
 
 **Revisión 2** — incorpora 7 correcciones obligatorias tras la revisión del
 usuario: (1) histórico append-only real, (2) pricing side-aware explícito
@@ -10,7 +19,10 @@ YES/NO, (3) separación infraestructura-de-modelo vs modelo-entrenado, (4)
 `confidence_method` declarado como heurística no calibrada, (5) no-vig en
 dos pasos con gate de matching, (6) estrategia de rama git, (7) reorden de
 implementación con el histórico append-only como Paso 0 absoluto. Los
-cambios respecto a la Revisión 1 están marcados **[REV2]**.
+cambios respecto a la Revisión 1 están marcados **[REV2]**. Este texto
+(secciones 1-17) se conserva tal como fue aprobado antes de la
+implementación — es la propuesta original, no una crónica editada después
+de los hechos.
 
 ---
 
@@ -731,6 +743,97 @@ junto con el resto de la implementación.
 
 ---
 
+## 18. Estado final de implementación — Cierre formal de Fase 2 (2026-07-26)
+
+Esta sección se añade al cerrar Fase 2, sin alterar el texto de diseño
+original de §1-17 (conservado como registro histórico de lo aprobado
+antes de implementar). Documenta lo que realmente se construyó, contra
+qué se verificó, y las desviaciones aceptadas respecto al texto literal
+original.
+
+### 18.1 Mapeo Paso → módulo → estado → commit
+
+| Paso (§12) | Módulo | Estado | Commit de código |
+|---|---|---|---|
+| 0 | Histórico append-only (`event_snapshots`, `event_results`) | ✅ COMPLETO | `92af29d` |
+| 1 | Feature Registry | ✅ COMPLETO | `a471668` |
+| 2 | Cómputo de features MLB | ✅ COMPLETO | `7756319` |
+| 3 | Pricing side-aware (`P_market_YES`/`P_market_NO`) | ✅ COMPLETO | `32677d6` |
+| 4 | Consenso no-vig en dos pasos + gate de matching | ✅ COMPLETO | `b97092d` |
+| 0c/0d | Automatización de captura histórica (LaunchAgent) | ✅ COMPLETO (descargado a propósito, ver §21 de `CONTINUITY.md`) | `b261f80`, `7175b78`, `f931822` |
+| 5a | Infraestructura de modelo MLB | ✅ COMPLETO | `328e69c` |
+| 5b | `feature_snapshots`/`event_results` wiring + training pipeline real | ✅ COMPLETO | `8a15577` |
+| 6 | Elo simple MLB (Baseline 2) | ✅ COMPLETO | `03f21c0` |
+| 7 | `src/uncertainty/quality_score.py` (HEURISTIC_V1) | ✅ COMPLETO | `822d4dc` |
+| 8 | `src/signals/edge.py` + `expected_value.py` | ✅ COMPLETO | `038bff0` |
+| 9 | `src/backtesting/` (dataset + walk-forward splitter + metrics) | ✅ COMPLETO | `f15fc59` |
+| 10 | `src/evaluation/reports.py` (Baseline 0 vs 1 vs 2) | ✅ COMPLETO | `cfb8dc0` |
+| 11 | Tenis (`tennis_features.py` + `tennis_baseline.py` + sync de resultados) | ✅ COMPLETO | `d6fc559` |
+| 12 | `src/signals/signal_schema.py` (tipos, sin lógica de umbral) | ✅ COMPLETO | `08daf26` |
+
+Detalle completo de cada paso (ambigüedades resueltas, decisiones
+arquitectónicas, hallazgos empíricos) en `CONTINUITY.md`, que permanece
+como la fuente de verdad para el histórico técnico paso a paso.
+
+### 18.2 Verificación de los 13 criterios de aceptación (§14)
+
+| # | Criterio | Estado |
+|---|---|---|
+| 1 | Histórico append-only implementado, INSERT-only, con evidencia real acumulándose | ✅ Cumplido — `event_snapshots`=93 filas reales verificadas |
+| 2 | Feature registry documentado, sin valores inventados | ✅ Cumplido |
+| 3 | Infraestructura de modelo MLB completa end-to-end (aun sin modelo entrenado) | ✅ Cumplido |
+| 4 | Modelo entrenado si el histórico alcanza el umbral; si no, reporte honesto | ✅ Cumplido honestamente — histórico real insuficiente hoy (`feature_snapshots`/`event_results`=0), `model_status` reporta `MODEL_NOT_TRAINED`/`INSUFFICIENT_HISTORY` sin fabricar ninguna probabilidad. Explícitamente **no** exigido como bloqueante por §14 mismo. |
+| 5 | `P_market_YES`/`NO` y `EDGE_YES`/`NO` correctos, nunca cruzados, 6 tests de §7 | ✅ Cumplido |
+| 6 | No-vig en dos pasos, degradación limpia a `NOT_CONFIGURED` | ✅ Cumplido |
+| 7 | Sistema de incertidumbre `HEURISTIC_V1`, nunca presentado como calibrado | ✅ Cumplido |
+| 8 | `EV` bruto por lado; `EV_neto` permanece `None` | ✅ Cumplido |
+| 9 | Backtesting reproducible sobre `history_repository` real | ✅ Cumplido |
+| 10 | Esquema de señal (ENTER/WATCH/PASS) en tipos, sin lógica de umbral | ✅ Cumplido (Paso 12) |
+| 11 | Suite de tests en verde, sin reducir los 90 de Fase 1 | ✅ Cumplido — 498 tests, 0 regresiones |
+| 12 | Ningún módulo de Fase 2 modificó `connectors/`/`normalization/`/`matching/`/`quality/`; `repository.py` con cero cambios | ⚠️ **Cumplido con excepción documentada y autorizada** — ver §18.3 |
+| 13 | Todo el trabajo en `phase-2-dev`, sin commits directos sobre `main` | ✅ Cumplido — verificado, `main` intacto en `c5eb9e77` |
+
+### 18.3 Excepción aceptada — Criterio 12
+
+El texto original de §14.12 prohíbe literalmente cualquier cambio en
+`src/connectors/`, `src/normalization/`, `src/matching/`, `src/quality/`
+y exige cero cambios en `repository.py`. Verificado con
+`git diff --stat c5eb9e77...HEAD`, tres archivos SÍ tienen cambios:
+
+- **`src/storage/repository.py`** (+6/-1) — wiring de la subfase de
+  automatización 0c/0d (captura histórica por LaunchAgent), aditivo.
+- **`src/connectors/mlb.py`** (+39) — extensión aditiva de los Pasos
+  5a/5b (Bloque 1) para exponer los datos ya verificados disponibles en
+  la MLB Stats API que el baseline necesitaba.
+- **`src/normalization/tennis_normalizer.py`** (+27/-2) — extensión
+  aditiva del Paso 11 (captura de `espn_id`/`round` en
+  `model_inputs.context`), explícitamente flageada, resuelta como
+  ambigüedad y aprobada en el Design Proposal de ese paso.
+
+**Por qué se acepta como excepción y no como incumplimiento**: los tres
+cambios fueron (a) estrictamente aditivos (nunca removieron ni
+reinterpretaron comportamiento de Fase 1), (b) explícitamente
+identificados y flageados en el momento de cada paso (nunca colados sin
+mencionar), y (c) aprobados uno por uno por el usuario antes de
+implementarse — el mismo nivel de rigor que exige el criterio 12 en
+espíritu (evitar cambios silenciosos o no auditados a Fase 1), aunque el
+texto literal ("cero cambios") no preveía que la implementación real
+necesitaría estas tres extensiones puntuales. Se documenta aquí en vez de
+reescribir el criterio retroactivamente para que "aparente" haberse
+cumplido al pie de la letra.
+
+### 18.4 Paso 13 y trabajo posterior
+
+`PLAN_PHASE2.md` §12 no define ningún "Paso 13". El siguiente trabajo
+conceptual — lógica de clasificación real de umbrales (ENTER/WATCH/PASS)
+sobre `SignalInputs`, y cualquier trabajo de Fase 3 — **no está
+autorizado por este documento** y requiere una nueva propuesta y
+aprobación explícita del usuario antes de iniciarse (§16 sigue
+prohibiendo explícitamente "umbrales ENTER/WATCH/PASS calibrados" sin esa
+nueva decisión).
+
+---
+
 ## Resumen ejecutivo (actualizado)
 
 - **MLB tiene datos reales suficientes hoy** para infraestructura y,
@@ -750,4 +853,6 @@ junto con el resto de la implementación.
 - **Todo el trabajo ocurre en `phase-2-dev`**, no en `main`, dejando el
   commit baseline de Fase 1 como restauración instantánea en todo momento.
 
-**PLAN FASE 2 CORREGIDO — ESPERANDO APROBACIÓN FINAL**
+**FASE 2 CERRADA — IMPLEMENTADA, AUDITADA Y APROBADA (2026-07-26). Ver §18
+para el estado final de implementación y `CONTINUITY.md` para el detalle
+paso a paso.**
