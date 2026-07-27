@@ -91,11 +91,19 @@ Las 10 etapas (ingesta, normalización, matching, quality score, mercado, consen
 
 ---
 
-## 4. Corrección propuesta (NO ejecutada — pendiente de tu autorización)
+## 4. Actualización — causa raíz real encontrada y corregida (post-autorización)
 
-1. **Limpiar `data/models/`**: eliminar los 23 artefactos sintéticos (`*.joblib` + `*.metadata.json` con `n_training_samples` incompatible con el histórico real), conservando `.gitkeep`. Acción local, reversible en el sentido de que ninguno está en git ni es irremplazable — pero es una eliminación de archivos reales, así que no se ejecuta sin tu confirmación explícita.
-2. **Disciplina operativa hacia adelante** (no es un cambio de código): cualquier verificación manual futura de `train_mlb_baseline_model`/`predict_mlb_baseline` con datos sintéticos debe pasar explícitamente `models_dir=<ruta temporal>` — nunca dejar el valor por defecto de producción cuando el `HistoryRepository` usado no es el real. Esto ya es la práctica correcta usada en todos los tests; el hallazgo es que no se siguió consistentemente en verificaciones ad-hoc fuera de pytest.
+El hallazgo de §3.1 resultó ser más profundo de lo que la primera lectura sugería: no era solo un residuo histórico de 23 artefactos, sino un **defecto regenerativo activo**. Reproducido de forma determinista tres veces de forma aislada: `tests/unit/test_train_mlb_model_script.py::test_script_trains_and_reports_metrics_when_threshold_reached` escribía, en **cada corrida de `pytest`**, un artefacto sintético nuevo y real en `data/models/` de producción.
 
-No se propone ningún cambio a `src/` — no hay ningún defecto de código de producto, verificado explícitamente revisando cada call-site real.
+**Causa raíz exacta**: ese test monkeypatchea correctamente `HistoryRepository` (aislado, 10 muestras sintéticas), pero `scripts/train_mlb_model.py` nunca exponía forma de redirigir el directorio de salida del modelo — su `main()` llamaba a `train_mlb_baseline_model()` sin pasar nunca `models_dir`, cayendo siempre al valor por defecto de producción (`DATA_MODELS_DIR`). El test aislaba el histórico, no el destino del artefacto.
 
-¿Autorizas la limpieza de `data/models/` (punto 1)? Es la única acción pendiente de esta validación.
+**Corrección aplicada** (commit `eff754e`), estrictamente limitada al aislamiento del test/script, sin tocar ninguna lógica del motor de predicción, pipeline, modelo, EDGE/EV o clasificación (`git diff --name-only -- src/` vacío, verificado):
+- `scripts/train_mlb_model.py`: nuevo flag opcional `--models-dir` (por defecto sigue siendo `DATA_MODELS_DIR` — ninguna corrida manual real cambia de comportamiento), pasado a través al parámetro `models_dir` que `train_mlb_baseline_model` ya soportaba.
+- `tests/unit/test_train_mlb_model_script.py`: ambos tests pasan ahora `--models-dir` apuntando a `tmp_path`; se añadió una aserción de regresión que confirma que el artefacto se escribe en `tmp_path`, nunca en producción.
+
+**Verificación de la corrección** (reproducibilidad confirmada, no una sola corrida de suerte):
+- Batería completa (`498 passed`) corrida **dos veces** tras el fix — `data/models/` quedó con únicamente `.gitkeep` en ambas.
+- El archivo antes ofensivo, corrido en aislamiento una tercera vez — mismo resultado, cero artefactos nuevos.
+- `data/engine.db` real sin cambios (`event_snapshots=93`, `feature_snapshots=0`, `event_results=0`, `normalized_records=94`) y `git status --short` vacío tras todo el proceso.
+
+**Estado final**: `data/models/` limpio (solo `.gitkeep`), reproducible (no se regenera en corridas futuras de `pytest`), 498 tests en verde, ningún archivo de `src/` modificado. Repositorio listo para Fase 3.

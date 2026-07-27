@@ -12,9 +12,11 @@ baselines: Baseline 0 vs 1 vs 2). Actualizado: 2026-07-26 (cierre del
 Paso 11 — Baseline de tenis: features + infraestructura de modelo +
 sincronización de resultados). Actualizado: 2026-07-26 (cierre del
 Paso 12 — Esquema de señal: SignalInputs + SignalType/Side, sin lógica de
-umbral). **Actualizado de nuevo: 2026-07-26 — CIERRE FORMAL DE FASE 2.**
-Propósito: única fuente de verdad para continuar este proyecto en una
-conversación nueva, sin acceso al historial de chat.
+umbral). Actualizado: 2026-07-26 — CIERRE FORMAL DE FASE 2. **Actualizado
+de nuevo: 2026-07-26 — Validación Institucional post-cierre y corrección
+de un defecto de aislamiento de tests (ver §0.1).** Propósito: única
+fuente de verdad para continuar este proyecto en una conversación nueva,
+sin acceso al historial de chat.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
@@ -39,6 +41,42 @@ considera cumplido. Documentos formales del cierre:
 punto de las recomendaciones de Fase 3 en `FASE2_CIERRE_FINAL.md` §7)
 requiere una nueva propuesta y aprobación explícita del usuario antes de
 iniciarse — no está autorizado por el cierre de Fase 2 en sí.
+
+## 0.1 Validación Institucional post-cierre + fix de aislamiento de tests (2026-07-26)
+
+Tras el cierre formal, el usuario pidió una Validación Institucional:
+correr el motor extremo a extremo sobre mercados reales (MLB + tenis
+ATP) usando exclusivamente código ya existente. Reporte completo:
+[`FASE2_VALIDACION_INSTITUCIONAL.md`](FASE2_VALIDACION_INSTITUCIONAL.md).
+Resultado: las 10 etapas (ingesta, normalización, matching, quality
+score, mercado, consenso no-vig, modelo, confidence, edge/EV, señal)
+corrieron sin ninguna excepción sobre 4 registros reales, con propagación
+honesta de `None` en cada punto sin dato real disponible — incluido un
+caso con mercado Kalshi real emparejado (tenis, `P_market_YES=0.99`) que
+ejercitó la cadena completa por primera vez sobre un precio vivo.
+
+**Hallazgo real encontrado y corregido** (commit `eff754e`): el registro
+de modelos MLB de producción (`data/models/`, ignorado por git, nunca
+comprometido en ningún commit) se contaminaba con artefactos sintéticos
+en **cada corrida de `pytest`** — `tests/unit/test_train_mlb_model_script.py`
+aislaba correctamente `HistoryRepository`, pero `scripts/train_mlb_model.py`
+nunca exponía forma de redirigir dónde se escribe el artefacto entrenado,
+cayendo siempre a la ruta de producción por defecto. Corrección aplicada,
+estrictamente limitada al aislamiento del test/script (flag
+`--models-dir` opcional en el script, pasado explícitamente a `tmp_path`
+en los tests) — **cero cambios en `src/`**, ninguna lógica de predicción/
+pipeline/modelo/EDGE/EV/clasificación tocada. Verificado con 3 corridas
+independientes tras el fix (dos de la batería completa, una del archivo
+antes ofensivo en aislamiento): `data/models/` queda con únicamente
+`.gitkeep` cada vez, reproducible. `data/engine.db` real sin cambios en
+todo el proceso (`event_snapshots=93`, `feature_snapshots=0`,
+`event_results=0`, `normalized_records=94`).
+
+**Repositorio verificado limpio y listo para Fase 3** al cierre de esta
+actualización: `git status --short` vacío, 498 tests en verde,
+`data/models/` sin artefactos sintéticos y sin regenerarlos en corridas
+futuras de `pytest`.
+
 Todo lo aquí escrito fue verificado contra el estado real del repositorio
 en el momento de cada actualización (comandos git, lectura de archivos,
 ejecución de tests, inspección directa de `data/engine.db`) — no
@@ -61,15 +99,18 @@ sobre `main`.
 ## 3. Último commit completo de código (hash)
 
 ```
-08daf2603bf25ec542f44a526f551c94118a423e
+eff754ef8054adbd9aacc65d7ba825aea1bbe674
 ```
-Mensaje: `Phase 2 Step 12: signal schema (SignalInputs + SignalType/Side, no threshold logic)`
+Mensaje: `Fix test-isolation defect: scripts/train_mlb_model.py leaked synthetic artifacts into production data/models/`
 
-Sigue siendo el último commit de **código** (`src/`/`tests/`). Después de
-este, dos commits puramente documentales formalizan el cierre de Fase 2
-(sin tocar `src/`/`tests/`): `57768b4` (§18 en `PLAN_PHASE2.md`) y el
-commit que añade este mismo cierre a `CONTINUITY.md` +
-`FASE2_CIERRE_FINAL.md`, ver §0.
+Post-cierre de Fase 2 (§0/§0.1): único cambio de código autorizado desde
+el cierre formal, estrictamente de aislamiento de test/script (flag
+`--models-dir` en `scripts/train_mlb_model.py`, uso explícito de
+`tmp_path` en `tests/unit/test_train_mlb_model_script.py`). Cero cambios
+en cualquier otro archivo de `src/` (`git diff --name-only -- src/`
+vacío, verificado). El commit de código de Fase 2 propiamente dicha
+(Paso 12) sigue siendo `08daf260` — ver §5 para la línea de tiempo
+completa incluyendo los commits documentales del cierre.
 
 Este mismo archivo `CONTINUITY.md` se commitea por separado tras esta
 actualización (mismo patrón ya usado en los cierres anteriores).
@@ -145,6 +186,10 @@ calibrados" sin nueva decisión explícita).
 | 26 | `05e6d9bcb6d694fae73fff8a693f22c69956b1d9` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 12 (signal schema) | phase-2-dev |
 | 27 | `57768b4445353e3b1bfb7be236f268f738a66e69` | 2026-07-26 | Formalize Phase 2 closure in PLAN_PHASE2.md | phase-2-dev |
 | 28 | `016975f` (hash corto; commit self-referencial, ver `git log` para el completo) | 2026-07-26 | Update CONTINUITY.md + add FASE2_CIERRE_FINAL.md: formal closure of Phase 2 | phase-2-dev |
+| 29 | `0ad6da11807f376230326eaf774168f2a87837ad` | 2026-07-26 | CONTINUITY.md: record actual hash of the previous self-referential closure commit | phase-2-dev |
+| 30 | `ff7372801a01655047616d435d64e14de6d89c57` | 2026-07-26 | Add institutional end-to-end validation report for Phase 2 | phase-2-dev |
+| 31 | `eff754ef8054adbd9aacc65d7ba825aea1bbe674` | 2026-07-26 | Fix test-isolation defect: scripts/train_mlb_model.py leaked synthetic artifacts into production data/models/ | phase-2-dev |
+| 32 | (este commit, ver `git log` tras cerrar) | 2026-07-26 | Update CONTINUITY.md + FASE2_VALIDACION_INSTITUCIONAL.md: post-closure validation and test-isolation fix | phase-2-dev (HEAD tras este cierre) |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
@@ -423,7 +468,8 @@ Todos los de la versión anterior de este documento, más:
 
 ## 24. Todo lo que un chat nuevo debe saber antes de escribir una sola línea de código
 
-- **FASE 2 ESTÁ FORMALMENTE CERRADA (2026-07-26).** Verifica tú mismo antes de asumir nada de este documento -- `git rev-parse HEAD` y `git status --short` (debe estar limpio). El objetivo de `PLAN_PHASE2.md` se considera cumplido; ver §0 de este documento y `PLAN_PHASE2.md` §18 para el cierre formal completo, y [`FASE2_CIERRE_FINAL.md`](FASE2_CIERRE_FINAL.md) para el Informe Final de Cierre.
+- **FASE 2 ESTÁ FORMALMENTE CERRADA (2026-07-26), Y VALIDADA INSTITUCIONALMENTE end-to-end sobre mercados reales (2026-07-26, ver §0.1).** Verifica tú mismo antes de asumir nada de este documento -- `git rev-parse HEAD` y `git status --short` (debe estar limpio). El objetivo de `PLAN_PHASE2.md` se considera cumplido; ver §0/§0.1 de este documento, `PLAN_PHASE2.md` §18, [`FASE2_CIERRE_FINAL.md`](FASE2_CIERRE_FINAL.md) (Informe Final de Cierre) y [`FASE2_VALIDACION_INSTITUCIONAL.md`](FASE2_VALIDACION_INSTITUCIONAL.md) (validación real + fix de aislamiento de tests aplicado).
+- **`data/models/` está limpio y NO se regenera solo** -- verificado con 3 corridas independientes de la batería completa tras el fix de `eff754e` (§0.1). Si alguna vez vuelve a aparecer un artefacto sintético ahí, es una regresión real, no un comportamiento esperado.
 - **No existe ningún "Paso 13" ni trabajo de Fase 3 autorizado.** El siguiente trabajo conceptual (lógica de clasificación de umbrales ENTER/WATCH/PASS sobre `SignalInputs`, reactivación del LaunchAgent, integración participante↔YES, configuración de `ODDS_API_KEY`, etc. -- ver recomendaciones en `FASE2_CIERRE_FINAL.md` §7) requiere una **nueva propuesta y aprobación explícita del usuario**, siguiendo el mismo proceso institucional (revisión contractual → ambigüedades con metodología de 6 puntos → Design Proposal → aprobación → implementación → tests → auditoría → commits separados). No inicies nada de eso sin esa aprobación nueva, aunque parezca una continuación natural.
 - `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real (§22) -- tanto MLB como tenis seguirán en `MODEL_NOT_TRAINED`/`INSUFFICIENT_HISTORY` hasta que exista volumen real. Esto **no bloqueó** el cierre de Fase 2 -- `PLAN_PHASE2.md` §14 lo declara explícitamente aceptable.
 - El LaunchAgent sigue DESCARGADO. El cierre de Fase 2 no lo reactiva automáticamente -- sigue requiriendo autorización explícita nueva y separada (es la recomendación #1 de `FASE2_CIERRE_FINAL.md` §7 para una futura Fase 3, no una acción ya aprobada).
