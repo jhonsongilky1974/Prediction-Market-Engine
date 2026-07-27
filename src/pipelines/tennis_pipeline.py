@@ -19,8 +19,9 @@ from config.settings import EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT
 from src.connectors.espn_tennis import EspnTennisConnector
 from src.connectors.kalshi import KalshiConnector
 from src.connectors.sofascore import SofascoreConnector
+from src.features.tennis_features import TennisFeatureInputs, persist_tennis_feature_snapshot
 from src.matching.market_matcher import apply_kalshi_match, find_best_kalshi_event
-from src.models.schemas import SourceStatus
+from src.models.schemas import NormalizedRecord, SourceStatus
 from src.normalization.tennis_normalizer import normalize_espn_tennis_match
 from src.quality.completeness import compute_completeness_score, dedupe_missing_fields, subtract_filled_fields
 from src.quality.validators import annotate_duplicate_markets, validate_record
@@ -47,6 +48,7 @@ def run_tennis_pipeline(
     history_repository: Optional[HistoryRepository] = None,
     limit: Optional[int] = None,
     enrich_sofascore: bool = True,
+    fetch_features: bool = True,
 ) -> TennisPipelineResult:
     tour = tour.upper()
     steps: List[PipelineStepResult] = []
@@ -78,8 +80,22 @@ def run_tennis_pipeline(
         steps.append(PipelineStepResult("kalshi", f"events_KX{tour}MATCH", False, error=kalshi_events_result.error))
 
     records = []
+    # Paso 11: features (rest_days/tournament_round_context) calculadas
+    # junto al resto del lote, alineadas 1:1 por índice con `records`
+    # (mismo patrón que el Bloque 2 del Paso 5b en mlb_pipeline.py).
+    feature_inputs_list: List[Optional[TennisFeatureInputs]] = []
+    feature_cutoffs: List[Optional[datetime]] = []
+
     for match in matches:
         record, missing = normalize_espn_tennis_match(match, tour)
+
+        if fetch_features and history_repository is not None:
+            feature_inputs = _fetch_tennis_feature_inputs(history_repository, record)
+            feature_cutoffs.append(datetime.now(timezone.utc))
+            feature_inputs_list.append(feature_inputs)
+        else:
+            feature_inputs_list.append(None)
+            feature_cutoffs.append(None)
 
         source_status = {
             "espn_tennis": SourceStatus.OK,
@@ -129,15 +145,63 @@ def run_tennis_pipeline(
     annotate_duplicate_markets(records)
 
     if repository is not None:
-        for record in records:
+        for record, feature_inputs, feature_cutoff in zip(records, feature_inputs_list, feature_cutoffs):
             repository.save_normalized_record(record)
             # Paso 0c: snapshot histórico append-only del MISMO record ya
             # persistido -- nunca antes, nunca en su lugar (ver PLAN_PHASE2.md §11).
             if history_repository is not None:
-                history_repository.save_event_snapshot(record, source="tennis_pipeline_run")
+                snapshot_id = history_repository.save_event_snapshot(record, source="tennis_pipeline_run")
+                # Paso 11: feature_snapshot del MISMO snapshot ya guardado --
+                # solo si se pidieron features para este record (mismo
+                # patrón que el Bloque 2 del Paso 5b para MLB).
+                if feature_inputs is not None:
+                    persist_tennis_feature_snapshot(
+                        history_repository=history_repository,
+                        record=record,
+                        event_snapshot_id=snapshot_id,
+                        inputs=feature_inputs,
+                        data_cutoff_timestamp=feature_cutoff,
+                    )
 
     steps.append(PipelineStepResult("pipeline", "normalized_records", True, count=len(records)))
     return TennisPipelineResult(records=records, steps=steps)
+
+
+def _fetch_tennis_feature_inputs(history_repository: HistoryRepository, record: NormalizedRecord) -> TennisFeatureInputs:
+    """Construye `TennisFeatureInputs` (Paso 11) consultando el histórico
+    YA acumulado en `event_snapshots` -- busca, para cada participante
+    (emparejado por `espn_id`, nunca por nombre de texto, ver
+    tennis_normalizer.py), los `start_time` de partidos previos ya
+    vistos. Recorrido lineal sobre TODO `event_snapshots` -- mismo patrón
+    ya usado por `build_backtest_dataset`/`build_mlb_elo_game_sequence`;
+    deuda de escalabilidad ya documentada en Fase 2, aceptable dado el
+    volumen real actual. No hace ninguna llamada de red."""
+    context = record.model_inputs.context or {}
+    espn_ids = {
+        "participant_a": context.get("participant_a_espn_id"),
+        "participant_b": context.get("participant_b_espn_id"),
+    }
+    prior_start_times: Dict[str, List[datetime]] = {"participant_a": [], "participant_b": []}
+
+    target_ids = {v for v in espn_ids.values() if v is not None}
+    if not target_ids:
+        return TennisFeatureInputs(prior_match_start_times=prior_start_times)
+
+    for row in history_repository.get_all_event_snapshots():
+        if row["event_id"] == record.event_id:
+            continue  # nunca el propio evento
+        if not row["event_id"].startswith("espn_tennis_"):
+            continue
+        other_record = NormalizedRecord.model_validate_json(row["normalized_record_json"])
+        if other_record.start_time is None:
+            continue
+        other_context = other_record.model_inputs.context or {}
+        other_ids = {other_context.get("participant_a_espn_id"), other_context.get("participant_b_espn_id")}
+        for side, espn_id in espn_ids.items():
+            if espn_id is not None and espn_id in other_ids:
+                prior_start_times[side].append(other_record.start_time)
+
+    return TennisFeatureInputs(prior_match_start_times=prior_start_times)
 
 
 def _try_enrich_sofascore(

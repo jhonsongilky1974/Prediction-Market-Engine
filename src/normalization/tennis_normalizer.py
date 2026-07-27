@@ -38,7 +38,10 @@ def normalize_espn_tennis_match(
     tour: str,
 ) -> Tuple[NormalizedRecord, List[str]]:
     """`espn_match` es un elemento ya aplanado por
-    `EspnTennisConnector.extract_matches`. `tour` en {"ATP","WTA"}."""
+    `EspnTennisConnector.extract_matches` -- que preserva el `competition`
+    crudo completo vía `dict(competition)`, así que `id`/`round` de cada
+    competidor y de la competencia ya están disponibles aquí sin ningún
+    cambio al conector. `tour` en {"ATP","WTA"}."""
     missing: List[str] = []
 
     match_id = espn_match.get("id")
@@ -46,11 +49,14 @@ def normalize_espn_tennis_match(
         missing.append("espn_tennis.id")
 
     names: List[Optional[str]] = [None, None]
+    espn_ids: List[Optional[str]] = [None, None]
     for competitor in espn_match.get("competitors", []) or []:
         athlete = competitor.get("athlete", {}) or {}
         idx = 0 if competitor.get("homeAway") == "home" else 1
         names[idx] = athlete.get("displayName")
+        espn_ids[idx] = competitor.get("id")
     participant_a, participant_b = names
+    participant_a_espn_id, participant_b_espn_id = espn_ids
     if participant_a is None:
         missing.append("espn_tennis.competitors.home")
     if participant_b is None:
@@ -68,6 +74,14 @@ def normalize_espn_tennis_match(
     if tournament_name is None:
         missing.append("espn_tennis.tournament_name")
 
+    # Paso 11: ronda del torneo (p.ej. "Qualifying 1st Round", "Final"),
+    # verificada contra la API real de ESPN antes de implementar esto --
+    # NUNCA inferida por heurística de texto del nombre del torneo (eso
+    # está explícitamente prohibido, PLAN_PHASE2.md §16).
+    tournament_round = ((espn_match.get("round") or {}).get("displayName"))
+    if tournament_round is None:
+        missing.append("espn_tennis.round")
+
     tennis_vars = TennisVariables()
     for field in TennisVariables.model_fields:
         missing.append(f"tennis_variables.{field}")
@@ -82,7 +96,16 @@ def normalize_espn_tennis_match(
         participant_b=participant_b,
         tennis_variables=tennis_vars,
     )
-    record.model_inputs.context = {"tournament_name": tournament_name, "tour": tour}
+    # Paso 11: identidad estable (espn_id) y ronda del torneo, mismo rol
+    # que away_team_id/home_team_id en MLB -- permite emparejar al mismo
+    # jugador entre partidos distintos sin depender de texto de nombre.
+    record.model_inputs.context = {
+        "tournament_name": tournament_name,
+        "tour": tour,
+        "participant_a_espn_id": participant_a_espn_id,
+        "participant_b_espn_id": participant_b_espn_id,
+        "tournament_round": tournament_round,
+    }
     return record, missing
 
 

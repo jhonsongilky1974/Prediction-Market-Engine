@@ -1,7 +1,7 @@
 """Versión pytest (pass/fail) del test end-to-end real. Para el reporte
 legible por humanos usar `python scripts/run_e2e.py` (ver README).
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -104,6 +104,39 @@ def test_tennis_pipeline_history_wiring_reaches_history_repository_real(tmp_repo
     assert len(snapshots) == 1
     captured_at = datetime.fromisoformat(snapshots[0]["captured_at"])
     assert captured_at.tzinfo is not None
+
+
+def test_tennis_pipeline_persists_feature_snapshot_and_predicts_honestly_on_real_data(
+    tmp_repository, tmp_history_repository
+):
+    """Paso 11, prueba controlada real (E): confirma que
+    `run_tennis_pipeline` persiste un `feature_snapshot` real
+    (rest_days/tournament_round_context, calculados contra la API real de
+    ESPN) y que `predict_tennis_baseline` reporta honestamente
+    `MODEL_NOT_TRAINED` sin ningún artefacto entrenado en este entorno --
+    esperado dado el doble bloqueo (SofaScore + histórico propio bajo,
+    PLAN_PHASE2.md §6)."""
+    from src.features.tennis_features import TennisFeatureInputs
+    from src.models.base import ModelStatus
+    from src.models.tennis_baseline import predict_tennis_baseline
+
+    tennis_date = _next_tennis_date_with_matches("atp")
+    if tennis_date is None:
+        pytest.skip("no hay partidos ATP próximos disponibles vía ESPN")
+    result = run_tennis_pipeline(
+        "ATP", tennis_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+    record = result.records[0]
+
+    feature_snapshots = tmp_history_repository.get_feature_snapshots_for_event(record.event_id)
+    assert len(feature_snapshots) == 1
+
+    output = predict_tennis_baseline(
+        record, TennisFeatureInputs(), datetime.now(timezone.utc), loaded_artifact=None
+    )
+    assert output.model_status == ModelStatus.MODEL_NOT_TRAINED
+    assert output.p_model_yes is None
 
 
 def test_quality_score_computes_on_real_mlb_pipeline_output(tmp_repository):
