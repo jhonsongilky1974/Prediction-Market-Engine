@@ -5,10 +5,12 @@ automatización 0c/0d y del Paso 5a). Actualizado: 2026-07-26 (cierre del
 Paso 5b, Bloques 1-5). Actualizado: 2026-07-26 (cierre del Paso 7 —
 Quality Score / Incertidumbre). Actualizado: 2026-07-26 (cierre del
 Paso 6 — Elo simple MLB / Baseline 2). Actualizado: 2026-07-26 (cierre del
-Paso 8 — EDGE_YES/EDGE_NO + Expected Value). **Actualizado de nuevo:
-2026-07-26 (cierre del Paso 9 — Backtesting: dataset + walk-forward
-splitter + metrics).** Propósito: única fuente de verdad para continuar
-este proyecto en una conversación nueva, sin acceso al historial de chat.
+Paso 8 — EDGE_YES/EDGE_NO + Expected Value). Actualizado: 2026-07-26
+(cierre del Paso 9 — Backtesting: dataset + walk-forward splitter +
+metrics). **Actualizado de nuevo: 2026-07-26 (cierre del Paso 10 —
+Comparación de baselines: Baseline 0 vs 1 vs 2).** Propósito: única fuente
+de verdad para continuar este proyecto en una conversación nueva, sin
+acceso al historial de chat.
 Todo lo aquí escrito fue verificado contra el estado real del repositorio
 en el momento de cada actualización (comandos git, lectura de archivos,
 ejecución de tests, inspección directa de `data/engine.db`) — no
@@ -31,28 +33,32 @@ sobre `main`.
 ## 3. Último commit completo de código (hash)
 
 ```
-f15fc592860d3d047a361958b2044a32c7c80b69
+cfb8dc09562f198c36cd0c6528be440b79cb15e8
 ```
-Mensaje: `Phase 2 Step 9: backtesting infrastructure (dataset + walk-forward splitter + metrics)`
+Mensaje: `Phase 2 Step 10: baseline comparison reports (Baseline 0 vs 1 vs 2)`
 
 Este mismo archivo `CONTINUITY.md` se commitea por separado tras esta
 actualización (mismo patrón ya usado en los cierres anteriores).
 
 ## 4. Último paso completamente terminado
 
-**Paso 9 (`src/backtesting/`) — COMPLETO, AUDITADO Y COMMITTEADO.**
-Implementa la infraestructura de backtesting según `PLAN_PHASE2.md` §10:
-dataset (uniendo `event_snapshots`+`feature_snapshots`+`event_results` de
-`HistoryRepository`), splitter walk-forward estrictamente temporal, y
-métricas de calibración puras (Brier, log loss, accuracy, curva de
-calibración). Precedido de una revisión contractual completa (10
-secciones) y un Design Proposal formal, ambos con múltiples ambigüedades
-señaladas explícitamente y resueltas una por una por el usuario antes de
-escribir código (ver §12/§13 abajo).
+**Paso 10 (`src/evaluation/reports.py`) — COMPLETO, AUDITADO Y
+COMMITTEADO.** Implementa la comparación Baseline 0 (mercado) vs Baseline
+1 (regresión logística, Paso 5a/5b) vs Baseline 2 (Elo, Paso 6) según
+`PLAN_PHASE2.md` §3/§12, reutilizando `src/backtesting/` (Paso 9) sin
+modificarlo, más segmentación por EDGE/confianza/liquidez. Precedido de
+una revisión contractual completa, seis ambigüedades (A-F) resueltas una
+por una, un Design Proposal formal aprobado, y una auditoría técnica final
+explícita con ocho verificaciones puntuales (ningún módulo cerrado
+modificado, cero duplicación de métricas, cero leakage estructural, mismo
+universo de eventos, Baseline 0 sin EDGE, 435 tests desde estado limpio,
+diff acotado, veredicto de autorización de producción) — ver §11/§12/§13
+abajo.
 
-Con este cierre: **Pasos 0, 1, 2, 3, 4, 5a, 5b, 6, 7, 8 y 9 están todos
-completos.** El siguiente pendiente en el orden oficial es el **Paso 10**
-(`src/evaluation/reports.py`).
+Con este cierre: **Pasos 0, 1, 2, 3, 4, 5a, 5b, 6, 7, 8, 9 y 10 están
+todos completos.** El siguiente pendiente en el orden oficial es el
+**Paso 11** (tenis: `src/features/tennis_features.py` +
+`src/models/tennis_baseline.py`).
 
 ## 5. Todos los commits (orden cronológico, `git log --reverse`)
 
@@ -76,7 +82,9 @@ completos.** El siguiente pendiente en el orden oficial es el **Paso 10**
 | 16 | `7ac93e1cf12c53769fcc0eb0df294ac4099ac417` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 6 (MLB Elo baseline) | phase-2-dev |
 | 17 | `038bff0fae343d230cef778b263b4b2f4e794b14` | 2026-07-26 | Phase 2 Step 8: EDGE_YES/EDGE_NO + Expected Value (bruto) | phase-2-dev |
 | 18 | `945170bec1bfb4747bad0268a1015dfcbf10a350` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 8 (EDGE/EV) | phase-2-dev |
-| 19 | `f15fc592860d3d047a361958b2044a32c7c80b69` | 2026-07-26 | Phase 2 Step 9: backtesting infrastructure (dataset + walk-forward splitter + metrics) | phase-2-dev (HEAD actual) |
+| 19 | `f15fc592860d3d047a361958b2044a32c7c80b69` | 2026-07-26 | Phase 2 Step 9: backtesting infrastructure (dataset + walk-forward splitter + metrics) | phase-2-dev |
+| 20 | `72e5f19ddb717b8689bf3fa51ae3d5c033d8567a` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 9 (backtesting infrastructure) | phase-2-dev |
+| 21 | `cfb8dc09562f198c36cd0c6528be440b79cb15e8` | 2026-07-26 | Phase 2 Step 10: baseline comparison reports (Baseline 0 vs 1 vs 2) | phase-2-dev (HEAD actual) |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
@@ -96,127 +104,127 @@ src/storage/                                            [Fase 1 + Fase 2]  Sin c
 src/pipelines/                                          [Fase 1 + wiring Fase 2]  Sin cambios desde el Paso 5b
 src/connectors/mlb.py                                   Sin cambios desde el Paso 5b (Bloque 1)
 
-src/backtesting/                                        [Fase 2 -- Paso 9 COMPLETO]
+src/backtesting/                                        [Fase 2 -- Paso 9 COMPLETO]  Sin cambios en esta actualización
+  __init__.py / dataset.py / splitter.py / metrics.py    build_backtest_dataset,
+                              walk_forward_splits (HistoryRepository TEMPORAL por
+                              fold), brier_score/log_loss_metric/accuracy_metric/
+                              calibration_curve (n_bins=10)
+
+src/models/mlb_baseline.py                              [Fase 2 -- extensión aditiva del Paso 9]  Sin cambios en esta actualización
+  predict_mlb_baseline_from_features  wrapper delgado sobre el mismo núcleo de
+                              inferencia que predict_mlb_baseline
+                              (_predict_proba_from_vectorized_features)
+
+src/evaluation/                                         [Fase 2 -- Paso 10 COMPLETO]
   __init__.py                CONSTRUIDO
-  dataset.py                  CONSTRUIDO -- build_backtest_dataset(history_repository) -> BacktestDataset
-                              (une event_snapshots+feature_snapshots+event_results,
-                              reconstruye NormalizedRecord histórico, recalcula
-                              P_market_YES/NO + quality_score sobre ese registro)
-  splitter.py                 CONSTRUIDO -- walk_forward_splits(...) -> Iterator[Fold]
-                              (HistoryRepository TEMPORAL aislado por fold, cero
-                              leakage por construcción, agnóstico al modelo)
-  metrics.py                   CONSTRUIDO -- brier_score/log_loss_metric/
-                              accuracy_metric/calibration_curve (n_bins=10)
-
-src/models/mlb_baseline.py                              [Fase 2 -- extensión aditiva del Paso 9]
-  predict_mlb_baseline_from_features  NUEVO -- wrapper delgado sobre el mismo
-                              núcleo de inferencia que predict_mlb_baseline
-                              (_predict_proba_from_vectorized_features, también
-                              nuevo), para aplicar el modelo a features YA
-                              materializadas (histórico), sin recalcularlas en vivo
-
-src/evaluation/                                         [Fase 2 -- PENDIENTE, siguiente paso]
-  reports.py                 NO EXISTE
+  reports.py                  CONSTRUIDO -- compare_baselines(history_repository,
+                              dataset, fit_fn_1, predict_fn_1, fit_fn_2,
+                              predict_fn_2, min_train_size=300, test_block_size=30)
+                              -> BaselineComparisonReport. Un único recorrido de
+                              walk_forward_splits (Paso 9) alimenta Baseline 0
+                              (mercado, directo de BacktestRow.p_market_yes),
+                              Baseline 1 (logreg) y Baseline 2 (Elo) sobre el
+                              MISMO universo de test_rows. segment_by_edge (solo
+                              baseline_1/baseline_2, reutiliza compute_edge_yes de
+                              Paso 8 vía un PModelOutput mínimo) / segment_by_confidence
+                              / segment_by_liquidity (ancho fijo, mismo esquema que
+                              calibration_curve). Agnóstico al modelo -- no importa
+                              mlb_baseline.py ni mlb_elo.py. Solo en memoria, sin
+                              persistencia ni dependencias de visualización.
 
 scripts/                                                Sin cambios desde el Paso 6
 ```
 
 Módulos ya cerrados **sin ningún cambio** en esta actualización,
-verificado explícitamente antes del commit: `src/pricing/market_pricing.py`,
+verificado explícitamente antes del commit (incluida una verificación
+`git diff --name-only` dirigida a cada uno): `src/pricing/market_pricing.py`,
 `src/models/base.py`, `src/models/schemas.py`, `src/models/mlb_baseline.py`,
 `src/models/mlb_elo.py`, `src/models/registry.py`,
-`src/uncertainty/quality_score.py`, y todos los módulos de Fase 1.
-`edge.py`/`expected_value.py` reutilizan `market_price_yes`/
-`market_price_no` (Paso 3) y `PModelOutput` (Paso 5a) **sin modificarlos**.
+`src/uncertainty/quality_score.py`, `src/backtesting/*`, `src/signals/*`, y
+todos los módulos de Fase 1. **Primera vez desde el Paso 5b que un paso no
+requiere ninguna extensión aditiva a un módulo cerrado** -- `reports.py`
+únicamente invoca lo ya construido.
 
 ## 7. Árbol de directorios (delta desde la última actualización)
 
 Nuevo en esta actualización:
 ```
-src/backtesting/__init__.py               [NUEVO]
-src/backtesting/dataset.py                [NUEVO]
-src/backtesting/splitter.py               [NUEVO]
-src/backtesting/metrics.py                [NUEVO]
-tests/unit/test_backtesting_dataset.py    [NUEVO]
-tests/unit/test_backtesting_splitter.py   [NUEVO]
-tests/unit/test_backtesting_metrics.py    [NUEVO]
+src/evaluation/__init__.py                [NUEVO]
+src/evaluation/reports.py                 [NUEVO]
+tests/unit/test_evaluation_reports.py     [NUEVO]
 ```
 Modificado:
-- `src/models/mlb_baseline.py` — extensión aditiva pre-autorizada explícitamente (ver §11): `_predict_proba_from_vectorized_features` (núcleo de inferencia extraído) + `predict_mlb_baseline_from_features` (wrapper nuevo). `predict_mlb_baseline` cambia internamente para llamar al núcleo compartido, comportamiento observable idéntico (verificado por test de equivalencia exacta).
-- `tests/unit/test_mlb_baseline.py` (+3 tests para la extensión anterior).
 - `tests/integration/test_e2e_real.py` (+1 test real).
 
-## 8. Responsabilidad de `src/backtesting/`
+Ningún módulo cerrado modificado — primera vez desde el Paso 5b (ver §6).
 
-**`dataset.py`** — `build_backtest_dataset(history_repository) -> BacktestDataset`. Une `event_snapshots`+`feature_snapshots`+`event_results` (enlace exacto vía `feature_snapshots.event_snapshot_id`, no una heurística de "snapshot más cercano"). Por cada fila válida, reconstruye el `NormalizedRecord` histórico COMPLETO desde `normalized_record_json` (verificado byte a byte por test) y recalcula sobre ese registro, con las funciones ya cerradas y SIN modificarlas, `P_market_YES`/`P_market_NO` (Paso 3) y `compute_quality_score` (Paso 7) — usando el instante histórico (`captured_at`) como `now`, nunca el reloj real. Mismo corte temporal no negociable que en 5b/6 (`computed_at < recorded_at` del resultado). Cinco categorías de exclusión, cada una con warning nombrado (versión de features incorrecta, sin snapshot correspondiente, sin resultado, leakage temporal, resultado no binario).
+## 8. Responsabilidad de `src/evaluation/reports.py`
 
-**`splitter.py`** — `walk_forward_splits(history_repository, dataset, min_train_size, test_block_size) -> Iterator[Fold]`. Walk-forward estrictamente temporal (ventana de train expansiva, ventana de test = siguiente bloque), agnóstico al modelo (no importa `mlb_baseline` ni `mlb_elo`). **Invariante central, confirmado explícitamente por el usuario antes de implementar: cero leakage por construcción.** Cada fold recibe un `HistoryRepository` TEMPORAL y aislado, poblado únicamente con filas cuyo timestamp es ≤ el corte del fold — el no-leakage no depende de la disciplina de la función de entrenamiento que se invoque después, sino de que los datos futuros físicamente no existen en el objeto que se le entrega. El repositorio temporal se elimina automáticamente al avanzar al siguiente fold (contrato de uso documentado explícitamente en el docstring: debe consumirse dentro de la misma iteración del `for`). Nunca se parte un grupo de filas con `data_cutoff_timestamp` idéntico entre train y test. Sin volumen suficiente → iterador vacío, nunca un error.
+**`compare_baselines(history_repository, dataset, fit_fn_baseline_1, predict_fn_baseline_1, fit_fn_baseline_2, predict_fn_baseline_2, min_train_size=300, test_block_size=30) -> BaselineComparisonReport`** — orquesta la comparación Baseline 0 (mercado) vs Baseline 1 (logreg, Paso 5a/5b) vs Baseline 2 (Elo, Paso 6). **Invariante central: los tres se evalúan sobre el MISMO universo de filas** — un único recorrido de `walk_forward_splits` (Paso 9, sin modificar) alimenta, dentro de cada fold y antes de avanzar al siguiente, a los tres baselines: Baseline 0 se lee directamente de `fold.test_rows.p_market_yes` (no se reentrena nada); Baseline 1/2 se entrenan sobre el mismo `fold.train_repository` vía `fit_fn`/`predict_fn` provistos por el llamador. `min_train_size`/`test_block_size` son parámetros configurables con defaults documentados (300 = `DEFAULT_MIN_TRAINING_SAMPLES` de `mlb_baseline.py`, duplicado deliberadamente sin importar el módulo, para mantener `reports.py` agnóstico; 30 = heurística nueva de ingeniería, no calibrada, ~una semana de calendario MLB).
 
-**`metrics.py`** — `brier_score`/`log_loss_metric`/`accuracy_metric`/`calibration_curve` (`n_bins=10`, aprobado explícitamente). Funciones puras `(y_true, y_pred) -> métrica`, sin conocer `HistoryRepository` ni ningún modelo concreto. `None` cuando no hay muestras, nunca un valor fabricado. `log_loss_metric` usa `labels=[0,1]` explícito (mismo patrón de Paso 5b) — con eso, calcula igual aunque el fold contenga una sola clase (verificado que NO es `None` en ese caso, corrigiendo una expectativa inicial incorrecta durante el desarrollo de los tests).
+`segment_by_edge`/`segment_by_confidence`/`segment_by_liquidity` — desagregación por bucket de ancho fijo (mismo esquema que `calibration_curve`, clamping a los extremos). `segment_by_edge` reutiliza `compute_edge_yes` (Paso 8) **tal cual**, envolviendo la predicción en un `PModelOutput` mínimo — nunca reimplementa `p_model - p_market`. **Baseline 0 está estructuralmente ausente de `edge_segments`** (su EDGE es 0 por definición) — no una llave vacía, la llave simplemente no existe en el diccionario.
 
-**Extensión en `src/models/mlb_baseline.py`** — `predict_mlb_baseline_from_features(features, loaded_artifact) -> Optional[float]`: wrapper delgado, invocado por el backtesting del baseline logreg para aplicar el modelo a features YA materializadas (`feature_snapshots`), ya que `predict_mlb_baseline` original exige `MlbFeatureInputs` en vivo (imposible para un evento pasado). Comparte, sin excepción, el mismo núcleo `_predict_proba_from_vectorized_features` que `predict_mlb_baseline` — una sola implementación, nunca duplicada, verificado por test de equivalencia exacta. `predict_mlb_elo` (Paso 6) no necesitó ninguna extensión: ya opera solo sobre `record`+artefacto, sin fetch en vivo.
-
-**Explícitamente diferido de esta iteración (aprobado así por el usuario)**: ROI simulado y CLV (ni siquiera un stub — `event_snapshots`/`event_results` reales en 0 filas hoy no ejercitarían ese código); reentrenamiento walk-forward real de un modelo concreto y comparación entre modelos (queda para quien invoque `walk_forward_splits`, hoy solo los tests — el Paso 10 lo hará en serio); persistencia en disco de resultados de backtest (todo en memoria, dataclasses).
+Agnóstico al modelo: no importa `mlb_baseline.py` ni `mlb_elo.py`; el llamador (tests hoy) adapta `predict_mlb_baseline_from_features`/`predict_mlb_elo` a la firma genérica `(BacktestRow, artefacto) -> Optional[float]`. Nota de contrato descubierta durante la implementación: `train_mlb_baseline_model` devuelve solo metadata (`MlbTrainedArtifact`), no el modelo cargado — el adaptador debe recargar vía `load_latest_mlb_artifact` (documentado explícitamente en el docstring de `compare_baselines` para que no se repita el tropiezo). Solo en memoria (dataclasses), sin persistencia, sin dependencias de visualización nuevas.
 
 ## 9. Invariantes del sistema — se mantienen todos los de la versión anterior, más:
 
-- **Cero leakage por construcción** en el walk-forward: cada fold recibe un `HistoryRepository` físicamente incapaz de contener filas futuras — verificado por test dedicado (`test_train_repository_never_contains_future_rows`), no solo documentado.
-- `dataset.py`/`splitter.py`/`metrics.py` son agnósticos al modelo — no importan `mlb_baseline` ni `mlb_elo`.
-- `predict_mlb_baseline_from_features` y `predict_mlb_baseline` comparten una única implementación de inferencia — nunca dos caminos que puedan divergir.
-- Ningún grupo de filas con `data_cutoff_timestamp` idéntico se parte entre train y test de un mismo fold.
+- **Mismo universo de filas** para los tres baselines — un único recorrido de `walk_forward_splits`, nunca tres pasadas independientes.
+- **Baseline 0 nunca usa EDGE** — verificado no solo por test sino por inspección directa de código: `compute_edge_yes` se invoca únicamente dentro de `segment_by_edge`, y `segment_by_edge` se invoca únicamente con los pares de Baseline 1/2.
+- **`history_repository` (crudo, sin acotar) nunca llega a una función de entrenamiento** — se usa únicamente como argumento de `walk_forward_splits`; `fit_fn_baseline_1`/`fit_fn_baseline_2` reciben siempre `fold.train_repository` (verificado por inspección de código en la auditoría final, no solo por test).
+- Cero duplicación de métricas — las cuatro funciones de `src.backtesting.metrics` se importan y se usan tal cual, ninguna fórmula reimplementada dentro de `reports.py`.
 
 ## 10. Reglas que nunca deben romperse
 
-Sin cambios respecto a la versión anterior. Confirmado de nuevo: ninguna dependencia nueva añadida; único módulo cerrado modificado es `mlb_baseline.py`, y solo de forma aditiva, explícitamente flageada y autorizada antes de tocarlo (ver §11).
+Sin cambios respecto a la versión anterior. Confirmado de nuevo: ninguna dependencia nueva añadida; **ningún módulo cerrado modificado en absoluto** en este paso (a diferencia de todos los pasos desde el 5b, que requirieron al menos una extensión aditiva puntual).
 
-## 11. Decisiones arquitectónicas tomadas durante el Paso 9
+## 11. Decisiones arquitectónicas tomadas durante el Paso 10
 
-- **Mecanismo de cero-leakage vía `HistoryRepository` temporal por fold** (en vez de parametrizar un cutoff dentro de `build_mlb_training_dataset`/`build_mlb_elo_game_sequence`, que hubiera exigido modificar esos módulos cerrados) — la garantía de no-leakage se vuelve estructural (los datos futuros no existen en el objeto), no una promesa de disciplina de código, y permite reutilizar `train_mlb_baseline_model`/`train_mlb_elo_model` **sin modificarlos en absoluto**.
-- **Extensión aditiva a `mlb_baseline.py` explícitamente autorizada**, con una condición estricta del usuario: `predict_mlb_baseline_from_features` debe ser exclusivamente un wrapper delgado sobre una única implementación compartida (`_predict_proba_from_vectorized_features`), nunca una lógica duplicada ni un camino alternativo — implementado exactamente así y verificado por test de equivalencia bit a bit con `predict_mlb_baseline`.
-- **Interfaz genérica agnóstica al modelo** (Ambigüedad B, aprobada): `dataset.py`/`splitter.py`/`metrics.py` no acoplan a ningún algoritmo concreto; quien invoca `walk_forward_splits` decide qué función de entrenamiento/inferencia usar por fold.
-- **ROI/CLV diferidos por completo** (Ambigüedad C, aprobada) — ni siquiera un stub `None`-gated, a diferencia de `EV_neto` (Paso 8), porque no hay ningún dato real hoy que ejercite ese código.
-- **`min_train_size`/`test_block_size` sin default embebido** (Ambigüedad D, aprobada) — el llamador debe pasarlos explícitamente; para el baseline logreg reutilizar `DEFAULT_MIN_TRAINING_SAMPLES=300`, para Elo `DEFAULT_MIN_GAMES=50` (mismos umbrales ya aprobados en 5b/6, ningún número nuevo inventado).
-- **Solo en memoria** (Ambigüedad E, aprobada) — sin persistencia de resultados de backtest; queda para el Paso 10.
-- **`n_bins=10`** para `calibration_curve`, aprobado explícitamente.
+- **Un único recorrido compartido de `walk_forward_splits`** en vez de tres pasadas independientes (una por baseline) — es la única forma de garantizar "mismo universo de filas" sin depender de que folds generados por separado coincidan por casualidad.
+- **`min_train_size`/`test_block_size` como parámetros configurables CON default documentado** (300/30) — ajuste explícito del usuario sobre el Design Proposal original (que proponía dejarlos sin ningún default, mismo estilo que `walk_forward_splits`); aquí sí se fija un default para que `compare_baselines` sea invocable sin fricción, pero siguen siendo parámetros reales, no valores ocultos (verificado por test de configurabilidad).
+- **EDGE de evaluación reutiliza `compute_edge_yes` (Paso 8) vía un `PModelOutput` mínimo construido ad-hoc**, en vez de recalcular la fórmula inline — evita cualquier riesgo de divergencia entre la fórmula de señales real y la de evaluación.
+- **Baseline 0 excluido estructuralmente de `edge_segments`** (la llave no existe, no es un valor `None`/vacío) — decisión explícita (Ambigüedad B del Design Proposal) porque su EDGE es 0 por definición.
+- **Solo EDGE_YES segmentado, no EDGE_NO** — alcance acotado a propósito, documentado.
+- **Sin persistencia, sin visualización** — mismo patrón que Paso 9.
 
 ## 12. Ambigüedades encontradas y resueltas (acumulado completo)
 
-Paso 9 tuvo la revisión de ambigüedades más extensa hasta ahora — cinco preguntas explícitas (A-E), todas resueltas por el usuario antes de redactar el Design Proposal formal:
-- **Ambigüedad A** (cómo obtener `P_model` histórico sin leakage): resuelta como A1 — reentrenar por fold, con prioridad absoluta sobre cualquier otra consideración ("bajo ninguna circunstancia un modelo puede ver datos futuros").
-- **Ambigüedad B** (alcance de modelos): interfaz genérica.
-- **Ambigüedad C** (ROI/CLV): diferido por completo.
-- **Ambigüedad D** (tamaño de fold): reutilizar umbrales ya aprobados, sin default embebido en el módulo.
-- **Ambigüedad E** (persistencia): solo en memoria.
-Una sexta decisión de implementación (no ambigüedad de negocio, sino de diseño técnico) se resolvió durante el Design Proposal: el mecanismo exacto para garantizar A1 sin modificar `train_mlb_baseline_model`/`train_mlb_elo_model` (repositorio temporal aislado por fold, §11).
+Paso 10 tuvo seis ambigüedades explícitas (A-F), todas resueltas por el usuario antes del Design Proposal formal:
+- **Ambigüedad A** (¿mismo universo de filas?): A1 — `min_train_size`/`test_block_size` comunes a los tres baselines.
+- **Ambigüedad B** (EDGE de Baseline 0): excluir de la segmentación, documentar que es 0 por definición.
+- **Ambigüedad C** (buckets de segmentación): reutilizar el esquema propuesto (ancho fijo, mismo estilo que `calibration_curve`).
+- **Ambigüedad D** (persistencia): solo memoria, sin artefactos en disco.
+- **Ambigüedad E** (visualización): solo buckets numéricos, sin dependencias gráficas.
+- **Ambigüedad F** (volumen real ≈0): comportamiento honesto, reporte válido sin fabricar ni fallar.
+Un ajuste adicional sobre el Design Proposal aprobado: mantener `min_train_size`/`test_block_size` como parámetros configurables pero **con** default documentado (300/30), a diferencia del enfoque sin-default de `walk_forward_splits`.
 
-## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 46)
+## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 52)
 
-47. Instrucción de realizar primero la revisión contractual completa del Paso 9 (10 secciones específicas) sin escribir código, siguiendo el mismo flujo institucional.
-48. Aprobación de Ambigüedad A = A1 con énfasis explícito: "El principio de no leakage tiene prioridad absoluta."
-49. Resolución de Ambigüedades B/C/D/E, las cuatro con la opción recomendada.
-50. Aprobación del Design Proposal completo, con una condición estricta sobre `predict_mlb_baseline_from_features` (wrapper delgado, una sola implementación, sin camino alternativo) y `n_bins=10` confirmado.
-51. Autorización explícita para implementar el Paso 9 completo, manteniendo como invariantes: cero leakage por construcción, `HistoryRepository` temporal por fold, una única implementación de inferencia, y el wrapper delgado exacto — con instrucción de ejecutar la batería completa + regresión y no commitear hasta revisar la auditoría.
-52. Aprobación de la auditoría técnica del Paso 9 + autorización de commit (`f15fc59`), con instrucción explícita de: regresión final, confirmación exacta de la salida de pytest, commit, actualización de `CONTINUITY.md`, y entrega del hash con el repositorio limpio.
+53. Instrucción de iniciar la revisión contractual del Paso 10 con la misma metodología institucional (contractual → ambigüedades → Design Proposal → aprobación → implementación mínima → tests → auditoría → commit).
+54. Resolución explícita de las Ambigüedades A-F, todas con la opción recomendada.
+55. Aprobación del Design Proposal formal, con un único ajuste: `min_train_size`/`test_block_size` configurables con los defaults propuestos documentados (no sin default).
+56. Autorización para implementar el Paso 10 completo + ejecutar suite completa + auditoría técnica + presentar reporte antes del commit.
+57. Solicitud de una auditoría final adicional, con ocho verificaciones puntuales explícitas (módulos cerrados, duplicación de métricas, leakage, mismo universo, Baseline 0 sin EDGE, 435 tests desde estado limpio, diff acotado, veredicto de autorización de producción) — todas confirmadas por inspección directa de código, no solo por los tests ya escritos.
+58. Aprobación de la auditoría final + autorización de commit (`cfb8dc0`), con instrucción explícita de: verificación post-commit, actualización de `CONTINUITY.md`, confirmación de hashes/número de tests, y **no iniciar el Paso 11** hasta nueva autorización — solo presentar su revisión contractual.
 
 ## 14. Estado exacto de todos los tests (verificado en el cierre de esta actualización)
 
 ```
 .venv/bin/python -m pytest tests/ -q
-423 passed, 1 warning in ~25s
+435 passed, 1 warning in ~28-30s
 ```
-El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente. 35 tests nuevos en esta actualización (388 → 423): 3 en `test_mlb_baseline.py` (extensión `predict_mlb_baseline_from_features`) + 11 en `test_backtesting_dataset.py` + 6 en `test_backtesting_splitter.py` + 14 en `test_backtesting_metrics.py` + 1 de integración real (`test_backtest_dataset_builds_honestly_on_real_mlb_pipeline_output_without_results`).
+El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente. 12 tests nuevos en esta actualización (423 → 435): 11 en `test_evaluation_reports.py` (comparación end-to-end, exclusión de Baseline 0 de `edge_segments`, segmentación exacta por bucket, configurabilidad de `min_train_size`/`test_block_size`, dataset vacío honesto) + 1 de integración real (`test_compare_baselines_builds_honestly_on_real_mlb_pipeline_output_without_results`). Verificado además desde un estado limpio (`__pycache__` purgado antes de correr, en la auditoría final).
 
 ## 15. Número total de tests existentes
 
-**423** (verificado con `pytest --collect-only` y con la salida final de pytest). Cero tests de pasos anteriores rotos o reducidos.
+**435** (verificado con `pytest --collect-only` y con la salida final de pytest). Cero tests de pasos anteriores rotos o reducidos.
 
 ## 16. Estado de la regresión completa
 
-Verde, sin excepciones, verificado antes del commit, y de nuevo post-commit (`f15fc59`). Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
+Verde, sin excepciones, verificado antes del commit, en la auditoría final (con caché de bytecode purgada), y de nuevo post-commit (`cfb8dc0`). Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
 
 ## 17. Dependencias actuales
 
-Sin cambios — ninguna dependencia nueva en el Paso 9:
+Sin cambios — ninguna dependencia nueva en el Paso 10:
 ```
 requests>=2.32,<3
 pydantic>=2.11,<3
@@ -242,9 +250,9 @@ Sin cambios desde el cierre del Paso 3 (commit `32677d6`). Sigue terminando en *
 | 6 | Elo simple MLB (Baseline 2) | ✅ COMPLETO |
 | 7 | `src/uncertainty/quality_score.py` | ✅ COMPLETO |
 | 8 | `src/signals/edge.py` + `expected_value.py` | ✅ COMPLETO |
-| 9 | `src/backtesting/` | ✅ **COMPLETO** (este documento) |
-| 10 | `src/evaluation/reports.py` | Pendiente — **siguiente en orden oficial** |
-| 11 | Tenis (features + baseline) | Pendiente |
+| 9 | `src/backtesting/` | ✅ COMPLETO |
+| 10 | `src/evaluation/reports.py` | ✅ **COMPLETO** (este documento) |
+| 11 | Tenis (`src/features/tennis_features.py` + `src/models/tennis_baseline.py`) | Pendiente — **siguiente en orden oficial; solo revisión contractual autorizada, NO implementación** |
 | 12 | `src/signals/signal_schema.py` | Pendiente |
 
 ## 21. Estado de la automatización (LaunchAgent) — sin cambios
@@ -262,22 +270,24 @@ feature_snapshots   -> 0
 event_results       -> 0
 normalized_records  -> 94
 ```
-Sin cambios desde la última actualización (mismo `mtime`, 24 jul 23:58) — el Paso 9 no toca `data/engine.db` en absoluto: `walk_forward_splits` opera exclusivamente sobre repositorios temporales (`tempfile`), nunca sobre la base de producción. Con `feature_snapshots`/`event_results` reales en 0 filas, `build_backtest_dataset(history_repository)` contra la base real produciría hoy un `BacktestDataset` vacío (0 filas) — honesto, verificado por el test de integración real de esta iteración.
+Sin cambios desde la última actualización (mismo `mtime`, 24 jul 23:58) — el Paso 10 no toca `data/engine.db` en absoluto: `compare_baselines` opera exclusivamente a través de `walk_forward_splits` (repositorios temporales) y directorios temporales para artefactos de modelo (`tempfile.TemporaryDirectory`), nunca sobre la base de producción ni `data/models/` real. Con `feature_snapshots`/`event_results` reales en 0 filas, `compare_baselines` contra la base real produce hoy un `BaselineComparisonReport` con `n_predictions=0` en los tres baselines — honesto, verificado por el test de integración real de esta iteración.
 
 ## 23. Pendientes técnicos (deuda documentada, acumulado)
 
 Todos los de la versión anterior de este documento, más:
-- ROI simulado y CLV completamente sin implementar (ni stub) — pendiente de que exista historial de precios real suficiente (§10 del plan).
-- El walk-forward reentrena un modelo completo (incluyendo, para el baseline logreg, un `fit` de scikit-learn) por cada fold vía un `HistoryRepository` temporal repoblado desde cero — funcionalmente correcto y verificado, pero no optimizado para volumen alto; aceptable dado que el volumen real hoy es ≈0 y no es un requisito de esta iteración.
-- Mapeo participante↔YES de un contrato de Kalshi específico sigue sin resolver (Ambigüedad #2/Paso 4, Ambigüedad C/Paso 5a-6, señalada de nuevo en Paso 8) — afecta la interpretación real de cualquier `P_model`/`EDGE`/backtest contra mercados reales.
+- `test_block_size=30` es una heurística de ingeniería nueva, no calibrada (igual que `_MARKET_LIQUIDITY_TARGET` en `quality_score.py`) — revisar cuando haya volumen real.
+- Segmentación de EDGE limitada a `EDGE_YES` (no `EDGE_NO`) — alcance acotado a propósito en esta iteración.
+- `compare_baselines` reentrena un modelo completo por fold para CADA uno de los dos baselines entrenados (el doble de trabajo que el walk-forward de Paso 9 por sí solo) — funcionalmente correcto, no optimizado para volumen alto (misma deuda ya documentada en Paso 9, ahora duplicada).
+- Mapeo participante↔YES de un contrato de Kalshi específico sigue sin resolver (Ambigüedad #2/Paso 4) — afecta la interpretación real de cualquier comparación de baselines contra mercados reales.
 
 ## 24. Todo lo que un chat nuevo debe saber antes de escribir una sola línea de código
 
-- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `f15fc592860d3d047a361958b2044a32c7c80b69` o posterior) y `git status --short`.
-- **Pasos 0-9 están todos completos.** El siguiente pendiente en el orden oficial del plan es el **Paso 10** (`src/evaluation/reports.py` — comparación Baseline 0 vs 1 vs 2).
-- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real -- `build_backtest_dataset` contra la base real produce hoy un dataset vacío, honesto (§22).
+- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `cfb8dc09562f198c36cd0c6528be440b79cb15e8` o posterior) y `git status --short`.
+- **Pasos 0-10 están todos completos.** El siguiente pendiente en el orden oficial del plan es el **Paso 11** (tenis: `src/features/tennis_features.py` + `src/models/tennis_baseline.py`) — **el usuario autorizó únicamente su revisión contractual, NO su implementación.** No escribas código de Paso 11 sin una autorización explícita nueva y separada.
+- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real -- `compare_baselines` contra la base real produce hoy un reporte honesto con `n_predictions=0` en los tres baselines (§22).
 - El LaunchAgent está DESCARGADO a propósito y debe permanecer así hasta finalizar la Fase 2 completa -- no lo reactives sin autorización explícita nueva.
-- `src/backtesting/` no toca ningún módulo de Pasos 0-8 -- solo los importa. La única modificación a un módulo cerrado en todo Fase 2 hasta ahora es la extensión aditiva de `mlb_baseline.py` (Paso 9, §11), explícitamente autorizada.
-- **Contrato de uso importante de `walk_forward_splits`**: el `HistoryRepository` de un fold debe entrenarse/consultarse dentro de la misma iteración del `for`, antes de pedir el siguiente fold -- el directorio temporal se borra al avanzar el generador (ver docstring de `src/backtesting/splitter.py`).
-- Patrón de trabajo ya validado en cinco pasos consecutivos (5b, 7, 6, 8, 9): revisión contractual → Design Proposal si hay huecos de especificación → aprobación explícita (ambigüedad por ambigüedad si hace falta) → implementación → tests → auditoría → commit separado de código → commit separado de `CONTINUITY.md`. El Paso 10 (`evaluation/reports.py`, comparación de modelos) probablemente también tenga huecos de especificación -- no saltarse el Design Proposal ahí tampoco.
+- **Ningún módulo cerrado fue modificado en el Paso 10** — primera vez desde el Paso 5b. `src/evaluation/reports.py` solo invoca `src/backtesting/*`, `src/models/mlb_baseline.py`/`mlb_elo.py`, `src/signals/edge.py`, `src/uncertainty/quality_score.py`.
+- **Contrato de uso importante heredado de `walk_forward_splits`** (Paso 9, sin cambios): el `HistoryRepository` de un fold debe consultarse dentro de la misma iteración del `for`, antes de pedir el siguiente fold.
+- **Nota de contrato de `compare_baselines`**: el `fit_fn` del baseline logreg debe recargar el artefacto vía `load_latest_mlb_artifact` antes de devolverlo (a diferencia de Elo, cuyo artefacto es directamente utilizable) — ver docstring de `compare_baselines`.
+- Patrón de trabajo ya validado en seis pasos consecutivos (5b, 7, 6, 8, 9, 10): revisión contractual → Design Proposal si hay huecos de especificación → aprobación explícita (ambigüedad por ambigüedad) → implementación → tests → auditoría (incluyendo, en el Paso 10, una auditoría final adicional con verificaciones puntuales por inspección directa de código) → commit separado de código → commit separado de `CONTINUITY.md`. El Paso 11 (tenis) probablemente tenga huecos de especificación aún mayores que los anteriores, dado el bloqueo de SofaScore y la falta de histórico — no saltarse la revisión contractual ni el Design Proposal ahí tampoco.
 - Para correr tests: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
