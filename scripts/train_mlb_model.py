@@ -21,7 +21,16 @@ Comportamiento honesto por diseño: si el histórico etiquetado no alcanza
 
 Uso:
     source .venv/bin/activate
-    python scripts/train_mlb_model.py [--min-samples 300] [--validation-fraction 0.2]
+    python scripts/train_mlb_model.py [--min-samples 300] [--validation-fraction 0.2] [--models-dir data/models]
+
+`--models-dir` (opcional, por defecto `DATA_MODELS_DIR` de producción --
+mismo comportamiento de siempre para una corrida manual real): existe
+para que un test que ejercite este script pueda aislar dónde se escribe
+el artefacto (p.ej. `tmp_path`), sin necesitar tocar `HistoryRepository`
+por separado. Verificación aislada, no lógica de negocio nueva -- ver
+auditoría de la Validación Institucional de Fase 2 (hallazgo: un test de
+este script escribía artefactos sintéticos reales en `data/models/` por
+no tener forma de aislar este directorio).
 """
 from __future__ import annotations
 
@@ -31,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from config.settings import DATA_MODELS_DIR
 from src.models.base import ModelStatus
 from src.models.mlb_baseline import DEFAULT_MIN_TRAINING_SAMPLES, DEFAULT_VALIDATION_FRACTION, train_mlb_baseline_model
 from src.storage.history_repository import HistoryRepository
@@ -40,6 +50,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--min-samples", type=int, default=DEFAULT_MIN_TRAINING_SAMPLES)
     parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
+    parser.add_argument("--models-dir", type=Path, default=DATA_MODELS_DIR)
     args = parser.parse_args()
 
     hist = HistoryRepository()
@@ -47,7 +58,7 @@ def main() -> int:
     print(f"Entrenando baseline MLB (min_samples={args.min_samples}, validation_fraction={args.validation_fraction})...")
 
     status, artifact, warnings = train_mlb_baseline_model(
-        hist, min_samples=args.min_samples, validation_fraction=args.validation_fraction
+        hist, models_dir=args.models_dir, min_samples=args.min_samples, validation_fraction=args.validation_fraction
     )
 
     print(f"\nmodel_status: {status.value}")
