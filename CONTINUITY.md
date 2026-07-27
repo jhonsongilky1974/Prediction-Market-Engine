@@ -7,10 +7,12 @@ Quality Score / Incertidumbre). Actualizado: 2026-07-26 (cierre del
 Paso 6 — Elo simple MLB / Baseline 2). Actualizado: 2026-07-26 (cierre del
 Paso 8 — EDGE_YES/EDGE_NO + Expected Value). Actualizado: 2026-07-26
 (cierre del Paso 9 — Backtesting: dataset + walk-forward splitter +
-metrics). **Actualizado de nuevo: 2026-07-26 (cierre del Paso 10 —
-Comparación de baselines: Baseline 0 vs 1 vs 2).** Propósito: única fuente
-de verdad para continuar este proyecto en una conversación nueva, sin
-acceso al historial de chat.
+metrics). Actualizado: 2026-07-26 (cierre del Paso 10 — Comparación de
+baselines: Baseline 0 vs 1 vs 2). **Actualizado de nuevo: 2026-07-26
+(cierre del Paso 11 — Baseline de tenis: features + infraestructura de
+modelo + sincronización de resultados).** Propósito: única fuente de
+verdad para continuar este proyecto en una conversación nueva, sin acceso
+al historial de chat.
 Todo lo aquí escrito fue verificado contra el estado real del repositorio
 en el momento de cada actualización (comandos git, lectura de archivos,
 ejecución de tests, inspección directa de `data/engine.db`) — no
@@ -33,32 +35,38 @@ sobre `main`.
 ## 3. Último commit completo de código (hash)
 
 ```
-cfb8dc09562f198c36cd0c6528be440b79cb15e8
+d6fc559a28f3244d7f4ca1b97d66275dc1d70c60
 ```
-Mensaje: `Phase 2 Step 10: baseline comparison reports (Baseline 0 vs 1 vs 2)`
+Mensaje: `Phase 2 Step 11: tennis baseline (features + model infra + results sync)`
 
 Este mismo archivo `CONTINUITY.md` se commitea por separado tras esta
 actualización (mismo patrón ya usado en los cierres anteriores).
 
 ## 4. Último paso completamente terminado
 
-**Paso 10 (`src/evaluation/reports.py`) — COMPLETO, AUDITADO Y
-COMMITTEADO.** Implementa la comparación Baseline 0 (mercado) vs Baseline
-1 (regresión logística, Paso 5a/5b) vs Baseline 2 (Elo, Paso 6) según
-`PLAN_PHASE2.md` §3/§12, reutilizando `src/backtesting/` (Paso 9) sin
-modificarlo, más segmentación por EDGE/confianza/liquidez. Precedido de
-una revisión contractual completa, seis ambigüedades (A-F) resueltas una
-por una, un Design Proposal formal aprobado, y una auditoría técnica final
-explícita con ocho verificaciones puntuales (ningún módulo cerrado
-modificado, cero duplicación de métricas, cero leakage estructural, mismo
-universo de eventos, Baseline 0 sin EDGE, 435 tests desde estado limpio,
-diff acotado, veredicto de autorización de producción) — ver §11/§12/§13
-abajo.
+**Paso 11 (tenis: `src/features/tennis_features.py` +
+`src/models/tennis_baseline.py` + sincronización de resultados) —
+COMPLETO, AUDITADO Y COMMITTEADO.** Implementa el baseline v1 de tenis
+(`rest_days` + `tournament_round_context`) según `PLAN_PHASE2.md` §6,
+siguiendo exactamente el mismo patrón estructural que MLB (Pasos 5a/5b/9),
+con dos hallazgos empíricos clave verificados contra la API real de ESPN
+ANTES de diseñar (no asumidos): `competition.round.displayName` existe y
+es estable (desbloquea `tournament_round_context` sin heurística de
+texto, prohibida por §16), y `competitor.id` es un identificador numérico
+estable entre partidos del mismo jugador (permite emparejar por identidad,
+no por nombre de texto, para `rest_days`). Precedido de una revisión
+contractual completa, seis ambigüedades (A-F) resueltas una por una con
+la metodología de 6 puntos pedida explícitamente por el usuario
+(recomendación/alternativas/pros-contras/riesgos/recomendación final/
+impacto futuro), y un Design Proposal formal aprobado. Única modificación
+a módulos ya cerrados: extensión aditiva de `tennis_normalizer.py`
+(captura de `espn_id`/`round`) y de `tennis_pipeline.py` (wiring de
+`feature_snapshots`, mismo patrón que el Bloque 2 del Paso 5b) — ambas
+explícitamente autorizadas, ningún otro módulo tocado.
 
-Con este cierre: **Pasos 0, 1, 2, 3, 4, 5a, 5b, 6, 7, 8, 9 y 10 están
+Con este cierre: **Pasos 0, 1, 2, 3, 4, 5a, 5b, 6, 7, 8, 9, 10 y 11 están
 todos completos.** El siguiente pendiente en el orden oficial es el
-**Paso 11** (tenis: `src/features/tennis_features.py` +
-`src/models/tennis_baseline.py`).
+**Paso 12** (`src/signals/signal_schema.py`).
 
 ## 5. Todos los commits (orden cronológico, `git log --reverse`)
 
@@ -84,13 +92,43 @@ todos completos.** El siguiente pendiente en el orden oficial es el
 | 18 | `945170bec1bfb4747bad0268a1015dfcbf10a350` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 8 (EDGE/EV) | phase-2-dev |
 | 19 | `f15fc592860d3d047a361958b2044a32c7c80b69` | 2026-07-26 | Phase 2 Step 9: backtesting infrastructure (dataset + walk-forward splitter + metrics) | phase-2-dev |
 | 20 | `72e5f19ddb717b8689bf3fa51ae3d5c033d8567a` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 9 (backtesting infrastructure) | phase-2-dev |
-| 21 | `cfb8dc09562f198c36cd0c6528be440b79cb15e8` | 2026-07-26 | Phase 2 Step 10: baseline comparison reports (Baseline 0 vs 1 vs 2) | phase-2-dev (HEAD actual) |
+| 21 | `cfb8dc09562f198c36cd0c6528be440b79cb15e8` | 2026-07-26 | Phase 2 Step 10: baseline comparison reports (Baseline 0 vs 1 vs 2) | phase-2-dev |
+| 22 | `99e902968b3ec194fb698a170686a6386495ea1e` | 2026-07-26 | Update CONTINUITY.md: close out Phase 2 Step 10 (baseline comparison reports) | phase-2-dev |
+| 23 | `d6fc559a28f3244d7f4ca1b97d66275dc1d70c60` | 2026-07-26 | Phase 2 Step 11: tennis baseline (features + model infra + results sync) | phase-2-dev (HEAD actual) |
 
 ## 6. Arquitectura actual (real, no solo planeada)
 
 ```
-src/features/                                          [Fase 2]  Sin cambios desde el Paso 5b
-src/models/                                             [Fase 2 -- 5a/5b/6 COMPLETOS]  Sin cambios en esta actualización
+src/features/mlb_features.py                            [Fase 2]  Sin cambios desde el Paso 5b
+src/features/tennis_features.py                        [Fase 2 -- Paso 11 COMPLETO]
+  compute_rest_days           start_time del partido menos start_time del último
+                              partido ANTERIOR conocido del mismo jugador (emparejado
+                              por espn_id), corte de leakage = data_cutoff_timestamp
+  compute_tournament_round_context   directo -- competition.round.displayName
+                              (verificado real contra la API de ESPN, nunca heurística
+                              de texto, prohibida por PLAN_PHASE2.md §16)
+  TennisFeatureInputs/compute_tennis_features/persist_tennis_feature_snapshot
+                              mismo patrón que mlb_features.py (Paso 2/5b)
+
+src/models/mlb_baseline.py, mlb_elo.py, registry.py     [Fase 2 -- 5a/5b/6/9 COMPLETOS]  Sin cambios en esta actualización
+src/models/tennis_baseline.py                           [Fase 2 -- Paso 11 COMPLETO]
+  build_tennis_training_dataset / split_dataset_temporally / train_tennis_baseline_model
+                              mismo patrón que mlb_baseline.py, DUPLICADO (no importado)
+                              para no acoplar tennis_baseline.py a un módulo cerrado
+  TennisTrainedArtifact + persistencia INDEPENDIENTE (JSON+joblib propios,
+                              prefijo de archivo "tennis_baseline_*" -- convive sin
+                              colisión con "mlb_baseline_*" en el mismo DATA_MODELS_DIR,
+                              nunca importa/modifica registry.py)
+  DEFAULT_MIN_TRAINING_SAMPLES_TENNIS=30  heurística de ingeniería PROVISIONAL
+                              (10-20 obs/dimensión aplicado a 2 features de tenis,
+                              no las ~26 de MLB), revisable con evidencia
+  predict_tennis_baseline / predict_tennis_baseline_from_features  núcleo de
+                              inferencia único compartido, mismo patrón que MLB (Paso 9)
+  Vectorización: rest_days.participant_{a,b} escalares directos;
+                              tournament_round_context codificado como bandera 0/1 por
+                              categoría DESCUBIERTA en el split de TRAIN (nunca una lista
+                              fija inventada, nunca de validación)
+
 src/pricing/                                            [Fase 2]  Sin cambios
 src/uncertainty/                                        [Fase 2 -- Paso 7 COMPLETO]  Sin cambios
 
@@ -101,8 +139,26 @@ src/signals/                                            [Fase 2 -- Paso 8 COMPLE
   signal_schema.py           NO EXISTE (Paso 12)
 
 src/storage/                                            [Fase 1 + Fase 2]  Sin cambios desde el Paso 6
-src/pipelines/                                          [Fase 1 + wiring Fase 2]  Sin cambios desde el Paso 5b
+src/pipelines/mlb_pipeline.py, mlb_results_sync.py      Sin cambios desde el Paso 5b
+src/pipelines/tennis_pipeline.py                        [Fase 2 -- extensión aditiva del Paso 11]
+  fetch_features=True (default) + _fetch_tennis_feature_inputs  -- wiring de
+                              feature_snapshots, mismo patrón que el Bloque 2 del
+                              Paso 5b para MLB. Consulta SOLO event_snapshots ya
+                              persistidos (nunca red), empareja por espn_id.
+src/pipelines/tennis_results_sync.py                    [Fase 2 -- Paso 11 NUEVO]
+  sync_tennis_event_results   mismo patrón que mlb_results_sync.py; reutiliza
+                              EspnTennisConnector.get_scoreboard ya existente
+                              (competitors[].winner, verificado real). NO distingue
+                              POSTPONED/CANCELLED (sin verificar cómo ESPN Tennis los
+                              representa) -- se cuentan honestamente como
+                              not_yet_decided, nunca fabricados.
+src/normalization/tennis_normalizer.py                  [Fase 2 -- extensión aditiva del Paso 11]
+  model_inputs.context gana participant_{a,b}_espn_id + tournament_round (mismo
+                              rol que away_team_id/home_team_id en MLB)
 src/connectors/mlb.py                                   Sin cambios desde el Paso 5b (Bloque 1)
+src/connectors/espn_tennis.py                           Sin cambios -- extract_matches ya preservaba
+                              competitor.id/round vía dict(competition), sin saberlo
+                              hasta que Paso 11 lo aprovechó
 
 src/backtesting/                                        [Fase 2 -- Paso 9 COMPLETO]  Sin cambios en esta actualización
   __init__.py / dataset.py / splitter.py / metrics.py    build_backtest_dataset,
@@ -132,99 +188,111 @@ src/evaluation/                                         [Fase 2 -- Paso 10 COMPL
                               mlb_baseline.py ni mlb_elo.py. Solo en memoria, sin
                               persistencia ni dependencias de visualización.
 
-scripts/                                                Sin cambios desde el Paso 6
+scripts/sync_tennis_results.py                          [Fase 2 -- Paso 11 NUEVO]  CLI manual, mismo patrón que sync_mlb_results.py
+scripts/ (resto)                                        Sin cambios desde el Paso 6
 ```
 
 Módulos ya cerrados **sin ningún cambio** en esta actualización,
 verificado explícitamente antes del commit (incluida una verificación
-`git diff --name-only` dirigida a cada uno): `src/pricing/market_pricing.py`,
-`src/models/base.py`, `src/models/schemas.py`, `src/models/mlb_baseline.py`,
-`src/models/mlb_elo.py`, `src/models/registry.py`,
-`src/uncertainty/quality_score.py`, `src/backtesting/*`, `src/signals/*`, y
-todos los módulos de Fase 1. **Primera vez desde el Paso 5b que un paso no
-requiere ninguna extensión aditiva a un módulo cerrado** -- `reports.py`
-únicamente invoca lo ya construido.
+`git diff --name-only` dirigida a cada uno): `src/models/base.py`,
+`src/models/schemas.py`, `src/models/mlb_baseline.py`, `src/models/mlb_elo.py`,
+`src/models/registry.py`, `src/pricing/*`, `src/uncertainty/quality_score.py`,
+`src/backtesting/*`, `src/evaluation/reports.py`, `src/signals/*`,
+`src/pipelines/mlb_pipeline.py`, `src/connectors/*`, y todos los módulos
+de Fase 1. Única modificación a módulos ya cerrados en el Paso 11:
+extensión aditiva de `tennis_normalizer.py` y de `tennis_pipeline.py`,
+ambas explícitamente flageadas y autorizadas en el Design Proposal.
 
 ## 7. Árbol de directorios (delta desde la última actualización)
 
 Nuevo en esta actualización:
 ```
-src/evaluation/__init__.py                [NUEVO]
-src/evaluation/reports.py                 [NUEVO]
-tests/unit/test_evaluation_reports.py     [NUEVO]
+src/features/tennis_features.py                    [NUEVO]
+src/models/tennis_baseline.py                      [NUEVO]
+src/pipelines/tennis_results_sync.py               [NUEVO]
+scripts/sync_tennis_results.py                     [NUEVO]
+tests/unit/test_tennis_features.py                 [NUEVO]
+tests/unit/test_tennis_baseline.py                 [NUEVO]
+tests/unit/test_tennis_results_sync.py             [NUEVO]
+tests/unit/test_tennis_pipeline_feature_wiring.py  [NUEVO]
 ```
-Modificado:
+Modificado (aditivo, ambos explícitamente autorizados):
+- `src/normalization/tennis_normalizer.py` (+espn_id/tournament_round en `model_inputs.context`).
+- `src/pipelines/tennis_pipeline.py` (+`fetch_features`, `_fetch_tennis_feature_inputs`, wiring de `persist_tennis_feature_snapshot`).
+- `tests/unit/test_tennis_normalizer.py` (+2 tests).
 - `tests/integration/test_e2e_real.py` (+1 test real).
 
-Ningún módulo cerrado modificado — primera vez desde el Paso 5b (ver §6).
+## 8. Responsabilidad de `src/features/tennis_features.py` + `src/models/tennis_baseline.py`
 
-## 8. Responsabilidad de `src/evaluation/reports.py`
+**`tennis_features.py`** — `compute_rest_days(match_start_time, prior_match_start_times, data_cutoff_timestamp)`: resta el `start_time` del último partido ANTERIOR conocido (filtrado por `< data_cutoff_timestamp`, nunca por el `start_time` del propio partido) del `start_time` del partido a predecir. `compute_tournament_round_context(tournament_round)`: passthrough directo de `competition.round.displayName` (ESPN), verificado real, nunca heurística de texto (prohibida por §16). Ambas son los dos únicos `compute_function_name` FULLY_SPECIFIED de tenis ya anclados en el registry desde el Paso 1 — verificado por test cruzado (`test_every_computable_tennis_feature_has_a_matching_function_in_this_module`). `TennisFeatureInputs`/`compute_tennis_features`/`persist_tennis_feature_snapshot`: mismo patrón exacto que `mlb_features.py` (Paso 2/5b) — nunca hace red ni consulta `HistoryRepository` directamente, recibe los datos ya obtenidos por el llamador.
 
-**`compare_baselines(history_repository, dataset, fit_fn_baseline_1, predict_fn_baseline_1, fit_fn_baseline_2, predict_fn_baseline_2, min_train_size=300, test_block_size=30) -> BaselineComparisonReport`** — orquesta la comparación Baseline 0 (mercado) vs Baseline 1 (logreg, Paso 5a/5b) vs Baseline 2 (Elo, Paso 6). **Invariante central: los tres se evalúan sobre el MISMO universo de filas** — un único recorrido de `walk_forward_splits` (Paso 9, sin modificar) alimenta, dentro de cada fold y antes de avanzar al siguiente, a los tres baselines: Baseline 0 se lee directamente de `fold.test_rows.p_market_yes` (no se reentrena nada); Baseline 1/2 se entrenan sobre el mismo `fold.train_repository` vía `fit_fn`/`predict_fn` provistos por el llamador. `min_train_size`/`test_block_size` son parámetros configurables con defaults documentados (300 = `DEFAULT_MIN_TRAINING_SAMPLES` de `mlb_baseline.py`, duplicado deliberadamente sin importar el módulo, para mantener `reports.py` agnóstico; 30 = heurística nueva de ingeniería, no calibrada, ~una semana de calendario MLB).
+**`tennis_baseline.py`** — mismo patrón estructural que `mlb_baseline.py` (dataset builder -> vectorización -> training -> inferencia), con dos diferencias deliberadas: **persistencia independiente** (`TennisTrainedArtifact`, JSON+joblib propios con prefijo `tennis_baseline_*`, nunca importa/modifica `registry.py`, que está acoplado a `MlbTrainedArtifact`) y **umbral propio** (`DEFAULT_MIN_TRAINING_SAMPLES_TENNIS=30`, heurística "10-20 obs/dimensión" aplicada a 2 features de tenis en vez de las ~26 de MLB, PROVISIONAL). `tournament_round_context` (vocabulario abierto) se codifica como bandera 0/1 por categoría **descubierta únicamente en el split de TRAIN** (nunca de validación, nunca una lista fija inventada) — una categoría no vista en entrenamiento produce una fila en ceros, nunca fabricada. `predict_tennis_baseline`/`predict_tennis_baseline_from_features` comparten un único núcleo de inferencia (mismo patrón que Paso 9), disponible desde ya por si un futuro paso reutiliza `src/backtesting/`/`src/evaluation/reports.py` sobre tenis (explícitamente diferido, Ambigüedad F).
 
-`segment_by_edge`/`segment_by_confidence`/`segment_by_liquidity` — desagregación por bucket de ancho fijo (mismo esquema que `calibration_curve`, clamping a los extremos). `segment_by_edge` reutiliza `compute_edge_yes` (Paso 8) **tal cual**, envolviendo la predicción en un `PModelOutput` mínimo — nunca reimplementa `p_model - p_market`. **Baseline 0 está estructuralmente ausente de `edge_segments`** (su EDGE es 0 por definición) — no una llave vacía, la llave simplemente no existe en el diccionario.
+**`tennis_results_sync.py`** — mismo patrón que `mlb_results_sync.py`; reutiliza `EspnTennisConnector.get_scoreboard`/`extract_matches` ya existentes (`competitors[].winner`, verificado real). A diferencia de MLB, no distingue POSTPONED/CANCELLED (sin verificar cómo ESPN Tennis los representa) — se cuentan honestamente como `not_yet_decided`.
 
-Agnóstico al modelo: no importa `mlb_baseline.py` ni `mlb_elo.py`; el llamador (tests hoy) adapta `predict_mlb_baseline_from_features`/`predict_mlb_elo` a la firma genérica `(BacktestRow, artefacto) -> Optional[float]`. Nota de contrato descubierta durante la implementación: `train_mlb_baseline_model` devuelve solo metadata (`MlbTrainedArtifact`), no el modelo cargado — el adaptador debe recargar vía `load_latest_mlb_artifact` (documentado explícitamente en el docstring de `compare_baselines` para que no se repita el tropiezo). Solo en memoria (dataclasses), sin persistencia, sin dependencias de visualización nuevas.
+**Extensión en `tennis_normalizer.py`/`tennis_pipeline.py`** — captura `competitor.id` (identidad estable, verificada real: el mismo jugador conserva el mismo id entre partidos distintos) y `competition.round.displayName` en `model_inputs.context`; wiring de `feature_snapshots` mediante `_fetch_tennis_feature_inputs`, que consulta `event_snapshots` ya persistidos (emparejando por `espn_id`, nunca por nombre de texto) — sin ninguna llamada de red adicional.
+
+**Hallazgos empíricos clave** (verificados contra la API real de ESPN ANTES de diseñar, no asumidos): `competition.round.displayName` existe y es estable ("Qualifying 1st Round", "Qualifying Final", etc.); `competitor.id` es un identificador numérico estable entre partidos del mismo jugador; `competitors[].winner` está presente y correcto para partidos finalizados.
 
 ## 9. Invariantes del sistema — se mantienen todos los de la versión anterior, más:
 
-- **Mismo universo de filas** para los tres baselines — un único recorrido de `walk_forward_splits`, nunca tres pasadas independientes.
-- **Baseline 0 nunca usa EDGE** — verificado no solo por test sino por inspección directa de código: `compute_edge_yes` se invoca únicamente dentro de `segment_by_edge`, y `segment_by_edge` se invoca únicamente con los pares de Baseline 1/2.
-- **`history_repository` (crudo, sin acotar) nunca llega a una función de entrenamiento** — se usa únicamente como argumento de `walk_forward_splits`; `fit_fn_baseline_1`/`fit_fn_baseline_2` reciben siempre `fold.train_repository` (verificado por inspección de código en la auditoría final, no solo por test).
-- Cero duplicación de métricas — las cuatro funciones de `src.backtesting.metrics` se importan y se usan tal cual, ninguna fórmula reimplementada dentro de `reports.py`.
+- **`rest_days` nunca usa datos posteriores a `data_cutoff_timestamp`** — verificado por test dedicado (`test_compute_rest_days_excludes_matches_not_yet_knowable_before_cutoff`), corte por instante de conocimiento, no por el `start_time` del propio partido.
+- **Identidad de jugador por `espn_id`, nunca por nombre de texto** — en `rest_days`, en el wiring del pipeline, y en la sincronización de resultados.
+- **`tournament_round_context` (categórico abierto) se descubre solo del split de TRAIN** — nunca de validación, nunca una lista fija inventada; una categoría desconocida en inferencia produce ceros, nunca se fabrica.
+- **Persistencia de tenis totalmente independiente de `registry.py`** — verificado por test de coexistencia sin colisión en el mismo `DATA_MODELS_DIR`.
+- `predict_tennis_baseline_from_features`/`predict_tennis_baseline` comparten una única implementación de inferencia — mismo principio que MLB (Paso 9).
 
 ## 10. Reglas que nunca deben romperse
 
-Sin cambios respecto a la versión anterior. Confirmado de nuevo: ninguna dependencia nueva añadida; **ningún módulo cerrado modificado en absoluto** en este paso (a diferencia de todos los pasos desde el 5b, que requirieron al menos una extensión aditiva puntual).
+Sin cambios respecto a la versión anterior. Confirmado de nuevo: ninguna dependencia nueva añadida; únicos módulos cerrados modificados son `tennis_normalizer.py`/`tennis_pipeline.py`, ambos de forma aditiva, explícitamente flageados y autorizados antes de tocarlos (ver §11).
 
-## 11. Decisiones arquitectónicas tomadas durante el Paso 10
+## 11. Decisiones arquitectónicas tomadas durante el Paso 11
 
-- **Un único recorrido compartido de `walk_forward_splits`** en vez de tres pasadas independientes (una por baseline) — es la única forma de garantizar "mismo universo de filas" sin depender de que folds generados por separado coincidan por casualidad.
-- **`min_train_size`/`test_block_size` como parámetros configurables CON default documentado** (300/30) — ajuste explícito del usuario sobre el Design Proposal original (que proponía dejarlos sin ningún default, mismo estilo que `walk_forward_splits`); aquí sí se fija un default para que `compare_baselines` sea invocable sin fricción, pero siguen siendo parámetros reales, no valores ocultos (verificado por test de configurabilidad).
-- **EDGE de evaluación reutiliza `compute_edge_yes` (Paso 8) vía un `PModelOutput` mínimo construido ad-hoc**, en vez de recalcular la fórmula inline — evita cualquier riesgo de divergencia entre la fórmula de señales real y la de evaluación.
-- **Baseline 0 excluido estructuralmente de `edge_segments`** (la llave no existe, no es un valor `None`/vacío) — decisión explícita (Ambigüedad B del Design Proposal) porque su EDGE es 0 por definición.
-- **Solo EDGE_YES segmentado, no EDGE_NO** — alcance acotado a propósito, documentado.
-- **Sin persistencia, sin visualización** — mismo patrón que Paso 9.
+- **Verificación empírica ANTES de diseñar** (no asumir bloqueo): se confirmó contra la API real de ESPN que `round.displayName` y `competitor.id` existen y son estables antes de comprometerse a un diseño — evitó construir el baseline sobre una feature que hubiera resultado inviable.
+- **Persistencia independiente para tenis** (Ambigüedad C), mismo patrón ya validado por Elo (Paso 6) — nunca se generaliza/modifica `registry.py`.
+- **Umbral mínimo propio, derivado de la metodología del plan aplicada al vector real de tenis** (Ambigüedad D) — `30`, no el `300` de MLB ni el `50` de Elo (cada uno con su propia justificación estadística, no copiados entre sí).
+- **Codificación de `tournament_round_context` como one-hot manual, categorías descubiertas del split de TRAIN** — decisión de implementación no escalada como ambigüedad separada (mismo nivel de detalle que la vectorización manual ya usada en `mlb_baseline.py`), documentada explícitamente en el código.
+- **`_fetch_tennis_feature_inputs` vive en `tennis_pipeline.py`, no en `tennis_features.py`** — mismo patrón exacto que `_fetch_mlb_feature_inputs` en `mlb_pipeline.py` (Paso 5b): el módulo de features permanece puro/sin I/O, el pipeline hace el "fetch" (aquí, una consulta local a `HistoryRepository`, no una llamada de red).
+- **Sincronización de resultados sin distinguir POSTPONED/CANCELLED** (Ambigüedad E) — se prefirió no inventar una interpretación de estados no verificados contra datos reales, en vez de copiar ciegamente la lógica de MLB.
+- **`src/backtesting/`/`src/evaluation/reports.py` NO se ejercitan sobre tenis en esta iteración** (Ambigüedad F, diferido) — quedan disponibles sin cambios para un futuro paso deliberado.
 
 ## 12. Ambigüedades encontradas y resueltas (acumulado completo)
 
-Paso 10 tuvo seis ambigüedades explícitas (A-F), todas resueltas por el usuario antes del Design Proposal formal:
-- **Ambigüedad A** (¿mismo universo de filas?): A1 — `min_train_size`/`test_block_size` comunes a los tres baselines.
-- **Ambigüedad B** (EDGE de Baseline 0): excluir de la segmentación, documentar que es 0 por definición.
-- **Ambigüedad C** (buckets de segmentación): reutilizar el esquema propuesto (ancho fijo, mismo estilo que `calibration_curve`).
-- **Ambigüedad D** (persistencia): solo memoria, sin artefactos en disco.
-- **Ambigüedad E** (visualización): solo buckets numéricos, sin dependencias gráficas.
-- **Ambigüedad F** (volumen real ≈0): comportamiento honesto, reporte válido sin fabricar ni fallar.
-Un ajuste adicional sobre el Design Proposal aprobado: mantener `min_train_size`/`test_block_size` como parámetros configurables pero **con** default documentado (300/30), a diferencia del enfoque sin-default de `walk_forward_splits`.
+Paso 11 tuvo seis ambigüedades explícitas (A-F), resueltas con una metodología de 6 puntos por ambigüedad (recomendación/alternativas/pros-contras/riesgos/recomendación final/impacto futuro), pedida explícitamente por el usuario:
+- **Ambigüedad A** (identidad para `rest_days`): emparejar por `espn_id` de ESPN, verificado estable contra la API real -- no por nombre de texto.
+- **Ambigüedad B** (fuente de `tournament_round_context`): `round.displayName` confirmado real y directamente utilizable -- desbloqueó por completo lo que parecía el mayor riesgo del paso.
+- **Ambigüedad C** (persistencia del artefacto): independiente, mismo patrón que Elo.
+- **Ambigüedad D** (umbral de entrenamiento): 30, derivado de la metodología del plan aplicada a 2 features.
+- **Ambigüedad E** (sincronizador de resultados): módulo separado + script manual, mismo patrón que MLB.
+- **Ambigüedad F** (reutilizar backtesting/evaluación para tenis ya): diferido por completo.
 
-## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 52)
+## 13. Decisiones aprobadas explícitamente por el usuario (cronológico, continuación desde el punto 58)
 
-53. Instrucción de iniciar la revisión contractual del Paso 10 con la misma metodología institucional (contractual → ambigüedades → Design Proposal → aprobación → implementación mínima → tests → auditoría → commit).
-54. Resolución explícita de las Ambigüedades A-F, todas con la opción recomendada.
-55. Aprobación del Design Proposal formal, con un único ajuste: `min_train_size`/`test_block_size` configurables con los defaults propuestos documentados (no sin default).
-56. Autorización para implementar el Paso 10 completo + ejecutar suite completa + auditoría técnica + presentar reporte antes del commit.
-57. Solicitud de una auditoría final adicional, con ocho verificaciones puntuales explícitas (módulos cerrados, duplicación de métricas, leakage, mismo universo, Baseline 0 sin EDGE, 435 tests desde estado limpio, diff acotado, veredicto de autorización de producción) — todas confirmadas por inspección directa de código, no solo por los tests ya escritos.
-58. Aprobación de la auditoría final + autorización de commit (`cfb8dc0`), con instrucción explícita de: verificación post-commit, actualización de `CONTINUITY.md`, confirmación de hashes/número de tests, y **no iniciar el Paso 11** hasta nueva autorización — solo presentar su revisión contractual.
+59. Instrucción de iniciar la revisión contractual del Paso 11 (objetivos, alcance, arquitectura, riesgos, dependencias, módulos permitidos/prohibidos, ambigüedades, plan de pruebas), sin código.
+60. Aprobación general de la revisión contractual, con instrucción de resolver las Ambigüedades A-F con una metodología de 6 puntos cada una antes del Design Proposal definitivo.
+61. Resolución explícita de las seis ambigüedades (verificación empírica real contra la API de ESPN incluida) y presentación del Design Proposal definitivo.
+62. Aprobación del Design Proposal del Paso 11.
+63. Autorización de implementación completa, con nueve reglas institucionales explícitas repetidas (no modificar módulos cerrados, sin scope creep, compatibilidad total con MLB, aislamiento temporal sin leakage, alcance aprobado únicamente, solo los tests definidos, batería completa al finalizar, auditoría técnica completa antes del commit, commit solo si todo pasa) y siete entregables pedidos explícitamente (resumen técnico, archivos modificados, resultados de tests, auditoría final, confirmación de ausencia de regresiones, hash del commit, actualización de `CONTINUITY.md`) — con instrucción explícita de **no avanzar al Paso 12** sin nueva aprobación.
 
 ## 14. Estado exacto de todos los tests (verificado en el cierre de esta actualización)
 
 ```
 .venv/bin/python -m pytest tests/ -q
-435 passed, 1 warning in ~28-30s
+486 passed, 1 warning in ~27s
 ```
-El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente. 12 tests nuevos en esta actualización (423 → 435): 11 en `test_evaluation_reports.py` (comparación end-to-end, exclusión de Baseline 0 de `edge_segments`, segmentación exacta por bucket, configurabilidad de `min_train_size`/`test_block_size`, dataset vacío honesto) + 1 de integración real (`test_compare_baselines_builds_honestly_on_real_mlb_pipeline_output_without_results`). Verificado además desde un estado limpio (`__pycache__` purgado antes de correr, en la auditoría final).
+El único warning sigue siendo `NotOpenSSLWarning` de `urllib3`/LibreSSL, preexistente. 51 tests nuevos en esta actualización (435 → 486): 2 en `test_tennis_normalizer.py` (extensión espn_id/round) + 17 en `test_tennis_features.py` + 21 en `test_tennis_baseline.py` + 7 en `test_tennis_results_sync.py` + 3 en `test_tennis_pipeline_feature_wiring.py` + 1 de integración real (`test_tennis_pipeline_persists_feature_snapshot_and_predicts_honestly_on_real_data`). Verificado desde estado limpio (`__pycache__` purgado) antes del commit y de nuevo post-commit.
 
 ## 15. Número total de tests existentes
 
-**435** (verificado con `pytest --collect-only` y con la salida final de pytest). Cero tests de pasos anteriores rotos o reducidos.
+**486** (verificado con `pytest --collect-only` y con la salida final de pytest). Cero tests de pasos anteriores rotos o reducidos.
 
 ## 16. Estado de la regresión completa
 
-Verde, sin excepciones, verificado antes del commit, en la auditoría final (con caché de bytecode purgada), y de nuevo post-commit (`cfb8dc0`). Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
+Verde, sin excepciones, verificado antes del commit (con caché de bytecode purgada) y de nuevo post-commit (`d6fc559`). Comando exacto: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
 
 ## 17. Dependencias actuales
 
-Sin cambios — ninguna dependencia nueva en el Paso 10:
+Sin cambios — ninguna dependencia nueva en el Paso 11:
 ```
 requests>=2.32,<3
 pydantic>=2.11,<3
@@ -251,9 +319,9 @@ Sin cambios desde el cierre del Paso 3 (commit `32677d6`). Sigue terminando en *
 | 7 | `src/uncertainty/quality_score.py` | ✅ COMPLETO |
 | 8 | `src/signals/edge.py` + `expected_value.py` | ✅ COMPLETO |
 | 9 | `src/backtesting/` | ✅ COMPLETO |
-| 10 | `src/evaluation/reports.py` | ✅ **COMPLETO** (este documento) |
-| 11 | Tenis (`src/features/tennis_features.py` + `src/models/tennis_baseline.py`) | Pendiente — **siguiente en orden oficial; solo revisión contractual autorizada, NO implementación** |
-| 12 | `src/signals/signal_schema.py` | Pendiente |
+| 10 | `src/evaluation/reports.py` | ✅ COMPLETO |
+| 11 | Tenis (`src/features/tennis_features.py` + `src/models/tennis_baseline.py`) | ✅ **COMPLETO** (este documento) |
+| 12 | `src/signals/signal_schema.py` | Pendiente — **siguiente en orden oficial** |
 
 ## 21. Estado de la automatización (LaunchAgent) — sin cambios
 
@@ -270,24 +338,27 @@ feature_snapshots   -> 0
 event_results       -> 0
 normalized_records  -> 94
 ```
-Sin cambios desde la última actualización (mismo `mtime`, 24 jul 23:58) — el Paso 10 no toca `data/engine.db` en absoluto: `compare_baselines` opera exclusivamente a través de `walk_forward_splits` (repositorios temporales) y directorios temporales para artefactos de modelo (`tempfile.TemporaryDirectory`), nunca sobre la base de producción ni `data/models/` real. Con `feature_snapshots`/`event_results` reales en 0 filas, `compare_baselines` contra la base real produce hoy un `BaselineComparisonReport` con `n_predictions=0` en los tres baselines — honesto, verificado por el test de integración real de esta iteración.
+Sin cambios desde la última actualización (mismo `mtime`, 24 jul 23:58) — el Paso 11 no toca `data/engine.db` en absoluto: todos los tests de tenis corren contra `HistoryRepository`/`Repository` en `tmp_path`, y el único test de integración real usa las fixtures `tmp_repository`/`tmp_history_repository` (nunca la base de producción). Con `feature_snapshots`/`event_results` reales en 0 filas, `train_tennis_baseline_model` contra la base real reportaría hoy `INSUFFICIENT_HISTORY` honestamente — no ejercitado directamente en esta iteración (el test real de Paso 11 verifica `predict_tennis_baseline` con `loaded_artifact=None`, ruta honesta equivalente).
 
 ## 23. Pendientes técnicos (deuda documentada, acumulado)
 
 Todos los de la versión anterior de este documento, más:
-- `test_block_size=30` es una heurística de ingeniería nueva, no calibrada (igual que `_MARKET_LIQUIDITY_TARGET` en `quality_score.py`) — revisar cuando haya volumen real.
-- Segmentación de EDGE limitada a `EDGE_YES` (no `EDGE_NO`) — alcance acotado a propósito en esta iteración.
-- `compare_baselines` reentrena un modelo completo por fold para CADA uno de los dos baselines entrenados (el doble de trabajo que el walk-forward de Paso 9 por sí solo) — funcionalmente correcto, no optimizado para volumen alto (misma deuda ya documentada en Paso 9, ahora duplicada).
-- Mapeo participante↔YES de un contrato de Kalshi específico sigue sin resolver (Ambigüedad #2/Paso 4) — afecta la interpretación real de cualquier comparación de baselines contra mercados reales.
+- `DEFAULT_MIN_TRAINING_SAMPLES_TENNIS=30` es una heurística de ingeniería nueva, no calibrada — revisar cuando haya volumen real de tenis.
+- `tennis_results_sync.py` no distingue POSTPONED/CANCELLED (a diferencia de MLB) — no verificado contra datos reales cómo ESPN Tennis los representa; se cuentan como `not_yet_decided` hasta que se verifique y, si aplica, se extienda.
+- `_fetch_tennis_feature_inputs` hace un recorrido lineal sobre TODO `event_snapshots` por cada partido normalizado — misma deuda de escalabilidad ya documentada para `build_backtest_dataset`/`build_mlb_elo_game_sequence`, aceptable dado el volumen real actual.
+- `src/backtesting/`/`src/evaluation/reports.py` nunca se ejecutaron sobre datos de tenis (Ambigüedad F, diferido a propósito) — agnósticos al modelo por diseño, no requieren cambios cuando se decida hacerlo.
+- Mapeo participante↔YES de un contrato de Kalshi específico sigue sin resolver (Ambigüedad #2/Paso 4) — afecta también a tenis igual que a MLB.
+- Doble bloqueo de tenis (SofaScore 403 + histórico propio bajo) sigue vigente — `model_status` de tenis previsiblemente permanecerá en `INSUFFICIENT_HISTORY` por mucho tiempo, resultado aceptado explícitamente por el plan (§6/§14).
 
 ## 24. Todo lo que un chat nuevo debe saber antes de escribir una sola línea de código
 
-- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `cfb8dc09562f198c36cd0c6528be440b79cb15e8` o posterior) y `git status --short`.
-- **Pasos 0-10 están todos completos.** El siguiente pendiente en el orden oficial del plan es el **Paso 11** (tenis: `src/features/tennis_features.py` + `src/models/tennis_baseline.py`) — **el usuario autorizó únicamente su revisión contractual, NO su implementación.** No escribas código de Paso 11 sin una autorización explícita nueva y separada.
-- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real -- `compare_baselines` contra la base real produce hoy un reporte honesto con `n_predictions=0` en los tres baselines (§22).
+- Verifica tú mismo el estado real antes de asumir nada de este documento -- `git rev-parse HEAD` (debe ser `d6fc559a28f3244d7f4ca1b97d66275dc1d70c60` o posterior) y `git status --short`.
+- **Pasos 0-11 están todos completos.** El siguiente pendiente en el orden oficial del plan es el **Paso 12** (`src/signals/signal_schema.py` — tipos ENTER/WATCH/PASS, sin lógica de umbral).
+- `feature_snapshots`/`event_results` siguen en 0 en `data/engine.db` real (§22) -- tanto MLB como tenis seguirán en `MODEL_NOT_TRAINED`/`INSUFFICIENT_HISTORY` hasta que exista volumen real.
 - El LaunchAgent está DESCARGADO a propósito y debe permanecer así hasta finalizar la Fase 2 completa -- no lo reactives sin autorización explícita nueva.
-- **Ningún módulo cerrado fue modificado en el Paso 10** — primera vez desde el Paso 5b. `src/evaluation/reports.py` solo invoca `src/backtesting/*`, `src/models/mlb_baseline.py`/`mlb_elo.py`, `src/signals/edge.py`, `src/uncertainty/quality_score.py`.
-- **Contrato de uso importante heredado de `walk_forward_splits`** (Paso 9, sin cambios): el `HistoryRepository` de un fold debe consultarse dentro de la misma iteración del `for`, antes de pedir el siguiente fold.
-- **Nota de contrato de `compare_baselines`**: el `fit_fn` del baseline logreg debe recargar el artefacto vía `load_latest_mlb_artifact` antes de devolverlo (a diferencia de Elo, cuyo artefacto es directamente utilizable) — ver docstring de `compare_baselines`.
-- Patrón de trabajo ya validado en seis pasos consecutivos (5b, 7, 6, 8, 9, 10): revisión contractual → Design Proposal si hay huecos de especificación → aprobación explícita (ambigüedad por ambigüedad) → implementación → tests → auditoría (incluyendo, en el Paso 10, una auditoría final adicional con verificaciones puntuales por inspección directa de código) → commit separado de código → commit separado de `CONTINUITY.md`. El Paso 11 (tenis) probablemente tenga huecos de especificación aún mayores que los anteriores, dado el bloqueo de SofaScore y la falta de histórico — no saltarse la revisión contractual ni el Design Proposal ahí tampoco.
+- **Únicos módulos cerrados modificados en el Paso 11**: `tennis_normalizer.py` (captura `espn_id`/`round`) y `tennis_pipeline.py` (wiring de `feature_snapshots`), ambos aditivos y explícitamente autorizados. `tennis_features.py`/`tennis_baseline.py`/`tennis_results_sync.py` son módulos nuevos que solo invocan lo ya construido.
+- **`tennis_baseline.py` tiene persistencia totalmente independiente de `registry.py`** (prefijo de archivo `tennis_baseline_*`) — nunca reutilizar/generalizar `registry.py` para tenis sin una nueva decisión explícita.
+- **Identidad de jugador de tenis = `competitor.id` de ESPN** (`model_inputs.context.participant_{a,b}_espn_id`), nunca nombre de texto — verificado estable contra la API real.
+- **`round.displayName`** (ESPN) es la fuente directa de `tournament_round_context` — verificado real, no bloqueado por SofaScore.
+- Patrón de trabajo ya validado en siete pasos consecutivos (5b, 7, 6, 8, 9, 10, 11): revisión contractual → (si hay ambigüedades) resolución punto por punto → Design Proposal → aprobación explícita → implementación → tests → auditoría → commit separado de código → commit separado de `CONTINUITY.md`. El Paso 12 (`signal_schema.py`, solo tipos sin lógica de umbral) es probablemente el más simple de Fase 2 hasta ahora, pero no te saltes la revisión contractual por eso.
 - Para correr tests: `.venv/bin/python -m pytest tests/ -q` (nunca `python3` del sistema).
