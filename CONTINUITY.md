@@ -14,9 +14,92 @@ sincronización de resultados). Actualizado: 2026-07-26 (cierre del
 Paso 12 — Esquema de señal: SignalInputs + SignalType/Side, sin lógica de
 umbral). Actualizado: 2026-07-26 — CIERRE FORMAL DE FASE 2. **Actualizado
 de nuevo: 2026-07-26 — Validación Institucional post-cierre y corrección
-de un defecto de aislamiento de tests (ver §0.1).** Propósito: única
-fuente de verdad para continuar este proyecto en una conversación nueva,
-sin acceso al historial de chat.
+de un defecto de aislamiento de tests (ver §0.1).** **Actualizado de
+nuevo: 2026-07-30 — Auditoría contractual y arquitectónica completa del
+Plan Maestro de Fase 3, documental, sin implementación (ver §0.2).**
+Propósito: única fuente de verdad para continuar este proyecto en una
+conversación nueva, sin acceso al historial de chat.
+
+## 0.2 Auditoría del Plan Maestro de Fase 3 (2026-07-30, documental, sin implementación)
+
+El usuario pidió una auditoría contractual y arquitectónica completa de
+21 principios + 9 correcciones (A-I) propuestos para Fase 3 (Policy
+Engine, Model Pipeline con calibración, Evidence/Explainability Engine,
+Opportunity Lifecycle, Evaluation & Learning Framework, Shadow Mode),
+corregirlos, consolidarlos y dejarlos listos para implementación
+institucional — **sin implementar Fase 3 todavía, sin tocar `src/`, sin
+entrenar modelos, sin mover `v2.0-baseline`**.
+
+Verificación previa: `HEAD` de `phase-2-dev` coincide exactamente con
+`v2.0-baseline` (`git diff --stat v2.0-baseline HEAD` vacío), 498 tests
+en verde, `data/models/` con únicamente `.gitkeep`. No existía ningún
+documento previo de Fase 3 en el repositorio — el "Plan Maestro"
+auditado es el conjunto de principios entregado en la propia tarea de
+auditoría, no un documento preexistente.
+
+**Documentos generados** (todos nuevos, ninguno reemplaza documentación
+de Fase 2):
+
+- [`PLAN_MASTER_FASE3.md`](PLAN_MASTER_FASE3.md) — 21 principios y 9
+  correcciones consolidados, matriz REUTILIZAR/EXTENDER/CREAR/DEPRECAR/
+  FUERA DE ALCANCE, 3 decisiones pendientes (D-1/D-2/D-3).
+- [`ARCHITECTURE_FASE3.md`](ARCHITECTURE_FASE3.md) — árbol modular
+  propuesto, flujo de datos, reglas de dependencia entre módulos nuevos.
+- [`CONTRACTS_FASE3.md`](CONTRACTS_FASE3.md) — los 16 contratos de datos
+  pedidos, campos, invariantes, versionado.
+- [`POLICY_ENGINE_SPEC.md`](POLICY_ENGINE_SPEC.md) — Hard Block/Hold
+  Rules, Soft Score sin compensación de mínimos críticos, Policy
+  Validation.
+- [`MODEL_PIPELINE_SPEC.md`](MODEL_PIPELINE_SPEC.md) — arquitectura
+  jerárquica de P_model, Calibration Layer.
+- [`EVIDENCE_EXPLAINABILITY_SPEC.md`](EVIDENCE_EXPLAINABILITY_SPEC.md) —
+  Evidence Engine y Explainability Engine, separados.
+- [`EVALUATION_LEARNING_SPEC.md`](EVALUATION_LEARNING_SPEC.md) —
+  framework de evaluación de 5 dimensiones.
+- [`TEMPORAL_REPRODUCIBILITY_SPEC.md`](TEMPORAL_REPRODUCIBILITY_SPEC.md)
+  — integridad temporal, reproducibilidad, tests de fuga.
+- [`SHADOW_MODE_AND_PROMOTION_GATES.md`](SHADOW_MODE_AND_PROMOTION_GATES.md)
+  — release path de 5 etapas, gates cuantificables, GATE-0 de datos.
+- [`IMPLEMENTATION_ROADMAP_FASE3.md`](IMPLEMENTATION_ROADMAP_FASE3.md) —
+  10 pasos reversibles (F3-0 a F3-9), clasificados REQUIRED/RECOMMENDED
+  LATER/REJECTED AS PREMATURE.
+- [`FASE3_AUDIT_REPORT.md`](FASE3_AUDIT_REPORT.md) — informe de auditoría
+  de 15 secciones, conclusión **CONDITIONAL GO**.
+
+**Hallazgo principal de la auditoría**: `FASE2_CIERRE_FINAL.md §7` ya
+documentaba un orden de dependencia (reactivar captura histórica →
+resolver mapeo participante↔YES → configurar `ODDS_API_KEY` → recién
+entonces diseñar clasificación ENTER/WATCH/PASS) que los 21 principios de
+Fase 3, tal como fueron propuestos, no hacían explícito como bloqueante.
+La auditoría formaliza esto como **GATE-0**
+(`SHADOW_MODE_AND_PROMOTION_GATES.md` §2) y como 3 **decisiones
+pendientes** (D-1: reactivar LaunchAgent; D-2: resolver mapeo
+participante↔YES; D-3: fórmula de costos reales en el Payoff Model) que
+bloquean estructuralmente cualquier `ENTER` real — ninguna se resuelve en
+esta auditoría, todas quedan explícitas en
+`PLAN_MASTER_FASE3.md` §8 y `FASE3_AUDIT_REPORT.md` §13.
+
+3 huecos de contrato reales encontrados y resueltos sin romper Fase 2
+(detalle en `FASE3_AUDIT_REPORT.md` §6): colisión de nombre `ModelOutput`
+(ya existe una clase vacía con ese nombre en `src/models/schemas.py`,
+resuelto por composición `PModelOutput`+`CalibrationOutput`, sin tocar
+`schemas.py`); categoría de Hard Rule faltante para la Ambigüedad #2 de
+Fase 2 (`unresolved_side_mapping`, añadida a `HARD_HOLD_WATCH`);
+definición de `selection_id` (Kalshi no expone uno, se define
+determinísticamente como `f"{market_id}:{side.value}"`).
+
+**Conclusión**: CONDITIONAL GO — la especificación completa (contratos,
+arquitectura, Policy Engine, Payoff Model, Calibration Layer sin
+entrenar, Evidence/Explainability, Opportunity Lifecycle, andamiaje de
+Evaluation Framework) está lista para implementarse con fixtures/tests,
+sin histórico real. La puesta en producción de cualquier etapa que
+requiera calibración real, backtesting real o shadow mode real permanece
+bloqueada por D-1/D-2/D-3, sin resolver.
+
+**Cero cambios en `src/`, cero modelos entrenados, `v2.0-baseline` sin
+mover.** Verificación final (498 tests, `data/models/` limpio, `git diff
+--stat`/`git status`) documentada en el commit de esta auditoría — ver
+`git log` para el hash exacto.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
