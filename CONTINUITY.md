@@ -19,7 +19,9 @@ nuevo: 2026-07-30 — Auditoría contractual y arquitectónica completa del
 Plan Maestro de Fase 3, documental, sin implementación (ver §0.2).**
 **Actualizado de nuevo: 2026-07-30 — Aprobado FASE3_EXECUTION_PLAN.md e
 implementado el Paso 3.0 de Fase 3 (andamiaje de contratos), primer
-código real de Fase 3 (ver §0.3).**
+código real de Fase 3 (ver §0.3).** **Actualizado de nuevo: 2026-07-30 —
+Rectificado un contrato del Paso 3.0 (§0.3.1) e implementado el Paso 3.1
+(Calibration Layer, sin entrenar) (ver §0.4).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -221,6 +223,59 @@ su fuente en Fase 2):
 Suite completa re-ejecutada tras la corrección: sin regresiones (ver
 hash de commit de esta rectificación en `git log`). Ningún otro archivo
 tocado — la corrección quedó limitada exactamente al campo señalado.
+
+## 0.4 Fase 3 — Paso 3.1: Calibration Layer, sin entrenar (2026-07-30)
+
+El usuario autorizó el Paso 3.1 con la misma disciplina del Paso 3.0
+(alcance limitado, sin desviaciones arquitectónicas, sin entrenar
+modelos, pruebas + suite completa + auditoría antes del commit), y
+pidió explícitamente detener la implementación ante cualquier
+contradicción con Fase 2 — lo que ocurrió antes de escribir código de
+este paso (§0.3.1).
+
+**Implementado**: `src/calibration/calibration_layer.py` —
+`calibrate(model_output: PModelOutput, calibrator: Optional[Calibrator] = None,
+now: Optional[datetime] = None) -> CalibrationOutput`, función 100% pura
+(mismo estándar que `edge.py`/`expected_value.py`, Fase 2). `Calibrator`
+es un `Protocol` mínimo, sin implementación concreta en el repositorio
+— hoy todo llamador real pasa `calibrator=None` (ningún calibrador
+entrenado existe, depende de D-1), por lo que el resultado observable en
+producción es siempre `p_model_calibrated=None`/`calibration_version=None`.
+La función sí aplica un `calibrator` sintético cuando se le pasa uno
+(contract test con un doble de test, `_FakeCalibrator`, **no** un
+calibrador entrenado real) — satisface literalmente
+`MODEL_PIPELINE_SPEC.md` §3: "se construye y se prueba con fixtures
+sintéticos, pero no se entrena ningún calibrador real en el alcance de
+Fase 3".
+
+**Invariantes verificados por test**: `p_model_raw` es copia exacta de
+`model_output.p_model_yes`, nunca recalculado ni redondeado;
+`calibrator=None` o `p_model_yes=None` (individualmente o juntos) ⟹
+`p_model_calibrated`/`calibration_version`/`calibrated_at` en `None`
+simultáneamente — incluido el caso explícito "calibrador presente pero
+modelo no entrenado" (invariante que el propio plan pedía cubrir
+mirando al futuro); `model_version`/`prediction_timestamp`/
+`data_cutoff_timestamp` se propagan literalmente desde `PModelOutput`;
+pureza confirmada (misma entrada, con y sin calibrador, dos llamadas →
+resultado idéntico); `now` naive rechazado.
+
+**Archivos**: exactamente los dos declarados en `FASE3_EXECUTION_PLAN.md`
+para el Paso 3.1 — `src/calibration/calibration_layer.py` y
+`tests/unit/test_calibration_layer.py`. Cero archivos de Fase 1/2
+tocados (`git diff --stat` sobre los paquetes de Fase 1/2 vacío,
+confirmado directamente).
+
+**Tests**: 10 nuevos en `tests/unit/test_calibration_layer.py`. Suite
+completa: 605 (Fase 2 + Paso 3.0 + rectificación) + 10 = **615 passed,
+0 failed**. `data/models/` con únicamente `.gitkeep` (esta función no
+hace I/O).
+
+**Definición de "Done" del Paso 3.1**: cumplida — función pura, invariantes
+cubiertos uno a uno, sin tocar Fase 1/2, este cierre documentado en
+`CONTINUITY.md` antes del commit.
+
+**Pendiente**: Paso 3.2 (Payoff Model) — no iniciado, requiere nueva
+autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
