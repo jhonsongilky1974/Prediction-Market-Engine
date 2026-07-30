@@ -10,8 +10,19 @@ PLAN_MASTER_FASE3.md §5, Hallazgo de Contrato #1).
 
 Este módulo define únicamente el contrato de datos y sus invariantes.
 Ninguna función de calibración vive aquí -- eso es
-`src/calibration/calibration_layer.py` (Paso 3.1, no implementado
-todavía).
+`src/calibration/calibration_layer.py` (Paso 3.1).
+
+RECTIFICACIÓN DE CONTRATO (Paso 3.0, aplicada durante el Paso 3.1, antes
+de implementar `calibration_layer.py`): `model_version` se corrige de
+`str` obligatorio a `Optional[str]`. `PModelOutput.model_version` (Fase
+2, `src/models/base.py`) ya es `Optional[str]`, y el código real de
+`mlb_baseline.py`/`tennis_baseline.py` lo construye en `None` cuando
+`model_status=MODEL_NOT_TRAINED` (estado válido y verificado en
+producción) -- exigir `str` aquí habría hecho fallar `CalibrationOutput`
+precisamente en ese caso, que es el más común. No es un cambio
+arquitectónico: es la corrección de un error de transcripción del propio
+Paso 3.0 (el campo debía ser un espejo exacto de su fuente en Fase 2 y no
+lo era). Ver CONTINUITY.md §0.3 y CONTRACTS_FASE3.md §2 para el detalle.
 """
 from __future__ import annotations
 
@@ -42,7 +53,7 @@ class CalibrationOutput(StrictModel):
 
     p_model_raw: Optional[float] = None
     p_model_calibrated: Optional[float] = None
-    model_version: str
+    model_version: Optional[str] = None
     calibration_version: Optional[str] = None
     calibration_method: Optional[str] = None
     calibrated_at: Optional[datetime] = None

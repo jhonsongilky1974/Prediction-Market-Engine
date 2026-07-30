@@ -56,7 +56,11 @@ class CalibrationOutput(StrictModel):
     p_model_raw: Optional[float]            # = PModelOutput.p_model_yes, copiado, no recalculado
     p_model_calibrated: Optional[float]      # None si no existe capa de calibración activa para
                                               # este model_version, o si p_model_raw es None
-    model_version: str                       # = PModelOutput.model_version
+    model_version: Optional[str]             # = PModelOutput.model_version (Optional[str] en Fase
+                                              # 2 también -- None cuando model_status=
+                                              # MODEL_NOT_TRAINED, ver mlb_baseline.py/
+                                              # tennis_baseline.py; RECTIFICADO durante el Paso 3.1,
+                                              # ver nota abajo)
     calibration_version: Optional[str]       # None mientras no exista calibración entrenada
                                               # (estado válido y esperado, igual que
                                               # ModelStatus.MODEL_NOT_TRAINED en Fase 2)
@@ -76,6 +80,18 @@ class CalibrationOutput(StrictModel):
   `p_model_raw` explícitamente y registrar la ausencia de calibración como un componente de
   `model_reliability` reducido en `ConfidenceProfile` — nunca sustituir `p_model_calibrated` por
   `p_model_raw` silenciosamente sin dejar rastro.
+
+**Rectificación de contrato (aplicada durante el Paso 3.1, antes de
+implementar `calibration_layer.py`, ver `CONTINUITY.md` §0.3):**
+`model_version` se documentaba y se implementó en el Paso 3.0 como `str`
+obligatorio. Se corrigió a `Optional[str]` porque `PModelOutput.model_version`
+(su fuente literal) ya es `Optional[str]` en Fase 2, y el código real de
+`mlb_baseline.py`/`tennis_baseline.py` lo construye en `None` junto con
+`p_model_yes=None` cuando `model_status=MODEL_NOT_TRAINED` — el estado
+más común, no un caso extremo. Exigir `str` habría hecho que
+`CalibrationOutput` fallara precisamente en ese caso. No es un cambio de
+diseño: es la corrección de una transcripción incompleta del propio
+Paso 3.0.
 
 ---
 

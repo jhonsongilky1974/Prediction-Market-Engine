@@ -187,6 +187,41 @@ antes del commit.
 requiere nueva autorización explícita del usuario por paso, según la
 metodología acordada.
 
+### 0.3.1 Rectificación de contrato encontrada al preparar el Paso 3.1 (2026-07-30)
+
+Al preparar la implementación de `calibration_layer.py`, se detectó una
+contradicción real entre el contrato ya comiteado en el Paso 3.0
+(`CalibrationOutput.model_version: str`, obligatorio) y el comportamiento
+verificado de Fase 2: `PModelOutput.model_version` (`src/models/base.py`)
+es `Optional[str]`, y `mlb_baseline.py:449`/`tennis_baseline.py:479`
+construyen `PModelOutput(model_version=None, model_status=
+MODEL_NOT_TRAINED, ...)` en producción — el estado más común, no un caso
+extremo. El contrato de Fase 3, tal como se había comiteado, habría hecho
+fallar `CalibrationOutput` exactamente en ese caso, que el propio Paso
+3.1 exige manejar como criterio de aceptación.
+
+Siguiendo la instrucción explícita del usuario ("cualquier contradicción
+arquitectónica debe detener la implementación y reportarse antes de
+continuar"), la implementación se detuvo, se reportaron la causa (error
+de transcripción del Paso 3.0, no una decisión de diseño), el impacto y
+3 alternativas; el usuario autorizó la Alternativa 1.
+
+**Corrección aplicada** (no es un cambio arquitectónico — es la
+rectificación de un contrato ya comiteado para que refleje exactamente
+su fuente en Fase 2):
+
+- `src/calibration/schemas.py`: `model_version: str` → `Optional[str] = None`.
+- `CONTRACTS_FASE3.md` §2: actualizado con la nota de rectificación.
+- `tests/unit/test_calibration_schemas.py`: nuevo test
+  `test_model_not_trained_case_has_none_model_version` (cubre
+  explícitamente `p_model_raw=None` + `model_version=None`
+  simultáneamente, el caso real de `MODEL_NOT_TRAINED`) + caso adicional
+  de round-trip de serialización con `model_version=None`.
+
+Suite completa re-ejecutada tras la corrección: sin regresiones (ver
+hash de commit de esta rectificación en `git log`). Ningún otro archivo
+tocado — la corrección quedó limitada exactamente al campo señalado.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
