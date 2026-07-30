@@ -17,6 +17,9 @@ de nuevo: 2026-07-26 — Validación Institucional post-cierre y corrección
 de un defecto de aislamiento de tests (ver §0.1).** **Actualizado de
 nuevo: 2026-07-30 — Auditoría contractual y arquitectónica completa del
 Plan Maestro de Fase 3, documental, sin implementación (ver §0.2).**
+**Actualizado de nuevo: 2026-07-30 — Aprobado FASE3_EXECUTION_PLAN.md e
+implementado el Paso 3.0 de Fase 3 (andamiaje de contratos), primer
+código real de Fase 3 (ver §0.3).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -100,6 +103,89 @@ bloqueada por D-1/D-2/D-3, sin resolver.
 mover.** Verificación final (498 tests, `data/models/` limpio, `git diff
 --stat`/`git status`) documentada en el commit de esta auditoría — ver
 `git log` para el hash exacto.
+
+## 0.3 Fase 3 — Paso 3.0: Andamiaje de contratos (2026-07-30, primer código real de Fase 3)
+
+Tras aprobar la auditoría (§0.2, CONDITIONAL GO) y congelar la
+arquitectura, el usuario aprobó
+[`FASE3_EXECUTION_PLAN.md`](FASE3_EXECUTION_PLAN.md) (roadmap aprobado
+convertido en 14 pasos ejecutables, `Paso 3.0`-`Paso 3.9`, con el Policy
+Engine subdividido en `3.4.1`-`3.4.5`) y autorizó el inicio del Paso 3.0,
+con dos criterios de aceptación añadidos: round-trip de serialización
+(`model_dump`/`model_validate`/`model_dump_json`/`model_validate_json`)
+y una factory de ejemplo mínimo válido por contrato.
+
+**Corrección aplicada antes de implementar** (detectada al preparar el
+paso, documentada en `FASE3_EXECUTION_PLAN.md` antes de escribir código,
+no una desviación arquitectónica): la tabla de contratos del Paso 3.0 ya
+listaba `EvaluationRecord` pero no declaraba dónde viviría su
+`schemas.py`. Resuelto creando `src/evaluation/schemas.py` (archivo
+nuevo dentro del paquete `evaluation/` ya existente de Fase 2, sin tocar
+`reports.py`), siguiendo el mismo patrón `schemas.py` separado de lógica
+que todos los demás paquetes nuevos. `ConfidenceProfile` se ubicó en
+`src/policy/schemas.py` (`PLAN_MASTER_FASE3.md` §4 dejaba la ubicación
+abierta entre `policy/`/`opportunity/`).
+
+**Implementado** — 14 contratos, 13 archivos nuevos en `src/`, cero
+archivos de Fase 1/2 modificados (`git diff --stat HEAD -- src/models
+src/signals src/pricing src/uncertainty src/storage src/backtesting
+src/evaluation src/matching src/quality src/connectors
+src/normalization` vacío, confirmado directamente):
+
+- `src/calibration/schemas.py` — `CalibrationOutput`.
+- `src/payoff/schemas.py` — `PayoffEstimate`, `NetEvStatus`.
+- `src/evidence/schemas.py` — `EvidenceItem`, `EvidenceDirection`.
+- `src/health/schemas.py` — `AnalysisHealth`.
+- `src/policy/schemas.py` — `ConfidenceProfile`, `EligibilityResult`,
+  `HardRuleResult`+`HardRuleCategory`, `SoftScoreComponent`,
+  `SignalReason`+`SignalReasonCode`, `PolicyDecision`+
+  `AbstentionDisposition`, `PolicyManifest` (7 contratos).
+- `src/opportunity/schemas.py` — `Opportunity`, `OpportunityEvaluation`
+  (`frozen=True`, inmutable — Principio 10), más
+  `compute_selection_id`/`compute_opportunity_id` (identidad
+  determinística, Hallazgo de Contrato #3).
+- `src/evaluation/schemas.py` — `EvaluationRecord`, y `EvaluationScope`
+  (enum nuevo, formaliza como vocabulario cerrado las 5 dimensiones del
+  Principio 15 — mejora menor no solicitada explícitamente pero
+  consistente con el patrón ya usado en todo el proyecto para
+  vocabularios cerrados; documentada, no oculta).
+
+Todos los 14 contratos reutilizan `StrictModel` (`src/models/schemas.py`,
+Fase 2, `extra="forbid"`) y, donde aplica, `Sport`/`Side`/`SignalType`/
+`SignalInputs` (Fase 1/2, sin cambios) — ningún tipo se duplicó.
+`OpportunityEvaluation` embebe `SignalInputs` (dataclass estándar de
+Fase 2, no un `BaseModel`) directamente como campo tipado; se confirmó
+con test dedicado que pydantic v2 lo serializa/reconstruye
+correctamente en round-trip dict y JSON (caso de composición más
+delicado del paso).
+
+**Tests**: `tests/unit/fase3_factories.py` (factories de ejemplo mínimo
+válido para los 14 contratos + helper `assert_round_trip`, mismo patrón
+`_kwargs(**overrides)` de `test_signal_schema.py`) + 7 archivos de test
+(`test_calibration_schemas.py`, `test_payoff_schemas.py`,
+`test_evidence_schemas.py`, `test_health_schemas.py`,
+`test_policy_schemas.py`, `test_opportunity_schemas.py`,
+`test_evaluation_record_schema.py`) — **106 tests nuevos**, cubriendo
+cada invariante de `CONTRACTS_FASE3.md`, `extra="forbid"`, timestamps
+naive, y el round-trip de serialización de los 4 métodos pedido por el
+usuario.
+
+**Suite completa**: 498 (Fase 2, sin modificar ningún test existente) +
+106 (Fase 3, Paso 3.0) = **604 passed, 0 failed**, verificado
+directamente. `data/models/` con únicamente `.gitkeep` (ningún test de
+este paso hace I/O — son contratos puros, sin persistencia todavía; la
+persistencia real llega en el Paso 3.5, contra `tmp_path` exclusivamente
+según `FASE3_EXECUTION_PLAN.md`).
+
+**Definición de "Done" del Paso 3.0** (`FASE3_EXECUTION_PLAN.md` §0.3 +
+sección del Paso 3.0): cumplida en su totalidad — archivos exactamente
+los declarados, Fase 1/2 sin tocar, tests nuevos y suite completa en
+verde, sin I/O de producción, este cierre documentado en `CONTINUITY.md`
+antes del commit.
+
+**Pendiente**: Paso 3.1 (Calibration Layer, sin entrenar) — no iniciado,
+requiere nueva autorización explícita del usuario por paso, según la
+metodología acordada.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
