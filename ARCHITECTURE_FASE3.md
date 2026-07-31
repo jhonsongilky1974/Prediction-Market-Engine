@@ -164,7 +164,12 @@ resuelve en la implementación siguiendo el patrón exacto de
 ## 4. Dependencias entre módulos nuevos (para evitar ciclos)
 
 ```
-policy/  ---depends on--->  signals/ (Fase 2), calibration/, payoff/
+policy/  ---depends on--->  signals/ (Fase 2), calibration/, payoff/, health/schemas.py
+                             (AnalysisHealth -- corrección aplicada en el Paso 3.4.3:
+                             check_temporarily_stale_data necesita AnalysisHealth.staleness_seconds,
+                             POLICY_ENGINE_SPEC.md §2.2, y esta lista no lo reflejaba; solo el
+                             contrato de datos, nunca health/analysis_health.py, que sigue sin
+                             implementar -- Paso 3.7)
 calibration/  ---depends on--->  models/base.py (Fase 2)
 payoff/  ---depends on--->  pricing/ (Fase 2), signals/expected_value.py (Fase 2)
 evidence/  ---depends on--->  models/schemas.py (Fase 2), uncertainty/quality_score.py (Fase 2),

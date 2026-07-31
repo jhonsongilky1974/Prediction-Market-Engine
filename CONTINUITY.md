@@ -28,7 +28,8 @@ de Fase 3 (Evidence Engine) (ver §0.6).** **Actualizado de nuevo:
 2026-07-30 — Implementado el Paso 3.4.1 de Fase 3 (Policy Engine —
 Eligibility) (ver §0.7).** **Actualizado de nuevo: 2026-07-30 —
 Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
-(ver §0.8).**
+(ver §0.8).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso
+3.4.3 de Fase 3 (Policy Engine — Hard Hold Rules) (ver §0.9).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -497,6 +498,79 @@ Fase 1/2.
 
 **Pendiente**: Paso 3.4.3 (Policy Engine — Hard Hold Rules) — no
 iniciado, requiere nueva autorización explícita del usuario.
+
+## 0.9 Fase 3 — Paso 3.4.3: Policy Engine — Hard Hold Rules (2026-07-30)
+
+Antes de escribir código se reportaron 2 hallazgos, siguiendo el
+protocolo acordado:
+
+1. **Corrección menor, sin decisión pendiente**: el docstring del Paso
+   3.4.2 anotaba que el bloque HOLD viviría en un archivo separado
+   (`hard_hold_rules.py`), pero `FASE3_EXECUTION_PLAN.md` dice
+   explícitamente que se añade al mismo `hard_rules.py`. Se siguió el
+   plan aprobado (autoridad del documento) y se corrigió el comentario
+   desactualizado -- sin impacto en el código del Paso 3.4.2.
+2. **Gap real entre documentos aprobados, con decisión del usuario**:
+   `POLICY_ENGINE_SPEC.md` §2.2 prometía que el umbral de horas de
+   `pending_lineup` sería "configurable en `PolicyManifest`", pero el
+   contrato `PolicyManifest` (Paso 3.0) no tiene ningún campo para
+   parámetros numéricos por regla Hard Rule. El usuario aprobó diferir
+   esa decisión al Paso 3.4.5 (cuando `PolicyManifest` se cargue por
+   primera vez) e implementar por ahora con un parámetro de función
+   PROVISIONAL, sin modificar el contrato ya comiteado.
+
+**Implementado**: 6 reglas HARD_HOLD_WATCH añadidas a
+`src/policy/hard_rules.py` (mismo archivo del Paso 3.4.2, según el
+plan): `check_pending_lineup` (time-gated, `hours_threshold` PROVISIONAL
+= 3.0h), `check_unconfirmed_pitcher` (específico MLB, NO time-gated --
+distinción deliberada de `pending_lineup`), `check_temporarily_stale_data`
+(reutiliza el umbral de 3600s ya establecido en Fase 2, no uno nuevo),
+`check_temporarily_insufficient_liquidity` (piso PROVISIONAL = 1000.0,
+deliberadamente distinto del objetivo de normalización 50000.0 de
+`quality_score.py`), `check_recoverable_missing_information`
+(`missing_fields` menos `CORE_FIELDS`, complemento literal de
+`corrupted_critical_data`, nunca duplicado), y
+`check_unresolved_side_mapping` (**siempre** `triggered=True` -- D-2 sin
+resolver, probado con un test que cita explícitamente
+`PLAN_MASTER_FASE3.md` §5 Hallazgo #2 para que no se "arregle" por
+accidente).
+
+`evaluate_hard_hold_rules()` agrega las 6 -- a diferencia del evaluador
+BLOCK, ninguna regla HOLD se excluye (todas son evaluables directamente
+desde datos).
+
+**Corrección de documentación** (no de código): `ARCHITECTURE_FASE3.md`
+§4 no listaba `health/schemas.py` (`AnalysisHealth`) como dependencia de
+`policy/`, aunque `check_temporarily_stale_data` la necesita
+(`POLICY_ENGINE_SPEC.md` §2.2) -- corregido, mismo patrón que la
+corrección análoga del Paso 3.3. Solo el contrato de datos;
+`health/analysis_health.py` (la lógica, Paso 3.7) sigue sin
+implementar.
+
+**Bug propio corregido antes de la suite completa**: el helper local
+`_record(**overrides)` del nuevo archivo de test hardcodeaba `sport=
+Sport.MLB` como kwarg posicional, chocando con `overrides` cuando un
+test necesitaba `sport=Sport.TENNIS` (`TypeError: multiple values for
+keyword argument`). Corregido al patrón `dict(...).update(overrides)`
+ya usado en los demás archivos de test de Fase 3 -- no afectó ningún
+archivo de `src/`.
+
+**Archivos**: `src/policy/hard_rules.py` (modificado, aditivo),
+`tests/unit/test_hard_hold_rules.py` (nuevo) + `ARCHITECTURE_FASE3.md`
+(corrección de documentación). Cero archivos de Fase 1/2 tocados.
+
+**Tests**: 27 nuevos en `tests/unit/test_hard_hold_rules.py`, incluido
+el catálogo cerrado de 6 `rule_id` y 4 verificaciones independientes de
+que `unresolved_side_mapping` es constante. Suite completa: 706 + 27 =
+**733 passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.4.3**: cumplida — 6 reglas HOLD
+implementadas, `unresolved_side_mapping` verificablemente constante y
+documentado por qué, decisión de `PolicyManifest` diferida
+explícitamente (no oculta), sin tocar Fase 1/2.
+
+**Pendiente**: Paso 3.4.4 (Policy Engine — Soft Score) — no iniciado,
+requiere nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
