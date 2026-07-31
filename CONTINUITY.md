@@ -38,7 +38,10 @@ Decision + Manifest + Validation), CIERRA EL PASO 3.4 COMPLETO (ver
 de Fase 3 (Opportunity Lifecycle + persistencia) (ver §0.12).**
 **Actualizado de nuevo: 2026-07-31 — Implementado el Paso 3.6 de Fase 3
 (Explainability Engine), con una adición contractual correctiva
-(`ExplanationOutput`) (ver §0.13).**
+(`ExplanationOutput`) (ver §0.13).** **Actualizado de nuevo: 2026-07-31
+— Implementado el Paso 3.7 de Fase 3 (Analysis Health), con una
+rectificación al invariante del Principio 5 en `CONTRACTS_FASE3.md` §5
+(ver §0.14).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -873,6 +876,78 @@ real, verificado por test.
 
 **Pendiente**: Paso 3.7 (Analysis Health) — no iniciado, requiere nueva
 autorización explícita del usuario.
+
+## 0.14 Fase 3 — Paso 3.7: Analysis Health (2026-07-31)
+
+### Contradicción encontrada y rectificada (autorizada explícitamente antes de tocar código)
+
+Al preparar `analysis_health.py`, releer el invariante literal de
+`CONTRACTS_FASE3.md` §5 ("ningún campo de `AnalysisHealth` puede
+aparecer como término de `SoftScoreComponent` **ni de `HardRuleResult`**")
+reveló una contradicción real con código YA COMITEADO: `POLICY_ENGINE_SPEC.md`
+§2.2 diseñó explícitamente la regla Hard Hold `temporarily_stale_data`
+para usar `AnalysisHealth.staleness_seconds`, y así se implementó en el
+Paso 3.4.3 (`check_temporarily_stale_data`, ya en 3 commits: 3.4.3,
+3.4.4 sin afectar, 3.4.5). El propio `FASE3_EXECUTION_PLAN.md`, Paso
+3.7, ya formulaba el criterio real de forma más estrecha ("nunca como
+input de `soft_score.py`"), coincidiendo con lo implementado -- solo el
+texto de `CONTRACTS_FASE3.md` §5 quedó redactado más amplio de lo
+realmente aprobado.
+
+Siguiendo la instrucción explícita del usuario, se detuvo la
+implementación, se reportaron 3 alternativas con el análisis completo;
+el usuario aprobó la Alternativa 1 (corregir el texto del invariante,
+sin tocar código ya comiteado).
+
+**Rectificación aplicada**: `CONTRACTS_FASE3.md` §5 corregido -- el
+Principio 5 ("sin doble ponderación dentro del Policy Engine") prohíbe
+específicamente que `AnalysisHealth` sea input de `soft_score.py` (ahí
+sí habría doble conteo real, porque `ConfidenceProfile` ya agrega
+señales de calidad equivalentes en el score ponderado). Una Hard Rule
+específica y ya catalogada (`temporarily_stale_data`) SÍ puede leer un
+campo de `AnalysisHealth` como su fuente de evidencia -- una compuerta
+binaria de catálogo cerrado no es "ponderación". Ningún código de
+`src/` se modificó por esta rectificación.
+
+### Implementado
+
+`src/health/analysis_health.py` -- `compute_analysis_health(opportunity_id,
+record, quality_score_output, evidence_items, now=None) -> AnalysisHealth`,
+función 100% pura. `completeness_signal`/`consistency_signal` derivan de
+`QualityScoreOutput.components["data_completeness"]`/["bookmaker_dispersion"]`
+(Fase 2, escalados de [0,1] a [0,100], nunca recalculados).
+`evidence_density` es el conteo simple de `EvidenceItem`.
+`staleness_seconds` se calcula en segundos crudos desde el timestamp de
+fuente más viejo en `NormalizedRecord.data_quality.source_timestamps`
+(mismo patrón que `_component_freshness`/`validate_staleness`, Fase 2 --
+`QualityScoreOutput` solo expone la versión ya normalizada a [0,1], no
+los segundos reales).
+
+**Verificado por 3 tests de arquitectura, no solo documentado**:
+`soft_score.py` nunca importa `src.health.analysis_health` ni
+`src.health.schemas` (regla rectificada); `hard_rules.py` importa
+`src.health.schemas` (el contrato, ya usado por
+`temporarily_stale_data` desde el Paso 3.4.3) pero nunca
+`src.health.analysis_health` (la lógica de cómputo); `decision.py`
+tampoco importa la lógica de cómputo, solo recibe un `AnalysisHealth`
+ya calculado como parámetro.
+
+**Archivos**: exactamente los 2 declarados —
+`src/health/analysis_health.py`, `tests/unit/test_analysis_health.py` +
+la rectificación aprobada en `CONTRACTS_FASE3.md` §5. Cero archivos de
+Fase 1/2 tocados.
+
+**Tests**: 14 nuevos, incluidos los 3 de arquitectura. Suite completa:
+844 + 14 = **858 passed, 0 failed**. `data/models/` con únicamente
+`.gitkeep`.
+
+**Definición de "Done" del Paso 3.7**: cumplida -- el test de
+arquitectura que impide el uso de `AnalysisHealth` en `soft_score.py`
+está en verde y se re-ejecuta como parte de la suite completa desde
+este punto en adelante.
+
+**Pendiente**: Paso 3.8 (Evaluation & Learning Framework, estructura) —
+no iniciado, requiere nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

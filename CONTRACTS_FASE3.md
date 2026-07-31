@@ -186,12 +186,26 @@ class AnalysisHealth(StrictModel):
     computed_at: datetime
 ```
 
-**Invariante no negociable (Principio 5, reforzado como regla de
-contrato):** ningún campo de `AnalysisHealth` puede aparecer como término
-de `SoftScoreComponent` ni de `HardRuleResult`. Se verifica con un test
-de arquitectura (`IMPLEMENTATION_ROADMAP_FASE3.md`) que falla si
-`src/policy/` importa `src/health/analysis_health.py` para algo distinto
-de mostrarlo en la explicación (`explainability/`).
+**Invariante no negociable (Principio 5), RECTIFICADO durante el Paso
+3.7** (el texto original de esta sección era más amplio de lo realmente
+aprobado e implementado — ver `CONTINUITY.md` §0.14 para el detalle
+completo de la corrección): ningún campo de `AnalysisHealth` puede
+aparecer como término de `SoftScoreComponent` — esa es la "doble
+ponderación dentro del Policy Engine" que el Principio 5 prohíbe, porque
+`ConfidenceProfile` ya agrega señales de calidad equivalentes en el
+score ponderado. Un campo de `AnalysisHealth` SÍ puede ser la fuente de
+evidencia de una Hard Rule específica y ya catalogada
+(`POLICY_ENGINE_SPEC.md` §2.2: `temporarily_stale_data` usa
+`staleness_seconds` desde el Paso 3.4.3) — una compuerta binaria de
+catálogo cerrado no es "ponderación", y `FASE3_EXECUTION_PLAN.md`, Paso
+3.7, ya formulaba el criterio de aceptación real de forma más estrecha
+("nunca como input de `soft_score.py`"), consistente con esto. Se
+verifica con un test de arquitectura que falla si `src/policy/soft_score.py`
+importa `src/health/analysis_health.py` o `src/health/schemas.py` para
+cualquier propósito — `hard_rules.py` puede importar `AnalysisHealth`
+(el contrato) exclusivamente para la regla `temporarily_stale_data`, ya
+catalogada, nunca para una regla nueva sin pasar por esta misma
+auditoría.
 
 ---
 
