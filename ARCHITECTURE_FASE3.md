@@ -167,7 +167,13 @@ resuelve en la implementación siguiendo el patrón exacto de
 policy/  ---depends on--->  signals/ (Fase 2), calibration/, payoff/
 calibration/  ---depends on--->  models/base.py (Fase 2)
 payoff/  ---depends on--->  pricing/ (Fase 2), signals/expected_value.py (Fase 2)
-evidence/  ---depends on--->  models/schemas.py (Fase 2), uncertainty/quality_score.py (Fase 2)
+evidence/  ---depends on--->  models/schemas.py (Fase 2), uncertainty/quality_score.py (Fase 2),
+                               calibration/schemas.py, policy/schemas.py (ConfidenceProfile --
+                               corrección aplicada en el Paso 3.3: EVIDENCE_EXPLAINABILITY_SPEC.md
+                               ya definía collect_evidence(record, calibration_output,
+                               confidence_profile), y esta lista no lo reflejaba; consistente con
+                               el patrón ya usado por opportunity/, que también depende de
+                               policy/schemas.py solo para tipos de datos, nunca para lógica)
 explainability/  ---depends on--->  policy/schemas.py, evidence/schemas.py   [NUNCA al revés]
 health/  ---depends on--->  uncertainty/quality_score.py (Fase 2), evidence/schemas.py
 opportunity/  ---depends on--->  policy/schemas.py, matching/ (Fase 2, solo tipos de id)

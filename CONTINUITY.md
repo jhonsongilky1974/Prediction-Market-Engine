@@ -23,7 +23,8 @@ código real de Fase 3 (ver §0.3).** **Actualizado de nuevo: 2026-07-30 —
 Rectificado un contrato del Paso 3.0 (§0.3.1) e implementado el Paso 3.1
 (Calibration Layer, sin entrenar) (ver §0.4).** **Actualizado de nuevo:
 2026-07-30 — Implementado el Paso 3.2 de Fase 3 (Payoff Model) (ver
-§0.5).**
+§0.5).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso 3.3
+de Fase 3 (Evidence Engine) (ver §0.6).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -327,6 +328,68 @@ Fase 1/2, este cierre documentado antes del commit.
 
 **Pendiente**: Paso 3.3 (Evidence Engine) — no iniciado, requiere nueva
 autorización explícita del usuario.
+
+## 0.6 Fase 3 — Paso 3.3: Evidence Engine (2026-07-30)
+
+El usuario autorizó el Paso 3.3. No apareció ninguna contradicción
+arquitectónica que exigiera detener la implementación (ninguna colisión
+con Fase 2, ninguna decisión de fórmula sin aprobar). Sí se encontró y
+corrigió, sin detener el paso, un desajuste menor de documentación:
+`ARCHITECTURE_FASE3.md` §4 no listaba `policy/schemas.py`
+(`ConfidenceProfile`) ni `calibration/schemas.py` (`CalibrationOutput`)
+como dependencias de `evidence/`, aunque la firma de `collect_evidence()`
+ya definida en `EVIDENCE_EXPLAINABILITY_SPEC.md` §1 siempre los exigió
+como parámetros. Se corrigió la línea de dependencia en
+`ARCHITECTURE_FASE3.md` (mismo patrón ya usado por `opportunity/`, que
+también depende de `policy/schemas.py` solo para tipos de datos, nunca
+para lógica) — no es una decisión nueva, es sincronizar el diagrama con
+una decisión ya tomada en el Paso 3.0 (dónde vive `ConfidenceProfile`).
+
+**Implementado**: `src/evidence/evidence_engine.py` —
+`collect_evidence(opportunity_id, record, calibration_output,
+confidence_profile, now=None) -> List[EvidenceItem]`, función 100%
+pura, sin ningún conocimiento de `PolicyDecision` ni de
+`src/policy/hard_rules.py`/`soft_score.py`/`decision.py`/`manifest.py`/
+`validation.py` ni de `src/explainability/` (verificado con test de
+arquitectura por inspección del código fuente). 4 plantillas
+(`EVIDENCE_EXPLAINABILITY_SPEC.md` §1.1): pitcher probable confirmado
+(FOR), confianza de emparejamiento marginal (AGAINST), modelo con
+historial de performance evaluado (FOR), divergencia significativa
+modelo/consenso (AGAINST) — cada una se genera únicamente cuando su
+campo fuente no es `None`, nunca como relleno.
+
+**Adaptación menor respecto al texto de diseño original**: la plantilla
+3 mencionaba "(n muestras)", pero `ConfidenceProfile` (contrato ya
+comiteado) no expone un conteo de muestras — se usa el score
+`model_reliability` en su lugar, documentado en el docstring del módulo,
+para no fabricar un número que la función no recibe.
+
+**Umbrales nuevos, PROVISIONAL** (sin respaldo empírico, mismo espíritu
+que constantes ya existentes en Fase 2): banda de confianza de
+emparejamiento marginal (+0.10 sobre el mínimo), umbral de
+`model_reliability` para FOR (50.0/100), umbral de divergencia
+modelo/consenso para AGAINST (0.10, mismo valor que
+`_DISPERSION_ZERO_AT` de `quality_score.py`, Fase 2, reutilizado por
+consistencia de escala).
+
+**Archivos**: `src/evidence/evidence_engine.py`,
+`tests/unit/test_evidence_engine.py` (los 2 declarados) +
+`ARCHITECTURE_FASE3.md` (corrección de documentación, no código). Cero
+archivos de Fase 1/2 tocados.
+
+**Tests**: 35 nuevos en `tests/unit/test_evidence_engine.py`, incluida
+una combinatoria completa de 16 casos (2⁴, supera el mínimo de 8 pedido)
+que confirma la regla de no-fabricación sobre el producto cruzado de las
+4 plantillas. Suite completa: 637 + 35 = **672 passed, 0 failed**.
+`data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.3**: cumplida — función pura, las 4
+plantillas cubiertas una a una más la combinatoria completa, regla de
+dependencia verificada por test, sin tocar Fase 1/2, este cierre
+documentado antes del commit.
+
+**Pendiente**: Paso 3.4.1 (Policy Engine — Eligibility) — no iniciado,
+requiere nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
