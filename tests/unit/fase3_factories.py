@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from src.calibration.schemas import CalibrationOutput
 from src.evaluation.schemas import EvaluationRecord, EvaluationScope
 from src.evidence.schemas import EvidenceDirection, EvidenceItem
+from src.explainability.schemas import ExplanationOutput
 from src.health.schemas import AnalysisHealth
 from src.models.base import ModelStatus
 from src.models.schemas import Sport
@@ -156,6 +157,23 @@ def make_evidence_item(**overrides) -> EvidenceItem:
     )
     base.update(overrides)
     return EvidenceItem(**base)
+
+
+def make_explanation_output(**overrides) -> ExplanationOutput:
+    """ExplanationOutput -- adición contractual correctiva del Paso 3.6
+    (ver src/explainability/schemas.py, CONTINUITY.md §0.13)."""
+    base = dict(
+        opportunity_id="opp-1",
+        evaluation_id="oe-1",
+        headline="PASS (NO_VALUE) — score 35.0/100",
+        reasons_explained=["SOFT_SCORE_BELOW_GLOBAL: aggregate_soft_score=35.0 < enter_global_threshold=60.0"],
+        evidence_for=["Pitcher probable confirmado"],
+        evidence_against=[],
+        disclaimers=[],
+        generated_at=NOW,
+    )
+    base.update(overrides)
+    return ExplanationOutput(**base)
 
 
 def make_eligibility_result(**overrides) -> EligibilityResult:

@@ -272,7 +272,7 @@ contrato encontrados (incluye 2 adicionales de menor impacto).
 |---|---|
 | `PLAN_MASTER_FASE3.md` | Este documento — consolidación y correcciones |
 | [`ARCHITECTURE_FASE3.md`](ARCHITECTURE_FASE3.md) | Árbol modular, flujo de datos |
-| [`CONTRACTS_FASE3.md`](CONTRACTS_FASE3.md) | Los 16 contratos de datos, campos, invariantes |
+| [`CONTRACTS_FASE3.md`](CONTRACTS_FASE3.md) | Los contratos de datos, campos, invariantes (16 originales + `ExplanationOutput`, adición correctiva del Paso 3.6) |
 | [`POLICY_ENGINE_SPEC.md`](POLICY_ENGINE_SPEC.md) | Hard Rules, Soft Score, decisión |
 | [`MODEL_PIPELINE_SPEC.md`](MODEL_PIPELINE_SPEC.md) | Arquitectura jerárquica de P_model |
 | [`EVIDENCE_EXPLAINABILITY_SPEC.md`](EVIDENCE_EXPLAINABILITY_SPEC.md) | Evidence Engine / Explainability Engine |

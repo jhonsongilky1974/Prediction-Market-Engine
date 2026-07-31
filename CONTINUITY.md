@@ -36,6 +36,9 @@ Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
 Decision + Manifest + Validation), CIERRA EL PASO 3.4 COMPLETO (ver
 §0.11).** **Actualizado de nuevo: 2026-07-31 — Implementado el Paso 3.5
 de Fase 3 (Opportunity Lifecycle + persistencia) (ver §0.12).**
+**Actualizado de nuevo: 2026-07-31 — Implementado el Paso 3.6 de Fase 3
+(Explainability Engine), con una adición contractual correctiva
+(`ExplanationOutput`) (ver §0.13).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -805,6 +808,71 @@ paso del roadmap actual lo hace todavía).
 
 **Pendiente**: Paso 3.6 (Explainability Engine) — no iniciado, requiere
 nueva autorización explícita del usuario.
+
+## 0.13 Fase 3 — Paso 3.6: Explainability Engine (2026-07-31)
+
+### Adición contractual correctiva (autorizada explícitamente antes de tocar código)
+
+Al preparar `explain()`, se encontró que `ExplanationOutput`
+(esbozado en `EVIDENCE_EXPLAINABILITY_SPEC.md` §2 durante la auditoría
+original) nunca se incluyó en la lista cerrada de 16 contratos de
+`CONTRACTS_FASE3.md`, ni se scaffoldeó `src/explainability/` en el Paso
+3.0 — `FASE3_EXECUTION_PLAN.md`, Paso 3.6, solo declaraba
+`explainability_engine.py` como archivo nuevo, asumiendo implícitamente
+un contrato que no existía. Siguiendo la instrucción explícita del
+usuario de detenerse antes de introducir comportamiento nuevo o tocar
+contratos, se reportaron 3 alternativas; el usuario aprobó la
+Alternativa 1.
+
+**Aplicado**: `src/explainability/schemas.py` (nuevo) — `ExplanationOutput`
+como `StrictModel`, mismo patrón que los 16 contratos originales
+(invariantes: `headline`/`reasons_explained` no vacíos, `generated_at`
+tz-aware). Documentado como §17 de `CONTRACTS_FASE3.md` (adición
+correctiva, no un contrato "menos válido" que los 16 originales — misma
+exigencia de tests: invariantes, `extra="forbid"`, round-trip completo,
+factory en `fase3_factories.py`). `PLAN_MASTER_FASE3.md` actualizado
+para reflejar 17 contratos totales.
+
+### Implementado
+
+`src/explainability/explainability_engine.py` — `explain(policy_decision,
+evidence_items, evaluation_id, calibration_version=None,
+net_ev_status_is_unknown=False, now=None) -> ExplanationOutput`, función
+100% pura. Consume únicamente `PolicyDecision`/`EvidenceItem[]` ya
+calculados — nunca re-deriva desde `NormalizedRecord` ni desde
+`QualityScoreOutput` (Principio 6, verificado por test de arquitectura
+vía AST: solo puede importar `policy.schemas`/`evidence.schemas`/
+`explainability.schemas`). `calibration_version`/`net_ev_status_is_unknown`
+se reciben como primitivos (`Optional[str]`/`bool`), no como
+`CalibrationOutput`/`NetEvStatus` completos -- decisión de diseño (no
+una contradicción: el propio criterio de aceptación de este paso ya
+exigía que la función tuviera acceso a esa información de algún modo)
+que evita ampliar la regla de dependencia de `ARCHITECTURE_FASE3.md` §4
+para incluir `calibration/`/`payoff/`.
+
+`headline` se construye enteramente desde campos de `PolicyDecision`
+(`signal_type`/`disposition`/`aggregate_soft_score`) -- nunca desde
+datos externos a ese contrato. `disclaimers` obligatorio no vacío
+cuando `calibration_version is None` o `net_ev_status_is_unknown=True`,
+verificado con los 4 casos (ninguno, uno, otro, ambos).
+
+**Archivos**: `src/explainability/__init__.py`,
+`src/explainability/schemas.py` (adición aprobada),
+`src/explainability/explainability_engine.py` (declarado en el plan) +
+`tests/unit/fase3_factories.py` (aditivo, `make_explanation_output`).
+Cero archivos de Fase 1/2 tocados.
+
+**Tests**: 7 (`test_explainability_schemas.py`, mismo rigor que los 16
+contratos originales) + 14 (`test_explainability_engine.py`, incluido
+el test de arquitectura de imports). Suite completa: 823 + 21 = **844
+passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.6**: cumplida — toda razón mostrada en
+`ExplanationOutput` es trazable a un `SignalReason` o `EvidenceItem`
+real, verificado por test.
+
+**Pendiente**: Paso 3.7 (Analysis Health) — no iniciado, requiere nueva
+autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

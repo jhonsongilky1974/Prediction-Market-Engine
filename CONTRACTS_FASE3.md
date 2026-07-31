@@ -13,7 +13,12 @@ si existe una lista de motivos/faltantes en el contrato, se registra ahí
 Todo timestamp es `datetime` tz-aware UTC obligatorio — mismo invariante
 que `PModelOutput`/`SignalInputs`/`HistoryRepository` ya exigen
 (`ValueError` si es naive). Ver `TEMPORAL_REPRODUCIBILITY_SPEC.md` para
-el contrato temporal transversal que aplica a los 16 contratos de abajo.
+el contrato temporal transversal que aplica a los contratos de abajo.
+
+Este documento definía originalmente 16 contratos (§1-§16, cierre de la
+auditoría inicial). §17 (`ExplanationOutput`) se añadió durante el Paso
+3.6 como adición contractual correctiva, aprobada explícitamente por el
+usuario — ver §17 y `CONTINUITY.md` §0.13 para el detalle completo.
 
 ---
 
@@ -459,6 +464,50 @@ Ver `src/signals/signal_schema.py` (Fase 2, sin cambios) — campos:
 `p_model_raw` (con la advertencia de trazabilidad de §2); `ev_neto` se
 puebla desde `PayoffEstimate.ev_to_settlement` cuando
 `net_ev_status == COMPUTED`, si no permanece `None` exactamente como hoy.
+
+---
+
+## 17. `ExplanationOutput` [NUEVO — ADICIÓN CONTRACTUAL CORRECTIVA, Paso 3.6]
+
+`EVIDENCE_EXPLAINABILITY_SPEC.md` §2 esbozó este contrato durante la
+auditoría original, pero quedó fuera de la lista cerrada de 16 (§1-§16
+de este documento) y del scaffolding del Paso 3.0 — `src/explainability/`
+no existía. Se incorpora aquí, formalmente, como 17ª entrada, aprobada
+explícitamente por el usuario antes de crear el archivo (ver
+`CONTINUITY.md` §0.13). No es un requisito nuevo: el Principio 6/14
+(Evidence Engine y Explainability Engine separados) siempre exigió que
+este contrato existiera en algún lugar — solo faltaba enumerarlo.
+
+```python
+class ExplanationOutput(StrictModel):
+    opportunity_id: str
+    evaluation_id: str
+    headline: str                      # construido solo desde PolicyDecision
+                                        # (signal_type/disposition/aggregate_soft_score)
+    reasons_explained: List[str]       # una entrada por SignalReason real, nunca vacío
+    evidence_for: List[str]            # subset de EvidenceItem.fact con direction=FOR
+    evidence_against: List[str]        # subset de EvidenceItem.fact con direction=AGAINST
+    disclaimers: List[str]             # obligatorio no vacío si calibration_version=None
+                                        # o net_ev_status=UNKNOWN (recibidos como primitivos,
+                                        # ver src/explainability/explainability_engine.py)
+    generated_at: datetime
+```
+
+**Invariantes:**
+- `headline` no puede estar vacío.
+- `reasons_explained` no puede estar vacío — toda explicación traza al menos un `SignalReason`
+  real (mismo invariante que `PolicyDecision.reasons`, §11).
+- `generated_at` tz-aware obligatorio.
+- `evidence_for`/`evidence_against`/`disclaimers` pueden estar vacíos (ausencia de evidencia o de
+  advertencias es un estado válido, nunca se fabrica contenido de relleno).
+
+Producido por `explain(policy_decision, evidence_items, evaluation_id, calibration_version=None,
+net_ev_status_is_unknown=False, now=None)` (`src/explainability/explainability_engine.py`, Paso 3.6)
+— consume únicamente `PolicyDecision` (§11) y `EvidenceItem[]` (§6) ya calculados, nunca re-deriva
+desde `NormalizedRecord` ni desde `QualityScoreOutput` (Principio 6, verificado por test de
+arquitectura). `calibration_version`/`net_ev_status_is_unknown` se reciben como primitivos
+(`Optional[str]`/`bool`), no como `CalibrationOutput`/`NetEvStatus` completos, para no ampliar la
+regla de dependencia de `ARCHITECTURE_FASE3.md` §4.
 
 ---
 
