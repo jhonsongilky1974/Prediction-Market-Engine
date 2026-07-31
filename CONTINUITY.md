@@ -43,7 +43,9 @@ de Fase 3 (Opportunity Lifecycle + persistencia) (ver §0.12).**
 rectificación al invariante del Principio 5 en `CONTRACTS_FASE3.md` §5
 (ver §0.14).** **Actualizado de nuevo: 2026-07-31 — Implementado el Paso
 3.8 de Fase 3 (Evaluation & Learning Framework, andamiaje con fixtures
-sintéticos) (ver §0.15).**
+sintéticos) (ver §0.15).** **Actualizado de nuevo: 2026-07-31 — Paso 3.9
+declarado innecesario por hallazgo arquitectónico; CIERRE DEL ROADMAP
+REQUIRED FOR PHASE 3 (ver §0.16).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1006,6 +1008,111 @@ explícitamente aquí.
 **Pendiente**: Paso 3.9 (registro genérico de modelos) — no iniciado,
 requiere nueva autorización explícita del usuario. Último paso del
 roadmap aprobado.
+
+## 0.16 Paso 3.9 declarado innecesario + CIERRE DEL ROADMAP REQUIRED FOR PHASE 3 (2026-07-31)
+
+### Paso 3.9: hallazgo arquitectónico, autorizado sin implementar código
+
+Al preparar la implementación, verificar directamente el código reveló
+que la premisa del Paso 3.9 ("`registry.py` hoy solo indexa MLB, hay que
+generalizarlo") es falsa: `src/models/tennis_baseline.py` (Fase 2, Paso
+11) ya tiene su propio `TennisTrainedArtifact` y su propia
+`load_latest_tennis_artifact()` -- persistencia completa e
+independiente, mismo patrón de archivos hermanos que usa `registry.py`
+para MLB. No es un descuido: el docstring de `tennis_baseline.py`
+documenta una **decisión explícita y ya aprobada del Design Proposal de
+Fase 2** (Ambigüedad C/D): *"`registry.py` está acoplado a
+`MlbTrainedArtifact` específicamente"*, cada deporte con persistencia
+propia, deliberadamente desacoplada. `TennisTrainedArtifact` tampoco es
+un superset de `MlbTrainedArtifact` (tiene `round_categories: List[str]`
+propio) -- no son unificables bajo un tipo genérico sin inventar algo
+no pedido.
+
+Siguiendo la instrucción explícita del usuario, se detuvo la
+implementación antes de escribir cualquier código, se reportaron 3
+alternativas; el usuario aprobó la Alternativa 1: declarar el Paso 3.9
+innecesario, sin implementar ningún código, sin romper el
+desacoplamiento entre deportes que Fase 2 ya estableció
+deliberadamente. `FASE3_EXECUTION_PLAN.md` actualizado con el hallazgo
+completo, texto original del paso conservado como registro histórico
+(mismo criterio que todo este documento: no se reescribe retroactivamente
+lo ya aprobado, se documenta la desviación explícitamente).
+
+**Cero archivos de `src/` tocados por este hallazgo** -- es
+exclusivamente documental.
+
+### CIERRE DEL ROADMAP REQUIRED FOR PHASE 3 -- auditoría final
+
+Verificación de punta a punta ejecutada al cerrar este documento (no una
+recopilación de los cierres individuales, sino comandos re-ejecutados
+ahora mismo contra el estado real del repositorio):
+
+- **16 commits** desde `v2.0-baseline` (`4f602cf` a `66875f0`, más este
+  cierre): 1 auditoría documental, 1 plan de ejecución, 14 pasos de
+  implementación (3.0, la rectificación de 3.0, 3.1, 3.2, 3.3, 3.4.1-
+  3.4.5, 3.5, 3.6, 3.7, 3.8) + este cierre.
+- **`git diff --stat v2.0-baseline HEAD` sobre los paquetes de Fase 1/2**
+  (`src/models`, `src/signals`, `src/pricing`, `src/uncertainty`,
+  `src/storage`, `src/backtesting`, `src/evaluation`, `src/matching`,
+  `src/quality`, `src/connectors`, `src/normalization`): únicamente 3
+  archivos, los 3 ya aprobados explícitamente -- `src/backtesting/metrics.py`
+  (aditivo, Paso 3.8), `src/evaluation/learning.py` y
+  `src/evaluation/schemas.py` (archivos NUEVOS dentro del paquete
+  `evaluation/` ya existente, Pasos 3.0/3.8). `src/evaluation/reports.py`
+  (Fase 2) confirmado sin ningún cambio. Ningún otro archivo de Fase 1/2
+  tocado en ningún momento de todo el proceso.
+- **Suite completa**: `pytest -q` → **895 passed, 0 failed** (498 de
+  Fase 2 + 397 nuevos de Fase 3, acumulados sin ninguna regresión en
+  ningún punto del proceso).
+- **`data/models/`**: únicamente `.gitkeep`.
+- **`data/engine.db`**: MD5 `663480bdd2526d88351e19dcb84c0bfa`, sin
+  cambios desde antes del Paso 3.5 (primer y único paso que construyó
+  código capaz de tocarlo, y solo lo hizo contra `tmp_path` en tests).
+- **`v2.0-baseline`**: sin mover ni recrear en ningún momento.
+
+### Qué se construyó (resumen)
+
+Los 16 contratos originales + `ExplanationOutput` (adición correctiva
+del Paso 3.6, ahora 17) como código validado (`pydantic`,
+`extra="forbid"`); Calibration Layer (sin calibrador real entrenado);
+Payoff Model (siempre `net_ev_status=UNKNOWN`, D-3 pendiente); Evidence
+Engine (4 plantillas, no-fabricación verificada); Policy Engine completo
+(Eligibility, 7 Hard Block Rules, 6 Hard Hold Rules incluida
+`unresolved_side_mapping` siempre activa, Soft Score con no-compensación
+verificada, `decide()` orquestando las 4 etapas con fail-safe);
+`PolicyManifest` con validación de Corrección H (schema/rango/
+consistencia); Opportunity Lifecycle con persistencia append-only
+(probada solo contra `tmp_path`); Explainability Engine; Analysis
+Health (con su regla de no-uso en Soft Score verificada por test);
+Evaluation & Learning Framework (andamiaje de 5 dimensiones con
+fixtures sintéticos).
+
+### Qué queda estructuralmente bloqueado (reafirmado, no resuelto aquí)
+
+Exactamente lo que `FASE3_AUDIT_REPORT.md` §15 y `PLAN_MASTER_FASE3.md`
+§8 ya concluían, ahora confirmado en código real y probado en cada capa
+(Paso 3.2, 3.4.3, 3.4.4, 3.4.5): mientras D-1 (histórico real), D-2
+(mapeo participante↔YES de Kalshi) y D-3 (fórmula de costos reales) no
+se resuelvan con una decisión explícita del usuario, el sistema **no
+puede producir un `ENTER` real** -- `unresolved_side_mapping` fuerza
+`WATCH` incondicionalmente, y `ev_neto_strength` (mínimo crítico) nunca
+puede pasar su umbral mientras `net_ev_status` sea `UNKNOWN` de forma
+universal. Esto es el comportamiento correcto y deliberado, no una
+limitación de esta implementación.
+
+### Conclusión
+
+**Todo el roadmap REQUIRED FOR PHASE 3 de `IMPLEMENTATION_ROADMAP_FASE3.md`
+está completo.** Las columnas RECOMMENDED LATER y REJECTED AS PREMATURE
+permanecen exactamente donde `FASE3_AUDIT_REPORT.md` las dejó -- ninguna
+se promovió a REQUIRED sin pasar por una decisión explícita del usuario
+en el camino. La conclusión CONDITIONAL GO de `FASE3_AUDIT_REPORT.md`
+§15 se mantiene sin cambios: la especificación y ahora también la
+implementación completa de la arquitectura (contratos, Policy Engine,
+Payoff Model, Evidence/Explainability, Opportunity Lifecycle, Evaluation
+Framework) están listas y probadas con fixtures; la puesta en producción
+de cualquier etapa que dependa de histórico real, del mapeo de Kalshi, o
+de costos reales, sigue bloqueada por D-1/D-2/D-3, sin resolver.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

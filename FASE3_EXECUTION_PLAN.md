@@ -715,7 +715,54 @@ representar performance real (se documenta explícitamente en
 
 ---
 
-## Paso 3.9 — Registro genérico de modelos (extensión aditiva)
+## Paso 3.9 — Registro genérico de modelos — DECLARADO INNECESARIO (2026-07-31)
+
+**Estado: NO IMPLEMENTADO, NO SE IMPLEMENTARÁ. Cerrado por hallazgo
+arquitectónico, no por falta de tiempo.**
+
+Este paso, tal como se describía originalmente en la tabla de abajo
+(conservada sin editar como registro histórico de lo que se propuso, tal
+como en toda esta especificación "no se reescribe retroactivamente"), se
+basaba en una premisa incorrecta: que `src/models/registry.py` "hoy solo
+indexa artefactos MLB" y necesitaba generalizarse para soportar otros
+deportes. Al preparar la implementación (Paso 3.9, 2026-07-31), se
+verificó directamente contra el código que esa premisa es falsa.
+
+**Hallazgo**: `src/models/tennis_baseline.py` (Fase 2, Paso 11) ya tiene
+su propio `TennisTrainedArtifact` y su propia `load_latest_tennis_artifact()`
+-- persistencia completa e independiente, mismo patrón de archivos
+hermanos (`.joblib`+`.metadata.json`) que usa `registry.py` para MLB. No
+es un descuido: el docstring de `tennis_baseline.py` documenta una
+**decisión explícita y ya aprobada del Design Proposal de Fase 2**
+(Ambigüedad C/D): *"Persistencia INDEPENDIENTE, propia de este módulo...
+sin importar/modificar `registry.py` -- `registry.py` está acoplado a
+`MlbTrainedArtifact` específicamente."* Fase 2 ya resolvió la
+extensibilidad multi-deporte (Principio 16) mediante el patrón "módulo
+propio por deporte, con su propio tipo de artefacto y su propio loader"
+-- deliberadamente, no como un registro genérico único.
+
+`TennisTrainedArtifact` tampoco es un superset estructural de
+`MlbTrainedArtifact` (tiene un campo propio, `round_categories: List[str]`,
+que MLB no tiene) -- no son intercambiables bajo un tipo genérico único
+sin inventar una unificación que nadie pidió.
+
+**Por qué no se implementa de ninguna forma**: añadir
+`load_latest_artifact(sport, ...)` a `registry.py` recuperaría
+exactamente el acoplamiento entre deportes que la decisión de Fase 2
+evitó a propósito. Un dispatcher fuera de `registry.py` requeriría un
+archivo nuevo sin ningún llamador real que lo necesite hoy -- código sin
+propósito. Ver el reporte completo de esta decisión (3 alternativas,
+aprobación explícita del usuario para la Alternativa 1) en
+`CONTINUITY.md` §0.16.
+
+**Conclusión**: el objetivo real de este paso ("extensibilidad
+multi-deporte del registro de modelos") ya estaba cumplido por el diseño
+definitivo de Fase 2 antes de que Fase 3 empezara. No se modifica
+ningún archivo, no se rompe el desacoplamiento entre deportes, no se
+introduce código sin uso.
+
+<details>
+<summary>Texto original del paso (histórico, conservado sin editar)</summary>
 
 | | |
 |---|---|
@@ -751,6 +798,19 @@ vuelve a su estado de `v2.0-baseline` exacto.
 **Definición de "Done"**: `git diff src/models/registry.py` muestra
 únicamente líneas añadidas, cero líneas eliminadas o modificadas sobre
 código existente.
+
+</details>
+
+---
+
+## CIERRE DEL ROADMAP (2026-07-31)
+
+Los 14 pasos con código de este documento (3.0 a 3.8, incluidos los 5
+sub-bloques de 3.4) están completos, comiteados y auditados. El Paso 3.9
+queda formalmente cerrado como innecesario (ver arriba). **No queda
+ningún paso pendiente de la columna REQUIRED FOR PHASE 3 de
+`IMPLEMENTATION_ROADMAP_FASE3.md`.** Ver `CONTINUITY.md` §0.16 para la
+auditoría final de cierre completa.
 
 ---
 
