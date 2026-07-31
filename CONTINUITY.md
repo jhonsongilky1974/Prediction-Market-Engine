@@ -26,7 +26,9 @@ Rectificado un contrato del Paso 3.0 (§0.3.1) e implementado el Paso 3.1
 §0.5).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso 3.3
 de Fase 3 (Evidence Engine) (ver §0.6).** **Actualizado de nuevo:
 2026-07-30 — Implementado el Paso 3.4.1 de Fase 3 (Policy Engine —
-Eligibility) (ver §0.7).**
+Eligibility) (ver §0.7).** **Actualizado de nuevo: 2026-07-30 —
+Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
+(ver §0.8).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -435,6 +437,65 @@ regla de dependencia, pureza, `now` naive). Suite completa: 672 + 10 =
 **Definición de "Done" del Paso 3.4.1**: cumplida.
 
 **Pendiente**: Paso 3.4.2 (Policy Engine — Hard Block Rules) — no
+iniciado, requiere nueva autorización explícita del usuario.
+
+## 0.8 Fase 3 — Paso 3.4.2: Policy Engine — Hard Block Rules (2026-07-30)
+
+Ninguna contradicción arquitectónica. Dos huecos deliberados, documentados
+explícitamente en vez de inventar una decisión no aprobada:
+
+- `invalid_event`: `POLICY_ENGINE_SPEC.md` §2.1 describe el disparador
+  como "`EventStatus in (CANCELLED,)` o inconsistencia de horario
+  irrecuperable" -- solo se implementó la primera mitad
+  (`status == CANCELLED`); "inconsistencia de horario irrecuperable" no
+  tiene una definición concreta en ningún documento aprobado, así que no
+  se evaluó. Queda como hueco explícito para una futura decisión, no
+  oculto en el código.
+- `incompatible_contract`: `NormalizedRecord.market` (Fase 1/2) solo
+  modela contratos binarios YES/NO -- no existe ningún campo que
+  represente un contrato multi-outcome. La regla existe (satisface el
+  catálogo cerrado de 7) pero `triggered=False` siempre contra el
+  esquema actual, documentado explícitamente como tal, verificado por
+  test dedicado (`test_incompatible_contract_never_triggers_today`).
+
+**Implementado**: `src/policy/hard_rules.py` — 6 funciones puras
+(`check_unsafe_matching`, `check_invalid_event`,
+`check_invalid_or_closed_market`, `check_incompatible_contract`,
+`check_corrupted_critical_data`, `check_known_result`) más
+`evaluate_hard_block_rules()` que las agrega. La séptima regla
+(`check_non_recoverable_inconsistency`) queda deliberadamente fuera del
+evaluador -- su fuente de evidencia es "interno" (una excepción real
+capturada por el orquestador, Paso 3.4.5, no un campo de
+`NormalizedRecord`), así que vive como función independiente que ese
+futuro orquestador invocará dentro de su propio `try/except`.
+
+`check_known_result` reutiliza `HistoryRepository.get_results_for_event`
+(Fase 2, sin cambios) y respeta el filtro temporal: un resultado
+registrado ANTES de `data_cutoff_timestamp` dispara el bloqueo (era
+conocimiento público en ese instante); uno registrado DESPUÉS se ignora
+correctamente (usarlo sí sería la fuga) — cubierto por
+`test_known_result_triggers_when_recorded_before_cutoff` y
+`test_known_result_does_not_trigger_when_recorded_after_cutoff`.
+`check_corrupted_critical_data` compara `validation_errors` (texto libre,
+Fase 1/2) contra los nombres "bare" de `CORE_FIELDS` -- heurística
+PROVISIONAL documentada como tal (sin campo estructurado en Fase 1/2
+que vincule un error a un nombre de campo exacto).
+
+**Archivos**: exactamente los 2 declarados —
+`src/policy/hard_rules.py`, `tests/unit/test_hard_block_rules.py`. Cero
+archivos de Fase 1/2 tocados.
+
+**Tests**: 24 nuevos, incluidos los dos casos de fuga temporal de
+`known_result` (con `db_path=tmp_path`, nunca la ruta de producción) y
+el catálogo cerrado de 7 `rule_id`. Suite completa: 682 + 24 = **706
+passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.4.2**: cumplida — las 7 reglas
+existen (6 en el evaluador + 1 independiente), cada una trazable a un
+campo real o a la evidencia "interno" que le corresponde, sin tocar
+Fase 1/2.
+
+**Pendiente**: Paso 3.4.3 (Policy Engine — Hard Hold Rules) — no
 iniciado, requiere nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
