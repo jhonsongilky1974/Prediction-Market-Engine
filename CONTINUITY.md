@@ -24,7 +24,9 @@ Rectificado un contrato del Paso 3.0 (§0.3.1) e implementado el Paso 3.1
 (Calibration Layer, sin entrenar) (ver §0.4).** **Actualizado de nuevo:
 2026-07-30 — Implementado el Paso 3.2 de Fase 3 (Payoff Model) (ver
 §0.5).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso 3.3
-de Fase 3 (Evidence Engine) (ver §0.6).**
+de Fase 3 (Evidence Engine) (ver §0.6).** **Actualizado de nuevo:
+2026-07-30 — Implementado el Paso 3.4.1 de Fase 3 (Policy Engine —
+Eligibility) (ver §0.7).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -390,6 +392,50 @@ documentado antes del commit.
 
 **Pendiente**: Paso 3.4.1 (Policy Engine — Eligibility) — no iniciado,
 requiere nueva autorización explícita del usuario.
+
+## 0.7 Fase 3 — Paso 3.4.1: Policy Engine — Eligibility (2026-07-30)
+
+Primer sub-bloque del Paso 3.4 (Policy Engine), el más grande del
+roadmap, subdividido en 5 commits independientes según lo acordado. El
+usuario confirmó el protocolo exacto por subpaso: autoriza → se
+implementa → tests del subpaso → suite completa → resumen → el usuario
+audita antes de autorizar el siguiente.
+
+No apareció ninguna contradicción arquitectónica. Sí se corrigió, antes
+de ejecutar la suite completa, un falso positivo en el propio test de
+arquitectura nuevo de este subpaso: `test_does_not_import_hard_rules_or_soft_score_or_decision`
+comparaba el texto completo del archivo (incluido el docstring, que
+menciona en prosa "hard_rules.py" al explicar qué NO hace este módulo)
+contra una lista de tokens prohibidos — el docstring disparaba un falso
+"import" detectado. Corregido para inspeccionar únicamente los nodos
+`Import`/`ImportFrom` del AST, no el texto crudo del archivo. No afecta
+`src/policy/eligibility.py` en sí (nunca importó nada prohibido) — era
+un defecto del test, detectado y corregido antes del commit, no una
+contradicción de diseño.
+
+**Implementado**: `src/policy/eligibility.py` —
+`check_eligibility(opportunity_id, event_id, sport, side, generated_at,
+now=None) -> EligibilityResult`, función 100% pura, primer gate del
+Policy Engine (`POLICY_ENGINE_SPEC.md` §1.1, etapa [1]). Los 4 campos se
+reciben como `Optional` deliberadamente -- `SignalInputs` (Fase 2) ya
+los exige no-nulos por tipo, así que este gate existe para decidir,
+ANTES de intentar construir un `SignalInputs`, si los datos de origen
+alcanzan para evaluarlo en absoluto. No conoce Hard Rules ni Soft Score
+(verificado por test de arquitectura vía AST).
+
+**Archivos**: exactamente los 2 declarados —
+`src/policy/eligibility.py`, `tests/unit/test_policy_eligibility.py`.
+Cero archivos de Fase 1/2 tocados.
+
+**Tests**: 10 nuevos (un caso por cada uno de los 4 campos obligatorios
+ausente, `event_id` vacío/blank, todos ausentes a la vez, caso feliz,
+regla de dependencia, pureza, `now` naive). Suite completa: 672 + 10 =
+**682 passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.4.1**: cumplida.
+
+**Pendiente**: Paso 3.4.2 (Policy Engine — Hard Block Rules) — no
+iniciado, requiere nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
