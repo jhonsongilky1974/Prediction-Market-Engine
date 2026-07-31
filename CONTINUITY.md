@@ -41,7 +41,9 @@ de Fase 3 (Opportunity Lifecycle + persistencia) (ver §0.12).**
 (`ExplanationOutput`) (ver §0.13).** **Actualizado de nuevo: 2026-07-31
 — Implementado el Paso 3.7 de Fase 3 (Analysis Health), con una
 rectificación al invariante del Principio 5 en `CONTRACTS_FASE3.md` §5
-(ver §0.14).**
+(ver §0.14).** **Actualizado de nuevo: 2026-07-31 — Implementado el Paso
+3.8 de Fase 3 (Evaluation & Learning Framework, andamiaje con fixtures
+sintéticos) (ver §0.15).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -948,6 +950,62 @@ este punto en adelante.
 
 **Pendiente**: Paso 3.8 (Evaluation & Learning Framework, estructura) —
 no iniciado, requiere nueva autorización explícita del usuario.
+
+## 0.15 Fase 3 — Paso 3.8: Evaluation & Learning Framework (2026-07-31)
+
+Sin contradicciones arquitectónicas ni de contrato. Ninguna decisión
+requirió pausar la implementación.
+
+**Implementado**:
+- `src/backtesting/metrics.py` (extendido, aditivo) — `ece()` (reutiliza
+  `calibration_curve()` tal cual, promedio ponderado de
+  `|mean_predicted - mean_actual|`), `clv()` (Closing Line Value de una
+  observación, `closing_price - entry_price`, `None` si algún precio
+  está fuera de `[0,1]` -- nunca se clampa, mismo principio de
+  `market_pricing.py` Fase 2), `roi_teorico()`, `drawdown()` (caída
+  peak-to-trough ABSOLUTA, no porcentual -- decisión explícita para no
+  asumir una normalización no pedida), `profit_factor()`. Las 4
+  funciones originales de Fase 2 no se tocaron (mismo archivo de test
+  extendido, sus tests siguen intactos).
+- `src/evaluation/learning.py` (nuevo) — `build_evaluation_record()`:
+  ensambla un `EvaluationRecord` (Paso 3.0) a partir de un
+  `metric_value` ya calculado por el llamador, validando que
+  `metric_name` pertenezca al catálogo cerrado de su `EvaluationScope`
+  (`EVALUATION_LEARNING_SPEC.md` §1) antes de construir el registro.
+  `record_id` determinístico (`compute_evaluation_record_id`, mismo
+  espíritu que `compute_opportunity_id`, Paso 3.0). El invariante
+  `sample_size=0 ⟹ metric_value=None` ya estaba en el contrato
+  `EvaluationRecord` desde el Paso 3.0 -- este módulo no necesitó
+  reimplementarlo, solo lo hereda al construir.
+
+**Advertencia de alcance reafirmada** (GATE-0, `PLAN_MASTER_FASE3.md`
+§0, `FASE3_AUDIT_REPORT.md` §15): todo `EvaluationRecord` producido en
+este paso usa fixtures sintéticos pequeños (4 muestras en el caso de
+integración de `brier_score`, por ejemplo) -- ninguno pretende
+representar performance real del sistema. Sigue bloqueado por DECISIÓN
+PENDIENTE D-1 (histórico real: `feature_snapshots`/`event_results` en 0
+filas).
+
+**Archivos**: `src/backtesting/metrics.py` (modificado, aditivo),
+`src/evaluation/learning.py` (nuevo) + sus tests. Cero archivos de Fase
+1/2 tocados fuera de la extensión aditiva ya declarada — confirmado que
+ninguna de las 4 funciones/tests originales de `metrics.py` cambió.
+
+**Tests**: 19 nuevos en `tests/unit/test_backtesting_metrics.py`
+(extendido, mismo archivo que las 14 pruebas de Fase 2, todas intactas)
++ 18 nuevos en `tests/unit/test_evaluation_learning.py` (incluido un
+caso por cada una de las 5 dimensiones y 3 casos de integración de
+punta a punta con `metrics.py`). Suite completa: 858 + 19 + 18 = **895
+passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.8**: cumplida -- framework de 5
+dimensiones ensamblable con fixtures; ningún `EvaluationRecord`
+producido pretende representar performance real, documentado
+explícitamente aquí.
+
+**Pendiente**: Paso 3.9 (registro genérico de modelos) — no iniciado,
+requiere nueva autorización explícita del usuario. Último paso del
+roadmap aprobado.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

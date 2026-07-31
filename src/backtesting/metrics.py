@@ -6,11 +6,17 @@ Funciones puras `(y_true, y_pred) -> métrica` -- no conocen
 `HistoryRepository`, `NormalizedRecord` ni ningún modelo concreto (mismo
 principio de agnosticismo de `dataset.py`/`splitter.py`). Nunca fabrican
 un valor cuando la entrada es insuficiente: devuelven `None`.
+
+Extensión aditiva (Fase 3, Paso 3.8, ver FASE3_EXECUTION_PLAN.md y
+EVALUATION_LEARNING_SPEC.md §3): `ece`, `clv`, `roi_teorico`, `drawdown`,
+`profit_factor` -- misma disciplina que las 4 funciones originales de
+Fase 2 (`None` sin muestras, nunca un valor fabricado). Ninguna firma
+existente se modifica.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 DEFAULT_CALIBRATION_BINS = 10  # aprobado explícitamente por el usuario
 
@@ -93,3 +99,85 @@ def calibration_curve(
             )
         )
     return result
+
+
+# ---------------------------------------------------------------------
+# Extensión aditiva (Fase 3, Paso 3.8) -- EVALUATION_LEARNING_SPEC.md §3
+# ---------------------------------------------------------------------
+
+
+def ece(
+    y_true: Sequence[int], y_pred: Sequence[float], n_bins: int = DEFAULT_CALIBRATION_BINS
+) -> Optional[float]:
+    """Expected Calibration Error: promedio ponderado (por n_samples) de
+    |mean_predicted - mean_actual| sobre los buckets de calibration_curve()
+    -- reutiliza esa función tal cual, no reimplementa el binning. `None`
+    si no hay muestras."""
+    if len(y_true) == 0:
+        return None
+    buckets = calibration_curve(y_true, y_pred, n_bins)
+    if not buckets:
+        return None
+    total = sum(bucket.n_samples for bucket in buckets)
+    weighted_error = sum(bucket.n_samples * abs(bucket.mean_predicted - bucket.mean_actual) for bucket in buckets)
+    return weighted_error / total
+
+
+def clv(entry_price: float, closing_price: float) -> Optional[float]:
+    """Closing Line Value de una sola observación = closing_price -
+    entry_price (precio ~ probabilidad implícita en un contrato binario
+    -- un cierre más alto que la entrada significa que el mercado se
+    movió a favor del lado comprado). `None` si cualquiera de los dos
+    precios está fuera de [0,1] -- nunca se clampa (mismo principio no
+    negociable de `market_pricing.py`, Fase 2, §7). Agregación (media/
+    percentiles por horizonte) es responsabilidad del llamador, esta
+    función es puramente una observación individual."""
+    if entry_price is None or closing_price is None:
+        return None
+    if not (0.0 <= entry_price <= 1.0) or not (0.0 <= closing_price <= 1.0):
+        return None
+    return closing_price - entry_price
+
+
+def roi_teorico(pairs: Sequence[Tuple[float, float]]) -> Optional[float]:
+    """pairs = [(stake, payout_neto), ...] -- ROI teórico como
+    sum(payout_neto) / sum(stake), si se hubiera apostado exactamente lo
+    indicado por cada señal ENTER. `None` si no hay pares o si la suma
+    de stakes es <= 0 (no se puede dividir por una base inválida)."""
+    if not pairs:
+        return None
+    total_stake = sum(stake for stake, _ in pairs)
+    if total_stake <= 0:
+        return None
+    total_payout_neto = sum(payout_neto for _, payout_neto in pairs)
+    return total_payout_neto / total_stake
+
+
+def drawdown(equity_curve: Sequence[float]) -> Optional[float]:
+    """Máxima caída peak-to-trough ABSOLUTA (mismas unidades que
+    equity_curve, no un porcentaje -- evita asumir una normalización no
+    pedida) de una curva de equity teórica. `None` si la curva está
+    vacía."""
+    if not equity_curve:
+        return None
+    peak = equity_curve[0]
+    max_drop = 0.0
+    for value in equity_curve:
+        if value > peak:
+            peak = value
+        drop = peak - value
+        if drop > max_drop:
+            max_drop = drop
+    return max_drop
+
+
+def profit_factor(gains: Sequence[float], losses: Sequence[float]) -> Optional[float]:
+    """sum(gains) / abs(sum(losses)). `None` si losses está vacío o su
+    suma es 0 (no se puede dividir por una base inválida) -- mismo
+    principio que roi_teorico."""
+    if not losses:
+        return None
+    total_losses = sum(losses)
+    if total_losses == 0:
+        return None
+    return sum(gains) / abs(total_losses)

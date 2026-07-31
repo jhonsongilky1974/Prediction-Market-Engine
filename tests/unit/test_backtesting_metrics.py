@@ -1,5 +1,10 @@
 """Tests de `src/backtesting/metrics.py` (Paso 9): funciones puras de
-calibración, sin conocimiento de HistoryRepository/modelo alguno."""
+calibración, sin conocimiento de HistoryRepository/modelo alguno.
+
+Extendido en Fase 3, Paso 3.8 (ver EVALUATION_LEARNING_SPEC.md §3) con
+`ece`/`clv`/`roi_teorico`/`drawdown`/`profit_factor` -- mismo archivo,
+para mantener paridad con las 4 funciones originales; ninguno de los
+tests de arriba se modificó."""
 from __future__ import annotations
 
 import pytest
@@ -8,7 +13,12 @@ from src.backtesting.metrics import (
     accuracy_metric,
     brier_score,
     calibration_curve,
+    clv,
+    drawdown,
+    ece,
     log_loss_metric,
+    profit_factor,
+    roi_teorico,
 )
 
 
@@ -129,3 +139,124 @@ def test_calibration_curve_empty_buckets_are_omitted():
 
 def test_calibration_curve_empty_input_returns_empty_list():
     assert calibration_curve([], []) == []
+
+
+# =========================================================================
+# Extensión Fase 3, Paso 3.8 (EVALUATION_LEARNING_SPEC.md §3)
+# =========================================================================
+
+# ---------------------------------------------------------------------
+# ece
+# ---------------------------------------------------------------------
+
+
+def test_ece_exact_value_single_bucket():
+    y_true = [1, 0, 1]
+    y_pred = [0.61, 0.64, 0.69]  # mismo dataset que test_calibration_curve_groups...
+    mean_predicted = (0.61 + 0.64 + 0.69) / 3
+    mean_actual = (1 + 0 + 1) / 3
+    expected = abs(mean_predicted - mean_actual)
+    assert ece(y_true, y_pred) == pytest.approx(expected)
+
+
+def test_ece_weighted_across_multiple_buckets():
+    y_true = [1, 1, 0, 0]
+    y_pred = [0.05, 0.15, 0.85, 0.95]  # 4 buckets de 1 muestra cada uno
+    # cada bucket: |mean_predicted - mean_actual| = 0.95, 0.85, 0.85, 0.95
+    expected = (0.95 + 0.85 + 0.85 + 0.95) / 4
+    assert ece(y_true, y_pred) == pytest.approx(expected)
+
+
+def test_ece_none_when_empty():
+    assert ece([], []) is None
+
+
+# ---------------------------------------------------------------------
+# clv
+# ---------------------------------------------------------------------
+
+
+def test_clv_exact_value():
+    assert clv(entry_price=0.55, closing_price=0.62) == pytest.approx(0.07)
+
+
+def test_clv_negative_when_price_moved_against_entry():
+    assert clv(entry_price=0.60, closing_price=0.50) == pytest.approx(-0.10)
+
+
+def test_clv_none_when_entry_price_out_of_range():
+    assert clv(entry_price=1.5, closing_price=0.5) is None
+
+
+def test_clv_none_when_closing_price_out_of_range():
+    assert clv(entry_price=0.5, closing_price=-0.1) is None
+
+
+def test_clv_none_when_price_is_none():
+    assert clv(entry_price=None, closing_price=0.5) is None
+    assert clv(entry_price=0.5, closing_price=None) is None
+
+
+def test_clv_never_clamped():
+    """Documentación ejecutable del invariante -- ver market_pricing.py
+    §7, mismo principio reutilizado aquí."""
+    assert clv(entry_price=1.5, closing_price=0.5) is None  # nunca se clampa a 1.0
+
+
+# ---------------------------------------------------------------------
+# roi_teorico
+# ---------------------------------------------------------------------
+
+
+def test_roi_teorico_exact_value():
+    pairs = [(1.0, 0.5), (1.0, -0.3), (2.0, 1.0)]
+    assert roi_teorico(pairs) == pytest.approx(0.3)
+
+
+def test_roi_teorico_none_when_empty():
+    assert roi_teorico([]) is None
+
+
+def test_roi_teorico_none_when_total_stake_is_zero():
+    assert roi_teorico([(0.0, 5.0)]) is None
+
+
+def test_roi_teorico_none_when_total_stake_is_negative():
+    assert roi_teorico([(-1.0, 5.0)]) is None
+
+
+# ---------------------------------------------------------------------
+# drawdown
+# ---------------------------------------------------------------------
+
+
+def test_drawdown_exact_value():
+    equity_curve = [100.0, 120.0, 90.0, 130.0, 80.0]
+    assert drawdown(equity_curve) == pytest.approx(50.0)
+
+
+def test_drawdown_zero_for_monotonically_increasing_curve():
+    assert drawdown([100.0, 110.0, 120.0]) == pytest.approx(0.0)
+
+
+def test_drawdown_none_when_empty():
+    assert drawdown([]) is None
+
+
+# ---------------------------------------------------------------------
+# profit_factor
+# ---------------------------------------------------------------------
+
+
+def test_profit_factor_exact_value():
+    gains = [10.0, 20.0, 5.0]
+    losses = [-5.0, -10.0]
+    assert profit_factor(gains, losses) == pytest.approx(35.0 / 15.0)
+
+
+def test_profit_factor_none_when_losses_empty():
+    assert profit_factor([10.0], []) is None
+
+
+def test_profit_factor_none_when_losses_sum_to_zero():
+    assert profit_factor([10.0], [5.0, -5.0]) is None
