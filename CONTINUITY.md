@@ -30,6 +30,8 @@ Eligibility) (ver §0.7).** **Actualizado de nuevo: 2026-07-30 —
 Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
 (ver §0.8).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso
 3.4.3 de Fase 3 (Policy Engine — Hard Hold Rules) (ver §0.9).**
+**Actualizado de nuevo: 2026-07-30 — Implementado el Paso 3.4.4 de Fase 3
+(Policy Engine — Soft Score) (ver §0.10).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -571,6 +573,71 @@ explícitamente (no oculta), sin tocar Fase 1/2.
 
 **Pendiente**: Paso 3.4.4 (Policy Engine — Soft Score) — no iniciado,
 requiere nueva autorización explícita del usuario.
+
+## 0.10 Fase 3 — Paso 3.4.4: Policy Engine — Soft Score (2026-07-30)
+
+Sin contradicciones arquitectónicas ni de contrato. A diferencia del
+Paso 3.4.3, aquí no hubo ningún gap que reportar: `PolicyManifest`
+(Paso 3.0) ya tenía `soft_score_weights`/`critical_minimums` como
+campos `Dict[str, float]`, exactamente lo que este módulo necesita —
+confirmado antes de escribir código. `weights`/`minimums` se reciben
+como parámetros PROVISIONAL con defaults documentados; el Paso 3.4.5
+los pasará desde el manifiesto real sin ningún cambio de contrato.
+
+**Implementado**: `src/policy/soft_score.py` — `compute_soft_score_components()`
+(los 5 componentes: `edge_strength` no crítico; `ev_neto_strength`,
+`confidence_aggregate`, `data_quality_floor`, `operational_safety_floor`
+críticos, fijo por Principio 9, no configurable), `compute_aggregate_soft_score()`
+(suma ponderada sobre pesos ya redistribuidos, mismo patrón que
+`compute_quality_score`, Fase 2), y `check_enter_eligible_by_soft_score()`
+(implementación literal de la regla de no compensación,
+`POLICY_ENGINE_SPEC.md` §3.1).
+
+`edge_strength`/`ev_neto_strength` se normalizan a `[0,100]` reutilizando
+el mismo rango `[-0.30, 0.30]` que `segment_by_edge`
+(`src/evaluation/reports.py`, Fase 2, Paso 10) -- no un rango nuevo
+inventado. `confidence_aggregate` promedia las 4 dimensiones de
+`ConfidenceProfile` disponibles, redistribuyendo si falta alguna (mismo
+espíritu que Fase 2). Todo componente crítico declara `minimum_required`
+siempre, incluso cuando `value` es `None` (exigido por el propio
+contrato `SoftScoreComponent`, Paso 3.0).
+
+**Verificado en código el hallazgo central de la auditoría**: con
+`PayoffEstimate` por defecto (`net_ev_status=UNKNOWN`, estado real y
+universal del proyecto hoy -- Paso 3.2), `ev_neto_strength.value` y
+`.passed_minimum` son `None`, lo que bloquea `ENTER` aunque
+`edge_strength`/`confidence_aggregate`/`data_quality_floor`/
+`operational_safety_floor` sean perfectos y `aggregate_soft_score` supere
+el umbral (`test_ev_neto_strength_unknown_blocks_enter_even_with_everything_else_perfect`).
+Se probó lo mismo, uno a la vez, para los otros 3 componentes críticos
+(`test_single_critical_minimum_failure_blocks_enter_despite_high_aggregate`,
+parametrizado) -- en los 4 casos, un score global alto NUNCA compensa un
+mínimo crítico incumplido.
+
+Dos bugs propios (no de `src/`) corregidos antes de la suite completa:
+un caso de test violaba el invariante ya existente
+`operational_safety + operational_risk == 100` (Corrección B, Paso 3.0)
+al no declarar `operational_risk`; y una estimación manual de
+`aggregate_soft_score` en el test parametrizado no coincidía con el
+cálculo real (58.0 vs. una aserción de >=60.0) -- corregido ajustando el
+umbral de la aserción a 50.0, que sigue demostrando el punto (score
+global por encima del umbral, ENTER igualmente bloqueado) sin alterar
+`src/policy/soft_score.py`.
+
+**Archivos**: exactamente los 2 declarados —
+`src/policy/soft_score.py`, `tests/unit/test_soft_score.py`. Cero
+archivos de Fase 1/2 tocados.
+
+**Tests**: 27 nuevos. Suite completa: 733 + 27 = **760 passed, 0
+failed**. `data/models/` con únicamente `.gitkeep` (funciones sin I/O).
+
+**Definición de "Done" del Paso 3.4.4**: cumplida — la no-compensación
+está probada explícitamente para cada uno de los 4 componentes
+críticos, uno a la vez, sin tocar Fase 1/2.
+
+**Pendiente**: Paso 3.4.5 (Policy Engine — Decision + Manifest +
+Validation) — no iniciado, requiere nueva autorización explícita del
+usuario. Cierra el Paso 3.4 completo (5 sub-bloques).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
