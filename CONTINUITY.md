@@ -21,7 +21,9 @@ Plan Maestro de Fase 3, documental, sin implementación (ver §0.2).**
 implementado el Paso 3.0 de Fase 3 (andamiaje de contratos), primer
 código real de Fase 3 (ver §0.3).** **Actualizado de nuevo: 2026-07-30 —
 Rectificado un contrato del Paso 3.0 (§0.3.1) e implementado el Paso 3.1
-(Calibration Layer, sin entrenar) (ver §0.4).**
+(Calibration Layer, sin entrenar) (ver §0.4).** **Actualizado de nuevo:
+2026-07-30 — Implementado el Paso 3.2 de Fase 3 (Payoff Model) (ver
+§0.5).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -275,6 +277,55 @@ cubiertos uno a uno, sin tocar Fase 1/2, este cierre documentado en
 `CONTINUITY.md` antes del commit.
 
 **Pendiente**: Paso 3.2 (Payoff Model) — no iniciado, requiere nueva
+autorización explícita del usuario.
+
+## 0.5 Fase 3 — Paso 3.2: Payoff Model (2026-07-30)
+
+El usuario autorizó el Paso 3.2 con la misma disciplina de los pasos
+anteriores. No apareció ninguna contradicción arquitectónica durante la
+implementación — sí una decisión de alcance que se resolvió sin detener
+el paso, documentada abajo, porque ya estaba prevista explícitamente por
+DECISIÓN PENDIENTE D-3 (`PLAN_MASTER_FASE3.md` §8), no era nueva.
+
+**Implementado**: `src/payoff/payoff_model.py` —
+`estimate_payoff(record, side, opportunity_id, platform="KALSHI", now=None)
+-> PayoffEstimate`, función 100% pura. `entry_price` reutiliza
+literalmente `market_price_yes`/`market_price_no` (Fase 2,
+`src/pricing/market_pricing.py`, sin cambios). `entry_fee`/`spread` se
+propagan desde `NormalizedRecord.market` cuando existen (siempre `None`
+en los datos reales de Kalshi observados hasta ahora). `payout=1.0` y
+`breakeven_probability=entry_price` solo para `platform="KALSHI"` (hecho
+estructural de la plataforma, no un dato inventado por evento) —
+cualquier otra plataforma queda sin asumir.
+
+**Decisión de alcance confirmada durante la implementación (no
+detención, ya prevista por D-3)**: `net_ev_status` es **siempre**
+`NetEvStatus.UNKNOWN`, incluso en el caso hipotético de que
+`exchange_fee` estuviera poblado — verificado con un test explícito
+(`test_net_ev_status_is_unknown_even_when_exchange_fee_is_populated`).
+La razón: no existe una fórmula aprobada para combinar costos en un EV
+neto real (`PLAN_MASTER_FASE3.md` §8, D-3), así que esta función no
+recibe ninguna probabilidad de modelo como parámetro y no puede ni debe
+intentar calcular `ev_to_settlement` — hacerlo habría exigido inventar
+la fórmula que D-3 deja explícitamente pendiente. `max_acceptable_entry_price`
+permanece `None` por el mismo motivo (requeriría una probabilidad que
+esta función no recibe).
+
+**Archivos**: exactamente los dos declarados en `FASE3_EXECUTION_PLAN.md`
+para el Paso 3.2 — `src/payoff/payoff_model.py` y
+`tests/unit/test_payoff_model.py`. Cero archivos de Fase 1/2 tocados.
+
+**Tests**: 22 nuevos en `tests/unit/test_payoff_model.py`, incluida una
+parametrización que recorre variantes de los 6 escenarios obligatorios
+de `tests/unit/test_market_pricing.py` (Fase 2) confirmando
+`net_ev_status=UNKNOWN` en todos. Suite completa: 615 + 22 = **637
+passed, 0 failed**. `data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.2**: cumplida — función pura, alcance
+de D-3 respetado explícitamente (nunca se produce `COMPUTED`), sin tocar
+Fase 1/2, este cierre documentado antes del commit.
+
+**Pendiente**: Paso 3.3 (Evidence Engine) — no iniciado, requiere nueva
 autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
