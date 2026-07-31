@@ -34,7 +34,8 @@ Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
 (Policy Engine — Soft Score) (ver §0.10).** **Actualizado de nuevo:
 2026-07-31 — Implementado el Paso 3.4.5 de Fase 3 (Policy Engine —
 Decision + Manifest + Validation), CIERRA EL PASO 3.4 COMPLETO (ver
-§0.11).**
+§0.11).** **Actualizado de nuevo: 2026-07-31 — Implementado el Paso 3.5
+de Fase 3 (Opportunity Lifecycle + persistencia) (ver §0.12).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -740,6 +741,70 @@ commit.
 iniciado, requiere nueva autorización explícita del usuario. Primer
 paso que tocará `data/engine.db` (solo vía `tmp_path` en tests, según lo
 ya acordado).
+
+## 0.12 Fase 3 — Paso 3.5: Opportunity Lifecycle + persistencia (2026-07-31)
+
+Sin contradicciones arquitectónicas ni de contrato. Ninguna decisión
+requirió pausar la implementación.
+
+**Implementado**: `src/opportunity/opportunity_repository.py` --
+`OpportunityRepository`, mismo patrón exacto que `HistoryRepository`
+(Fase 2, Paso 0 — `CREATE TABLE IF NOT EXISTS`, triggers `RAISE(ABORT,
+...)` que rechazan `UPDATE`/`DELETE` incluso con SQL crudo,
+`PRAGMA foreign_keys = ON` por conexión). Dos tablas nuevas, aditivas,
+en el mismo `data/engine.db`: `opportunities` (una fila por CADA
+`state_version` de una `Opportunity` -- confirmado en
+`ARCHITECTURE_FASE3.md` §3, "solo `state_version` nuevo es INSERT,
+nunca UPDATE") y `opportunity_evaluations` (una fila por
+`OpportunityEvaluation`, ya `frozen=True` a nivel de contrato).
+
+Sin FK dura entre ambas tablas -- mismo motivo que `event_snapshots`/
+`event_results` en Fase 2 (el enlace es lógico por `opportunity_id`, no
+de fila; `opportunities` no tiene una fila "canónica" única por
+`opportunity_id`, tiene una por `state_version`).
+
+**Validación de secuencia añadida** (no exigida por ningún contrato de
+Paso 3.0, decisión de implementación dentro del alcance de este paso,
+consistente con "rechazar antes de persistir" ya usado en
+`validate_policy_manifest`, Paso 3.4.5): `save_opportunity()`/
+`save_opportunity_evaluation()` exigen `state_version == último + 1`
+(o `1` si es la primera fila) -- rechazan saltos y duplicados.
+`save_opportunity()` también exige `previous_signal_id=None` únicamente
+en `state_version==1`, no vacío en cualquier versión posterior --
+validación de presencia, no de igualdad exacta contra un
+`evaluation_id` concreto (esa correlación exacta depende de un futuro
+orquestador de punta a punta que todavía no existe en ningún paso del
+roadmap; inventar esa regla exacta aquí habría sido una decisión de
+diseño no pedida por este paso, documentada explícitamente en vez de
+improvisada).
+
+**Archivos**: exactamente los 2 declarados —
+`src/opportunity/opportunity_repository.py`,
+`tests/unit/test_opportunity_repository.py`. Cero archivos de Fase 1/2
+tocados (incluidos `src/storage/repository.py`/`history_repository.py`,
+verificado también por test de arquitectura vía AST).
+
+**Tests**: 17 nuevos, TODOS contra `db_path=tmp_path / "test.db"` --
+nunca `data/engine.db` de producción (confirmado: `data/engine.db` está
+en `.gitignore`, sin diff registrable, y su MD5 se verificó sin cambios
+antes/después de correr la suite). Cubren: inserción simple + round-trip
+completo, determinismo de `opportunity_id`, encadenamiento de
+`state_version`/`previous_signal_id` (2 versiones consecutivas, primera
+fila nunca sobrescrita), rechazo de salto/duplicado de `state_version`,
+rechazo de `previous_signal_id` ausente tras la primera versión, rechazo
+de `UPDATE`/`DELETE` crudo sobre ambas tablas, `PRAGMA foreign_keys=ON`
+confirmado. Suite completa: 806 + 17 = **823 passed, 0 failed**.
+`data/models/` con únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.5**: cumplida -- repositorio completo,
+probado exclusivamente contra bases de datos temporales, sin ninguna
+ejecución contra `data/engine.db` de producción todavía (esa primera
+ejecución real queda para cuando exista un orquestador de punta a punta
+que efectivamente llame a este repositorio con datos reales -- ningún
+paso del roadmap actual lo hace todavía).
+
+**Pendiente**: Paso 3.6 (Explainability Engine) — no iniciado, requiere
+nueva autorización explícita del usuario.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
