@@ -230,6 +230,7 @@ def make_policy_manifest(**overrides) -> PolicyManifest:
         hard_hold_rules=["unresolved_side_mapping"],
         soft_score_weights={"edge_strength": 0.2},
         critical_minimums={"ev_neto_strength": 0.0},
+        hard_rule_parameters={},
         enter_global_threshold=70.0,
         watch_global_threshold=40.0,
         manifest_hash="abc123",

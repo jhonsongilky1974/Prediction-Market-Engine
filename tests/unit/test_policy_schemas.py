@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
+from src.models.schemas import Sport
 from src.policy.schemas import (
     AbstentionDisposition,
     ConfidenceProfile,
@@ -294,3 +295,27 @@ def test_policy_manifest_naive_created_at_raises():
 
 def test_policy_manifest_round_trip():
     assert_round_trip(make_policy_manifest())
+
+
+def test_policy_manifest_hard_rule_parameters_defaults_to_empty_dict():
+    """Rectificación aditiva del Paso 3.4.5 (CONTINUITY.md §0.11) --
+    retrocompatible: un PolicyManifest construido sin el campo (como
+    todos los de este archivo antes de esta rectificación) sigue siendo
+    válido."""
+    manifest = PolicyManifest(
+        policy_version="1.0.0",
+        sport=Sport.MLB,
+        enter_global_threshold=70.0,
+        watch_global_threshold=40.0,
+        manifest_hash="abc123",
+        created_at=NOW,
+    )
+    assert manifest.hard_rule_parameters == {}
+
+
+def test_policy_manifest_hard_rule_parameters_round_trip():
+    manifest = make_policy_manifest(
+        hard_rule_parameters={"pending_lineup_hours_threshold": 4.0}
+    )
+    assert manifest.hard_rule_parameters == {"pending_lineup_hours_threshold": 4.0}
+    assert_round_trip(manifest)

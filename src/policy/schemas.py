@@ -245,6 +245,16 @@ class PolicyManifest(StrictModel):
     hard_hold_rules: List[str] = Field(default_factory=list)
     soft_score_weights: Dict[str, float] = Field(default_factory=dict)
     critical_minimums: Dict[str, float] = Field(default_factory=dict)
+    hard_rule_parameters: Dict[str, float] = Field(default_factory=dict)
+    """Rectificación aditiva aplicada durante el Paso 3.4.5 (aprobada
+    explícitamente por el usuario, ver CONTINUITY.md §0.11): parámetros
+    numéricos por regla Hard Rule (p.ej. "pending_lineup_hours_threshold",
+    "temporarily_stale_data_threshold_seconds",
+    "temporarily_insufficient_liquidity_minimum"), simétrico a
+    critical_minimums. Diccionario vacío por defecto -- retrocompatible,
+    ningún consumidor existente de PolicyManifest se ve afectado.
+    Cuando una clave no está presente, el llamador usa el default
+    PROVISIONAL correspondiente ya declarado en hard_rules.py."""
     enter_global_threshold: float
     watch_global_threshold: float
     manifest_hash: str

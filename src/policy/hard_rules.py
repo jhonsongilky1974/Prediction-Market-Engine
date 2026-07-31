@@ -132,6 +132,17 @@ deliberadamente distinto y muy inferior a _MARKET_LIQUIDITY_TARGET=50000.0
 scoring, no un piso de operabilidad). PROVISIONAL, sin respaldo
 empírico."""
 
+KNOWN_HARD_RULE_PARAMETER_KEYS = frozenset(
+    {
+        "pending_lineup_hours_threshold",
+        "temporarily_stale_data_threshold_seconds",
+        "temporarily_insufficient_liquidity_minimum",
+    }
+)
+"""Catálogo cerrado de claves válidas de PolicyManifest.hard_rule_parameters
+(rectificación aditiva del Paso 3.4.5, ver src/policy/schemas.py) --
+usado por src/policy/validation.py para rechazar claves desconocidas."""
+
 _CORE_FIELD_BARE_NAMES = {field.split(".")[-1] for field in CORE_FIELDS}
 """`validation_errors` (Fase 1/2, src/quality/validators.py) son texto
 libre sin campo estructurado (p.ej. "yes_ask=1.5 fuera de rango [0,1]"),

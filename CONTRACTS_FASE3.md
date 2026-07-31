@@ -429,6 +429,12 @@ class PolicyManifest(StrictModel):
     hard_hold_rules: List[str]          # rule_ids activos de HARD_HOLD_WATCH
     soft_score_weights: Dict[str, float]
     critical_minimums: Dict[str, float] # component_name -> umbral mínimo (Principio 9)
+    hard_rule_parameters: Dict[str, float]  # rule_id (o rule_id.param) -> valor -- RECTIFICACIÓN
+                                              # ADITIVA del Paso 3.4.5 (aprobada explícitamente,
+                                              # ver CONTINUITY.md §0.11): resuelve la promesa de
+                                              # "pending_lineup... N configurable en PolicyManifest"
+                                              # (POLICY_ENGINE_SPEC.md §2.2) que el contrato original
+                                              # del Paso 3.0 no cubría. default={} , retrocompatible.
     enter_global_threshold: float
     watch_global_threshold: float
     manifest_hash: str                  # hash de contenido, recalculado, no declarado a mano

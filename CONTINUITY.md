@@ -31,7 +31,10 @@ Implementado el Paso 3.4.2 de Fase 3 (Policy Engine — Hard Block Rules)
 (ver §0.8).** **Actualizado de nuevo: 2026-07-30 — Implementado el Paso
 3.4.3 de Fase 3 (Policy Engine — Hard Hold Rules) (ver §0.9).**
 **Actualizado de nuevo: 2026-07-30 — Implementado el Paso 3.4.4 de Fase 3
-(Policy Engine — Soft Score) (ver §0.10).**
+(Policy Engine — Soft Score) (ver §0.10).** **Actualizado de nuevo:
+2026-07-31 — Implementado el Paso 3.4.5 de Fase 3 (Policy Engine —
+Decision + Manifest + Validation), CIERRA EL PASO 3.4 COMPLETO (ver
+§0.11).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -638,6 +641,105 @@ críticos, uno a la vez, sin tocar Fase 1/2.
 **Pendiente**: Paso 3.4.5 (Policy Engine — Decision + Manifest +
 Validation) — no iniciado, requiere nueva autorización explícita del
 usuario. Cierra el Paso 3.4 completo (5 sub-bloques).
+
+## 0.11 Fase 3 — Paso 3.4.5: Policy Engine — Decision + Manifest + Validation (2026-07-31)
+
+**CIERRA EL PASO 3.4 COMPLETO** (5 sub-bloques: 3.4.1 Eligibility, 3.4.2
+Hard Block, 3.4.3 Hard Hold, 3.4.4 Soft Score, 3.4.5 Decision+Manifest+
+Validation — mismo nivel de detalle que Fase 2 documentó el Paso 5b con
+sus 5 bloques internos).
+
+### Decisión pendiente resuelta (autorizada explícitamente antes de tocar código)
+
+Al preparar `decide()`, resolver el diferimiento del Paso 3.4.3
+(`pending_lineup` "configurable en `PolicyManifest`", sin campo para
+ello) requería modificar el contrato `PolicyManifest` ya comiteado
+(Paso 3.0). Siguiendo la instrucción explícita del usuario de detenerse
+antes de tocar un contrato existente, se reportaron 3 alternativas; el
+usuario aprobó la Alternativa 1.
+
+**Rectificación aditiva aplicada**: `PolicyManifest.hard_rule_parameters:
+Dict[str, float] = Field(default_factory=dict)` (`src/policy/schemas.py`)
+-- simétrico a `critical_minimums`, retrocompatible (default `{}`, ningún
+consumidor existente afectado). Catálogo cerrado de claves válidas
+(`KNOWN_HARD_RULE_PARAMETER_KEYS`, aditivo en `hard_rules.py`):
+`pending_lineup_hours_threshold`, `temporarily_stale_data_threshold_seconds`,
+`temporarily_insufficient_liquidity_minimum`. `decide()` usa el valor del
+manifiesto cuando la clave existe, y cae al default PROVISIONAL ya
+declarado en `hard_rules.py` cuando no -- exactamente el diseño que el
+usuario aprobó. `CONTRACTS_FASE3.md` §15, `tests/unit/fase3_factories.py`
+y `tests/unit/test_policy_schemas.py` actualizados en consecuencia (2
+tests nuevos: default vacío retrocompatible, round-trip con el campo
+poblado).
+
+### Bug real encontrado y corregido (no un contrato, código propio no comiteado)
+
+Al probar la ruta ENTER, `PolicyDecision` (Paso 3.0) rechazó la
+construcción: su propio invariante ("ningún `signal_type=ENTER` puede
+coexistir con un `HardRuleResult` `BLOCK` `triggered=True` en su
+lista") no distingue reglas activas de inactivas -- `decide()` estaba
+pasando el catálogo COMPLETO evaluado (incluida una regla
+`triggered=True` pero no activada en el manifiesto) al campo
+`hard_rule_results` del `PolicyDecision` final, autorrechazándose el
+propio `ENTER` legítimo. Corregido enteramente dentro de `decision.py`
+(código nuevo, no comiteado todavía): `hard_rule_results` en el
+resultado final ahora contiene únicamente las reglas ACTIVAS según el
+manifiesto (evaluadas igual, pero filtradas antes de persistir) -- una
+regla que no forma parte de la política no debe aparecer en la
+auditoría de la decisión que esa política produjo. Ningún contrato
+tocado; el fix vive enteramente en la orquestación.
+
+**Implementado**:
+- `src/policy/validation.py` -- `validate_policy_manifest()`: las 3
+  validaciones determinísticas de Corrección H (cross-field consistency
+  contra los catálogos cerrados de `hard_rules.py`/`soft_score.py`;
+  range validation de valores de `critical_minimums`/`soft_score_weights`/
+  `hard_rule_parameters`). Las 3 restantes (regression/histórico/
+  promoción) dependen de histórico real o de un manifiesto previo --
+  fuera de alcance, documentado explícitamente, no implementado a
+  medias.
+- `src/policy/manifest.py` -- `load_policy_manifest()`/
+  `save_policy_manifest()`: I/O de archivo JSON únicamente, validando
+  siempre antes de aceptar. `config/policy/` creado, vacío (el primer
+  manifiesto real se publica en un paso posterior).
+- `src/policy/decision.py` -- `decide()`: orquesta las 4 etapas
+  (Eligibility -> Hard Block -> Hard Hold -> Soft Score), deteniéndose
+  en la primera que produce una decisión. Fail-safe: cualquier excepción
+  no controlada (incluida una re-validación defensiva del manifiesto, o
+  `policy_manifest.sport != record.sport`) se traduce a
+  `PolicyDecision(PASS, INVALID_ANALYSIS)`, nunca se propaga.
+
+**Verificado en código, a nivel de orquestación completa, el hallazgo
+central de la auditoría**: con el catálogo REALISTA completo activo
+(las 7 reglas BLOCK + las 6 HOLD, incluida `unresolved_side_mapping`),
+ningún `ENTER` es posible hoy aunque todo lo demás sea perfecto --
+`unresolved_side_mapping` fuerza `WATCH` antes de llegar siquiera a
+Soft Score (`test_watch_forced_by_unresolved_side_mapping_even_when_everything_else_perfect`).
+
+**Archivos**: `src/policy/decision.py`, `src/policy/manifest.py`,
+`src/policy/validation.py`, `config/policy/.gitkeep` (los declarados) +
+`src/policy/schemas.py`, `CONTRACTS_FASE3.md`,
+`tests/unit/fase3_factories.py`, `tests/unit/test_policy_schemas.py`
+(rectificación aprobada) + `src/policy/hard_rules.py` (aditivo,
+`KNOWN_HARD_RULE_PARAMETER_KEYS`). Cero archivos de Fase 1/2 tocados.
+
+**Tests**: 21 (`test_policy_decision.py`, incluido el fuzz test
+parametrizado de no-ENTER-con-bloqueo activo) + 16
+(`test_policy_manifest_validation.py`) + 7 (`test_policy_fail_safe.py`)
++ 2 (`test_policy_schemas.py`, el campo nuevo) = 46 nuevos. Suite
+completa: 760 + 46 = **806 passed, 0 failed**. `data/models/` con
+únicamente `.gitkeep`.
+
+**Definición de "Done" del Paso 3.4 completo**: cumplida -- el Policy
+Engine completo recibe inputs sintéticos y produce una `PolicyDecision`
+determinista y trazable; el fuzz test de no-ENTER-con-bloqueo pasa sobre
+el espacio de combinaciones probado; este cierre documentado antes del
+commit.
+
+**Pendiente**: Paso 3.5 (Opportunity Lifecycle + persistencia) — no
+iniciado, requiere nueva autorización explícita del usuario. Primer
+paso que tocará `data/engine.db` (solo vía `tmp_path` en tests, según lo
+ya acordado).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
