@@ -77,7 +77,14 @@ def _build_record_context(
 ) -> _RecordContext:
     model_output = adapter.predict_fn(record, feature_inputs, data_cutoff_timestamp, loaded_artifact)
     quality_score_output = compute_quality_score(record, consensus=None, now=now)
-    calibration_output = calibrate(model_output, calibrator=None, now=now)
+    # Calibración real (CALIBRATION_SPEC.md §4.3): `load_calibrator_fn` es
+    # opcional -- `None` (MLB hoy, sin calibrador) preserva exactamente el
+    # comportamiento anterior (calibrator=None). Nunca se invoca si no hay
+    # model_version (modelo no entrenado) -- no hay nada que emparejar.
+    calibrator = None
+    if adapter.load_calibrator_fn is not None and model_output.model_version is not None:
+        calibrator = adapter.load_calibrator_fn(model_output.model_version)
+    calibration_output = calibrate(model_output, calibrator=calibrator, now=now)
     return _RecordContext(model_output, quality_score_output, calibration_output)
 
 
@@ -101,7 +108,7 @@ def evaluate_opportunity(
 
     confidence_profile = build_confidence_profile(context.quality_score_output, opportunity_id, now)
     signal_inputs, exchange_fee_populated_unexpectedly = build_signal_inputs(
-        record, context.model_output, context.quality_score_output, side, now
+        record, context.model_output, context.quality_score_output, side, now, context.calibration_output
     )
     payoff_estimate = estimate_payoff(record, side, opportunity_id, platform="KALSHI", now=now)
     evidence_items = collect_evidence(

@@ -192,10 +192,10 @@ def test_failure_in_one_side_does_not_block_the_other_side(tmp_path, monkeypatch
     record = _record()
     real_build_signal_inputs = decision_pipeline_module.build_signal_inputs
 
-    def flaky_build_signal_inputs(record, model_output, quality_score_output, side, now):
+    def flaky_build_signal_inputs(record, model_output, quality_score_output, side, now, calibration_output=None):
         if side == Side.NO:
             raise RuntimeError("fallo simulado, solo lado NO")
-        return real_build_signal_inputs(record, model_output, quality_score_output, side, now)
+        return real_build_signal_inputs(record, model_output, quality_score_output, side, now, calibration_output)
 
     monkeypatch.setattr(decision_pipeline_module, "build_signal_inputs", flaky_build_signal_inputs)
 
@@ -265,6 +265,91 @@ def test_naive_now_raises():
 # nada de src/policy|opportunity|evidence|health|calibration|payoff la
 # conoce a ella (ORCHESTRATOR_SPEC.md §2.4).
 # ---------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------
+# Calibración real (CALIBRATION_SPEC.md §4.3) -- SportAdapter.load_calibrator_fn
+# ---------------------------------------------------------------------
+
+
+class _FakeCalibrator:
+    """Mismo doble de test que `tests/unit/test_calibration_layer.py` --
+    NO es un calibrador real entrenado, solo satisface el Protocol
+    `Calibrator` para verificar el cableado."""
+
+    calibration_version = "FAKE_V1"
+    calibration_method = "FAKE_V1"
+
+    def calibrate(self, p_raw: float) -> float:
+        return min(1.0, p_raw * 0.9 + 0.05)
+
+
+def _trained_predict(record, inputs, data_cutoff_timestamp, loaded_artifact):
+    return PModelOutput(
+        p_model_yes=0.60,
+        model_version="tennis_baseline_logreg_v1_test",
+        model_status=ModelStatus.TRAINED,
+        feature_set_version="phase2_registry_v1",
+        prediction_timestamp=NOW,
+        data_cutoff_timestamp=data_cutoff_timestamp or NOW,
+    )
+
+
+def test_load_calibrator_fn_is_applied_when_present(tmp_path):
+    hist, opp = _repos(tmp_path)
+    record = _record()
+
+    calls = []
+
+    def load_calibrator_fn(model_version):
+        calls.append(model_version)
+        return _FakeCalibrator()
+
+    adapter = SportAdapter(sport=Sport.MLB, predict_fn=_trained_predict, load_artifact_fn=lambda: None, load_calibrator_fn=load_calibrator_fn)
+
+    run_decision_pipeline(
+        records=[record],
+        feature_inputs_list=[None],
+        feature_cutoffs=[NOW],
+        sport=Sport.MLB,
+        adapter=adapter,
+        history_repository=hist,
+        opportunity_repository=opp,
+        policy_manifest=_lenient_manifest(),
+        now=NOW,
+    )
+
+    assert calls == ["tennis_baseline_logreg_v1_test"]
+    yes_eval = opp.get_latest_evaluation("opp:mlb_1:KXMLBGAME-TEST:YES")
+    assert yes_eval.calibration_output.calibration_version == "FAKE_V1"
+    assert yes_eval.calibration_output.p_model_calibrated == pytest.approx(0.60 * 0.9 + 0.05)
+    # signal_inputs.p_model debe reflejar el valor CALIBRADO, no el crudo.
+    assert yes_eval.signal_inputs.p_model == pytest.approx(0.60 * 0.9 + 0.05)
+
+
+def test_no_load_calibrator_fn_preserves_previous_behavior(tmp_path):
+    """SportAdapter sin load_calibrator_fn (default None, MLB hoy) --
+    calibration_output.p_model_calibrated debe seguir siendo None,
+    comportamiento idéntico al de antes de este paso."""
+    hist, opp = _repos(tmp_path)
+    record = _record()
+    adapter = SportAdapter(sport=Sport.MLB, predict_fn=_trained_predict, load_artifact_fn=lambda: None)
+
+    run_decision_pipeline(
+        records=[record],
+        feature_inputs_list=[None],
+        feature_cutoffs=[NOW],
+        sport=Sport.MLB,
+        adapter=adapter,
+        history_repository=hist,
+        opportunity_repository=opp,
+        policy_manifest=_lenient_manifest(),
+        now=NOW,
+    )
+
+    yes_eval = opp.get_latest_evaluation("opp:mlb_1:KXMLBGAME-TEST:YES")
+    assert yes_eval.calibration_output.p_model_calibrated is None
+    assert yes_eval.signal_inputs.p_model == 0.60
 
 
 def test_no_fase3_package_imports_orchestration():

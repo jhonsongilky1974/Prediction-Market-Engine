@@ -303,6 +303,14 @@ class TennisTrainedArtifact:
     principio que `PolicyManifest.manifest_hash`, aplicado al contenido
     real del artefacto (detecta corrupción/reentrenamiento idéntico, no
     solo diferencia por timestamp)."""
+    validation_event_ids: List[str] = field(default_factory=list)
+    """`event_id` exactos del split de validación (hallazgo de
+    `CALIBRATION_SPEC.md` §0.4/§4.4): permite a un paso futuro (p.ej.
+    calibración) reconstruir la partición EXACTA usada para entrenar este
+    artefacto sin depender de recomputar `split_dataset_temporally` contra
+    un `HistoryRepository` que puede haber crecido desde entonces. Vacío
+    para artefactos entrenados antes de este campo (Paso 4.3) -- nunca
+    fabricado retroactivamente."""
 
 
 def _tennis_metadata_path(models_dir: Path, model_version: str) -> Path:
@@ -341,6 +349,7 @@ def _save_tennis_artifact_metadata(artifact: TennisTrainedArtifact, models_dir: 
         "calibration_version": artifact.calibration_version,
         "calibration_method": artifact.calibration_method,
         "artifact_sha256": artifact.artifact_sha256,
+        "validation_event_ids": artifact.validation_event_ids,
     }
     path = _tennis_metadata_path(models_dir, artifact.model_version)
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -387,6 +396,22 @@ def load_latest_tennis_artifact(models_dir: Path = DATA_MODELS_DIR) -> Optional[
         accuracy=latest_data.get("accuracy"),
         log_loss=latest_data.get("log_loss"),
         brier_score=latest_data.get("brier_score"),
+        # Hallazgo real (calibración, ver CALIBRATION_SPEC.md): estos
+        # campos existen en TennisTrainedArtifact y ya se PERSISTEN desde
+        # el Paso 4.3 (_save_tennis_artifact_metadata), pero nunca se
+        # habían vuelto a CARGAR aquí -- .get(...) con default para
+        # metadata anterior a su introducción, nunca fabricado.
+        n_train_events=latest_data.get("n_train_events", 0),
+        n_validation_events=latest_data.get("n_validation_events", 0),
+        precision=latest_data.get("precision"),
+        recall=latest_data.get("recall"),
+        f1=latest_data.get("f1"),
+        ece=latest_data.get("ece"),
+        reliability_diagram=latest_data.get("reliability_diagram"),
+        calibration_version=latest_data.get("calibration_version"),
+        calibration_method=latest_data.get("calibration_method"),
+        artifact_sha256=latest_data.get("artifact_sha256", ""),
+        validation_event_ids=latest_data.get("validation_event_ids", []),
     )
     return model, artifact
 
@@ -540,6 +565,7 @@ def train_tennis_baseline_model(
         calibration_method=None,
         artifact_sha256=artifact_sha256,
         brier_score=brier,
+        validation_event_ids=sorted({s.event_id for s in validation_dataset.samples}),
     )
 
     _save_tennis_artifact_metadata(artifact, models_dir)

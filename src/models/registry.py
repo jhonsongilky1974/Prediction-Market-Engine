@@ -46,6 +46,7 @@ def save_artifact_metadata(artifact: MlbTrainedArtifact, models_dir: Path = DATA
         "accuracy": artifact.accuracy,
         "log_loss": artifact.log_loss,
         "brier_score": artifact.brier_score,
+        "validation_event_ids": artifact.validation_event_ids,
     }
     path = _metadata_path(models_dir, artifact.model_version)
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -94,5 +95,6 @@ def load_latest_mlb_artifact(models_dir: Path = DATA_MODELS_DIR) -> Optional[Tup
         accuracy=latest_data.get("accuracy"),
         log_loss=latest_data.get("log_loss"),
         brier_score=latest_data.get("brier_score"),
+        validation_event_ids=latest_data.get("validation_event_ids", []),
     )
     return model, artifact

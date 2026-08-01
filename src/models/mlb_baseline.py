@@ -327,6 +327,13 @@ class MlbTrainedArtifact:
     accuracy: Optional[float] = None
     log_loss: Optional[float] = None
     brier_score: Optional[float] = None
+    validation_event_ids: List[str] = field(default_factory=list)
+    """`event_id` exactos del split de validación (mismo motivo que
+    `TennisTrainedArtifact.validation_event_ids`, `CALIBRATION_SPEC.md`
+    §4.4) -- añadido por consistencia entre `mlb_baseline.py`/
+    `tennis_baseline.py` (código duplicado a propósito). Ningún modelo de
+    MLB se entrena en este paso; el campo solo protege una futura
+    ejecución real de `train_mlb_baseline_model`."""
 
 
 def train_mlb_baseline_model(
@@ -434,6 +441,7 @@ def train_mlb_baseline_model(
         accuracy=accuracy,
         log_loss=logloss,
         brier_score=brier,
+        validation_event_ids=sorted({s.event_id for s in validation_dataset.samples}),
     )
 
     # Import diferido (no a nivel de módulo) para evitar un ciclo:

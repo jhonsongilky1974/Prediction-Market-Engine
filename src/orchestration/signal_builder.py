@@ -7,9 +7,11 @@ ya calculados por el llamador -- cero cálculo nuevo, solo composición.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 from typing import Optional, Tuple
 
+from src.calibration.schemas import CalibrationOutput
 from src.models.base import PModelOutput
 from src.models.schemas import NormalizedRecord
 from src.pricing.market_pricing import market_price_no, market_price_yes
@@ -30,6 +32,7 @@ def build_signal_inputs(
     quality_score_output: QualityScoreOutput,
     side: Side,
     now: datetime,
+    calibration_output: Optional[CalibrationOutput] = None,
 ) -> Tuple[SignalInputs, bool]:
     """Devuelve `(signal_inputs, exchange_fee_populated_unexpectedly)`.
 
@@ -38,7 +41,19 @@ def build_signal_inputs(
     está poblado y `compute_ev_*_neto` lanza `NotImplementedError`
     (Fase 2, sin tocar) -- se captura explícitamente (posible evidencia
     nueva para D-3, señal operacional relevante), nunca se silencia como
-    un error genérico (`ORCHESTRATOR_SPEC.md` §5)."""
+    un error genérico (`ORCHESTRATOR_SPEC.md` §5).
+
+    `calibration_output` es opcional (`None` preserva el comportamiento
+    previo a la calibración real, CALIBRATION_SPEC.md §4.2). Cuando
+    `calibration_output.p_model_calibrated` existe, sustituye a
+    `model_output.p_model_yes` para TODO cálculo dependiente de la
+    probabilidad (`signal_inputs.p_model`, edge, EV bruto/neto) --
+    resolución del invariante ya declarado en `CONTRACTS_FASE3.md` §2
+    ("en cuanto exista calibration_version, el consumidor debe usar
+    p_model_calibrated"), nunca ambos valores mezclados."""
+    if calibration_output is not None and calibration_output.p_model_calibrated is not None:
+        model_output = dataclasses.replace(model_output, p_model_yes=calibration_output.p_model_calibrated)
+
     if side == Side.YES:
         market_price = market_price_yes(record)
         edge = compute_edge_yes(model_output, record)
