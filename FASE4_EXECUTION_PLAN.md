@@ -533,12 +533,32 @@ lo detectaría por sí solo.
   ningún entrenamiento real (Paso 4.3+) procede mientras la auditoría
   reporte anomalías sin resolver explícitamente por el usuario.
 
-### Paso 4.3+ — Gated, sin diseño detallado todavía
-Entrenamiento de calibrador real, Historical Backtesting real, Shadow
-Mode real, Paper Tracking real, recalibración de heurísticas: cada uno
-requiere su propia auditoría de diseño cuando su gate correspondiente se
-cumpla (mismo protocolo que abrió Fase 3), **no se diseñan en detalle
-en este documento** porque hacerlo hoy — sin saber qué shape tendrá el
+### Paso 4.3 — Diseño completo: [`MODEL_TRAINING_SPEC.md`](MODEL_TRAINING_SPEC.md) (propuesto 2026-08-01, pendiente de aprobación)
+
+Verificado contra el código real antes de diseñar (mismo protocolo que
+`ORCHESTRATOR_SPEC.md`): "entrenar un calibrador real", tal como este
+documento lo nombraba, **no es ejecutable todavía** — no existe ninguna
+implementación de `Calibrator` (solo un `Protocol` + un doble de test),
+y no existe ningún modelo base entrenado sobre el cual calibrar nada
+(`data/models/` solo tiene `.gitkeep`). De los 3 candidatos (MLB
+clasificador, MLB Elo, tenis clasificador), **solo tenis alcanza hoy su
+propio umbral** (`dataset.size=600 >= 30`) — MLB clasificador (87/300) y
+MLB Elo (**41/50, verificado con la función real de elegibilidad de
+Elo, no con los conteos crudos de GATE-0**) siguen sin alcanzarlo.
+`MODEL_TRAINING_SPEC.md` reencuadra el alcance a "entrenar el primer
+modelo base real (tenis)" + corregir un falso positivo encontrado en
+`GATE-0[mlb_elo]` del Paso 4.2 (el gate genérico no cubría la lógica de
+elegibilidad específica de Elo) — la calibración real queda diferida
+explícitamente a un paso futuro sin numerar, una vez exista un modelo
+real que produzca probabilidades reales sobre las cuales calibrar.
+
+### Paso 4.4+ — Gated, sin diseño detallado todavía
+Historical Backtesting real, Shadow Mode real, Paper Tracking real,
+recalibración de heurísticas, y la calibración real diferida por el
+Paso 4.3 (ver `MODEL_TRAINING_SPEC.md` §10): cada uno requiere su
+propia auditoría de diseño cuando su gate correspondiente se cumpla
+(mismo protocolo que abrió Fase 3), **no se diseñan en detalle en este
+documento** porque hacerlo hoy — sin saber qué shape tendrá el
 histórico real disponible entonces — sería el mismo tipo de fabricación
 que la Regla 3 de la metodología prohíbe para fórmulas de costos,
 aplicada ahora a diseño de pipeline. `MODEL_PIPELINE_SPEC.md`,
