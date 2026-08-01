@@ -48,7 +48,11 @@ declarado innecesario por hallazgo arquitectónico; CIERRE DEL ROADMAP
 REQUIRED FOR PHASE 3 (ver §0.16).** **Actualizado de nuevo: 2026-07-31 —
 RESUELTA LA DECISIÓN PENDIENTE D-2 (mapeo participante↔YES de Kalshi):
 primera modificación de código de Fase 1/2 en todo el proceso de Fase 3,
-autorizada explícitamente (ver §0.17).**
+autorizada explícitamente (ver §0.17).** **Actualizado de nuevo:
+2026-07-31 — INVESTIGADA Y REENCUADRADA (no resuelta) la DECISIÓN
+PENDIENTE D-3 (fórmula de fees reales de Kalshi): infraestructura
+preparada, `net_ev_status` permanece `UNKNOWN` a la espera de
+verificación contra la fuente primaria (ver §0.18).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1252,6 +1256,110 @@ independientemente de D-2. D-1 (histórico real) sigue bloqueando toda
 evaluación con significancia estadística real. La conclusión
 CONDITIONAL GO de `FASE3_AUDIT_REPORT.md` §15 se mantiene: 2 decisiones
 pendientes en vez de 3, ninguna resuelta por asunción.
+
+## 0.18 Investigación y reencuadre de D-3: fees reales de Kalshi (2026-07-31, NO RESUELTA)
+
+### Contexto y autorización
+
+Tras resolver D-2, el usuario pidió priorizar D-3 (fórmula de costos
+reales) antes de abrir D-1 (histórico), "porque completa el modelo
+económico del motor antes de comenzar la integración con datos
+históricos" -- misma disciplina: detenerse ante cualquier contradicción,
+reportar con alternativas, esperar aprobación.
+
+### Investigación (mismo rigor que D-2, con un resultado distinto)
+
+Verificación directa contra datos y código propios: ningún payload de
+Kalshi jamás capturado (`data/raw/kalshi/*.json`, ~2000+ mercados en 8
+capturas) contiene un campo de fee/comisión; `src/connectors/kalshi.py`
+solo llama a `/events`/`/markets`, nunca un endpoint de fees -- coincide
+exactamente con la premisa original de D-3.
+
+**Pero D-3 estaba mal encuadrada**: no es "esperar a que Kalshi exponga
+un campo" -- Kalshi cobra vía una **fórmula pública basada en precio**
+(`kalshi.com/docs/kalshi-fee-schedule.pdf`, "Fee Schedule for July
+2026 - 7.7.26 Update" según los resultados de búsqueda), no un campo por
+mercado. Se intentó `WebFetch` a la fuente primaria **3 veces**; las 3
+devolvieron HTTP 429 (límite de tasa del servidor). Dos fuentes
+secundarias (búsqueda web sintetizada + `pm.wiki`, que dice citar el fee
+schedule oficial) convergen en la estructura: `taker_fee ≈ 0.07 × precio
+× (1-precio)` por contrato (simétrica, máximo en precio=0.50,
+`maker_fee ≈ 25%` del taker) -- pero DIFIEREN en la regla de redondeo
+exacta, y ninguna es la fuente primaria verificada.
+
+### Decisión (reportada, autorizada explícitamente: NO implementar)
+
+El usuario aprobó explícitamente **no** codificar la fórmula con esta
+evidencia -- "prefiero mantener `net_ev_status=UNKNOWN` antes que
+introducir un cálculo financiero basado únicamente en fuentes
+secundarias" -- mismo estándar de evidencia que D-2 (verificación
+directa, nunca de memoria ni de fuentes no primarias), aplicado aquí en
+sentido contrario: en D-2 la evidencia directa SÍ alcanzaba; en D-3 no
+alcanza, y el sistema se queda como estaba en vez de forzar una
+resolución. El usuario pidió explícitamente dejar la infraestructura
+preparada para incorporar la fórmula "inmediatamente después de validar
+la fuente primaria".
+
+### Implementado (Fase 3 únicamente -- cero cambios de Fase 1/2 en este paso)
+
+`src/payoff/payoff_model.py` -- nueva función
+`_estimate_kalshi_taker_fee(price) -> Optional[float]`: **siempre
+devuelve `None`**, con un docstring extenso que documenta la
+verificación pendiente, cita la fuente primaria exacta, y advierte
+explícitamente contra rellenarla con la fórmula de fuentes secundarias
+sin repetir la verificación. `estimate_payoff()` ahora calcula
+`entry_fee` probando primero el campo real del registro
+(`record.market.exchange_fee`, sigue siendo siempre `None` en la
+práctica -- Kalshi no lo expone) y, si falta, consulta el punto de
+enganche (`platform == "KALSHI"` únicamente) -- que hoy también devuelve
+siempre `None`. **Cero cambio de comportamiento observable**:
+`entry_fee` sigue siendo `None` en todos los escenarios reales,
+`net_ev_status` sigue siendo `NetEvStatus.UNKNOWN` siempre, exactamente
+como antes de este paso.
+
+### Contratos afectados
+
+Ninguno. `PayoffEstimate` (Paso 3.0) no cambia -- `entry_fee` ya era
+`Optional[float]`, la nueva lógica solo decide de dónde intenta leerlo,
+nunca cambia su tipo ni sus invariantes.
+
+### Auditoría de este cambio
+
+- **Tests nuevos**: 3 en `tests/unit/test_payoff_model.py` -- confirman
+  que el punto de enganche devuelve `None` para 6 precios distintos
+  (incluido `None`), que `entry_fee` sigue `None` vía el punto de
+  enganche cuando `platform=KALSHI`, y que plataformas distintas de
+  KALSHI no lo consultan en absoluto. Documentación ejecutable: si
+  alguien rellena `_estimate_kalshi_taker_fee()` sin pasar por esta
+  misma verificación, el primer test falla.
+- **Regresión**: los 22 tests originales de `test_payoff_model.py`
+  (incluidos los que ya confirmaban `net_ev_status=UNKNOWN` universal,
+  Paso 3.2) pasan SIN modificación.
+- **Suite completa**: `pytest -q` → **902 passed, 0 failed** (899 tras
+  la resolución de D-2 + 3 nuevos).
+- **`data/models/`**: únicamente `.gitkeep`. **`v2.0-baseline`**: sin
+  mover. **Fase 1/2**: cero archivos tocados en este paso (a diferencia
+  de D-2).
+
+### Documentación actualizada
+
+`PLAN_MASTER_FASE3.md` §8, `FASE3_AUDIT_REPORT.md` §13/§15 -- D-3
+marcada como "REENCUADRADA", no como "resuelta" -- distinción
+deliberada: D-2 se resolvió con evidencia verificada; D-3 se investigó,
+se entendió mejor, y se dejó preparada, pero sigue abierta.
+
+### Estado para continuar
+
+**D-3 sigue sin resolver.** Próximo paso si se retoma: reintentar
+`WebFetch` a `https://kalshi.com/docs/kalshi-fee-schedule.pdf` (el 429
+puede ser temporal, no un bloqueo permanente), o que el usuario
+proporcione el contenido verificado del fee schedule oficial. Cuando
+eso ocurra, el único cambio necesario es rellenar el cuerpo de
+`_estimate_kalshi_taker_fee()` con la fórmula confirmada y actualizar
+`net_ev_status`/`ev_neto_strength` en consecuencia -- ningún otro
+archivo debería necesitar cambios, ese es el propósito del punto de
+enganche. **D-1 (histórico real) permanece como la única decisión
+restante no abordada todavía.**
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

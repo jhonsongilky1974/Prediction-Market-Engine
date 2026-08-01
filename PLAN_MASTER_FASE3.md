@@ -290,8 +290,9 @@ contrato encontrados (incluye 2 adicionales de menor impacto).
 |---|---|---|---|
 | D-1 | Reactivar el LaunchAgent de captura histórica | Es una decisión operativa del usuario (correr un proceso continuo, consumir cuota de APIs), no una decisión de diseño | Historical Backtesting real, Shadow Mode, calibración real de `ConfidenceProfile.model_reliability`, todo `EVALUATION_LEARNING_SPEC.md` con datos reales |
 | ~~D-2~~ | **RESUELTA** (post-cierre del roadmap, ver `CONTINUITY.md` §0.17) — el mapeo participante↔YES ya existía desde Fase 1 (`src/matching/market_matcher.py::_select_market`, selecciona el mercado de Kalshi cuyo `yes_sub_title` corresponde a `participant_a`); lo que faltaba era exponer su confianza. Se añadió `DataQuality.side_selection_confidence` (campo aditivo en Fase 1) y `unresolved_side_mapping` (Hard Hold, Fase 3) ahora la consume en vez de disparar como constante. | Ya no bloquea de forma incondicional — `unresolved_side_mapping` dispara solo cuando `side_selection_confidence` es `None` o está por debajo de `EVENT_NAME_MATCH_MIN_CONFIDENCE` |
-| D-3 | Fórmula exacta de incorporación de `exchange_fee`/spread/slippage en `PayoffEstimate` cuando Kalshi exponga esos campos | No existe evidencia real de esos campos hoy (mismo motivo por el que Fase 2 dejó `compute_ev_*_neto` sin implementar) | `net_ev_status` distinto de `UNKNOWN` en producción |
+| D-3 | Fórmula exacta de incorporación de `exchange_fee`/spread/slippage en `PayoffEstimate` | **REENCUADRADA** (ver `CONTINUITY.md` §0.18): no es "esperar a que Kalshi exponga un campo" (nunca lo hará por diseño de su API) — es una fórmula pública basada en precio (`kalshi.com/docs/kalshi-fee-schedule.pdf`), verificable pero no verificada todavía (3 intentos de `WebFetch` a la fuente primaria devolvieron HTTP 429). Punto de enganche preparado (`_estimate_kalshi_taker_fee`, `src/payoff/payoff_model.py`), sin implementar la fórmula de fuentes secundarias | `net_ev_status` distinto de `UNKNOWN` en producción — sigue bloqueado hasta verificación directa contra la fuente primaria |
 
 Ningún GO se declara sobre D-1/D-3, las dos decisiones que siguen sin
-resolver — ver `FASE3_AUDIT_REPORT.md` §15 y `CONTINUITY.md` §0.17 para
-el estado actualizado tras la resolución de D-2.
+resolver — ver `FASE3_AUDIT_REPORT.md` §15 y `CONTINUITY.md` §0.17/§0.18
+para el estado actualizado tras la resolución de D-2 y el reencuadre de
+D-3.

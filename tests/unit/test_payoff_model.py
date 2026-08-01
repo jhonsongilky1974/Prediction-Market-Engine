@@ -174,6 +174,42 @@ def test_entry_fee_propagated_when_present_none_when_absent():
 
 
 # ---------------------------------------------------------------------
+# D-3: punto de enganche de fee (ver CONTINUITY.md §0.18) -- siempre
+# None hasta verificar la fórmula pública de Kalshi contra la fuente
+# primaria. Documentación ejecutable: si estos tests empiezan a fallar
+# porque alguien rellenó _estimate_kalshi_taker_fee() sin pasar por esa
+# verificación, es una regresión, no una mejora.
+# ---------------------------------------------------------------------
+
+
+def test_kalshi_fee_hook_always_returns_none_until_d3_verified():
+    from src.payoff.payoff_model import _estimate_kalshi_taker_fee
+
+    for price in (0.01, 0.10, 0.50, 0.90, 0.99, None):
+        assert _estimate_kalshi_taker_fee(price) is None
+
+
+def test_entry_fee_none_via_hook_when_kalshi_and_no_real_fee_field():
+    """Con platform=KALSHI y sin exchange_fee real, entry_fee pasa por
+    el punto de enganche de D-3 -- hoy sigue siendo None, pero por una
+    ruta distinta (antes: solo ausencia; ahora: ausencia + hook
+    consultado y confirmado sin fórmula)."""
+    record = _priced_record(market=MarketData(yes_ask=0.55, exchange_fee=None))
+    result = estimate_payoff(record, Side.YES, opportunity_id="opp-1", platform="KALSHI", now=NOW)
+    assert result.entry_fee is None
+    assert result.net_ev_status == NetEvStatus.UNKNOWN
+
+
+def test_entry_fee_none_for_non_kalshi_platform_without_real_fee():
+    """Plataformas distintas de KALSHI no consultan el punto de enganche
+    específico de Kalshi -- entry_fee queda None por ausencia de dato,
+    no por una fórmula no verificada de otra plataforma."""
+    record = _priced_record(market=MarketData(yes_ask=0.55, exchange_fee=None))
+    result = estimate_payoff(record, Side.YES, opportunity_id="opp-1", platform="OTHER", now=NOW)
+    assert result.entry_fee is None
+
+
+# ---------------------------------------------------------------------
 # Pureza y validación de now
 # ---------------------------------------------------------------------
 

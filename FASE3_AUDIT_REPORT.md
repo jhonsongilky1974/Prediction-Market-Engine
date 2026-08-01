@@ -252,16 +252,19 @@ dependen de D-1/D-2/D-3 (§13).
 |---|---|---|
 | D-1 | Reactivar LaunchAgent de captura histórica | Historical backtesting real, Shadow Mode real, calibración real, recalibración de `HEURISTIC_V1`/umbrales |
 | ~~D-2~~ | **RESUELTA post-cierre del roadmap** (ver `CONTINUITY.md` §0.17) — el mapeo participante↔YES ya existía desde Fase 1; se expuso su confianza (`DataQuality.side_selection_confidence`) y `unresolved_side_mapping` ahora la consume en vez de disparar como constante | Ya no bloquea `ENTER` de forma incondicional — bloquea solo por registro cuando la confianza de selección de lado es baja o ausente |
-| D-3 | Fórmula de incorporación de `exchange_fee`/spread/slippage reales | `net_ev_status=COMPUTED` en producción (el mínimo crítico `ev_neto_strength` permanece imposible de cumplir sin esto) |
+| D-3 | Fórmula de incorporación de `exchange_fee`/spread/slippage reales | `net_ev_status=COMPUTED` en producción (el mínimo crítico `ev_neto_strength` permanece imposible de cumplir sin esto) -- **REENCUADRADA** (ver `CONTINUITY.md` §0.18): Kalshi no expone estos campos por diseño de su API, cobra vía una fórmula pública basada en precio, no verificada todavía contra su fuente primaria (HTTP 429 en 3 intentos). Punto de enganche preparado (`_estimate_kalshi_taker_fee`) sin implementar la fórmula |
 
 D-2 se resolvió después del cierre original de esta auditoría, siguiendo
 el mismo criterio metodológico (hallazgo → alternativas → aprobación
-explícita → implementación → auditoría). D-1 y D-3 se mantienen
-explícitamente abiertas — no se resuelven, asumen, ni deciden
-unilateralmente aquí, tal como exige la restricción "no declares GO si
-existen decisiones contractuales sin resolver" (interpretada aquí como:
-la especificación arquitectónica completa sí puede declararse GO; la
-puesta en producción de las etapas que dependen de D-1/D-3 no puede).
+explícita → implementación → auditoría); D-3 se investigó con el mismo
+criterio y se reencuadró, sin resolverse (evidencia insuficiente para
+codificar una fórmula financiera con la certeza que este proyecto
+exige). D-1 y D-3 se mantienen explícitamente abiertas — no se
+resuelven, asumen, ni deciden unilateralmente aquí, tal como exige la
+restricción "no declares GO si existen decisiones contractuales sin
+resolver" (interpretada aquí como: la especificación arquitectónica
+completa sí puede declararse GO; la puesta en producción de las etapas
+que dependen de D-1/D-3 no puede).
 
 ---
 
@@ -276,13 +279,15 @@ desde `explainability/`/`opportunity/`, que son terminales del grafo).
 
 ## 15. Implementation Readiness Assessment — Conclusión
 
-**Actualización post-cierre del roadmap (ver `CONTINUITY.md` §0.17):
-D-2 se resolvió.** El texto original de esta sección (conservado sin
-reescribir, como todo el historial de este documento) se apoyaba en 3
-decisiones pendientes; ahora son 2 (D-1, D-3). La conclusión sigue
-siendo **CONDITIONAL GO** — D-2 no era la única condición, y su
-resolución no habilita por sí sola ningún `ENTER` real (`ev_neto_strength`
-sigue bloqueado por D-3 de forma independiente).
+**Actualización post-cierre del roadmap (ver `CONTINUITY.md` §0.17/§0.18):
+D-2 se resolvió; D-3 se investigó y se reencuadró, pero permanece sin
+resolver.** El texto original de esta sección (conservado sin reescribir,
+como todo el historial de este documento) se apoyaba en 3 decisiones
+pendientes; ahora son 2 (D-1, D-3). La conclusión sigue siendo
+**CONDITIONAL GO** — D-2 no era la única condición, y su resolución no
+habilita por sí sola ningún `ENTER` real (`ev_neto_strength` sigue
+bloqueado por D-3, ahora por evidencia externa insuficiente en vez de
+inexistente, de forma independiente).
 
 **CONDITIONAL GO.**
 
