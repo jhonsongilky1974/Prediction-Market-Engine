@@ -335,6 +335,32 @@ def test_label_quality_audit_builds_honestly_on_real_mlb_pipeline_output_without
     assert label_report.unresolved_count == gate_report.exclusions["no_result"]
 
 
+def test_tennis_training_builds_honestly_on_real_tennis_pipeline_output(tmp_repository, tmp_history_repository, tmp_path):
+    """Fase 4, Paso 4.3, prueba controlada real (E): confirma que
+    `train_tennis_baseline_model` no falla contra un `HistoryRepository`
+    alimentado por una corrida real del pipeline de tenis -- con el
+    volumen mínimo capturable en un solo test (1 partido), el resultado
+    honesto es `INSUFFICIENT_HISTORY` (nunca se fabrica un modelo con
+    una sola muestra), igual que el resto de los tests de esta suite que
+    confirman comportamiento honesto ante datos reales insuficientes."""
+    from src.models.base import ModelStatus
+    from src.models.tennis_baseline import train_tennis_baseline_model
+
+    tennis_date = _next_tennis_date_with_matches("atp")
+    if tennis_date is None:
+        pytest.skip("no hay partidos ATP próximos disponibles vía ESPN")
+    result = run_tennis_pipeline(
+        "ATP", tennis_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    status, artifact, warnings = train_tennis_baseline_model(tmp_history_repository, models_dir=tmp_path / "models")
+
+    assert status == ModelStatus.INSUFFICIENT_HISTORY
+    assert artifact is None
+    assert any("umbral" in w for w in warnings)
+
+
 def test_orchestrator_end_to_end_real(tmp_repository, tmp_history_repository, tmp_path):
     """Fase 4, Paso 4.1, prueba controlada real (E): confirma que el
     orquestador completo (captura real -> Policy Engine ->

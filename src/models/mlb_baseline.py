@@ -252,22 +252,47 @@ def build_mlb_training_dataset(history_repository: HistoryRepository) -> MlbTrai
 def split_dataset_temporally(
     dataset: MlbTrainingDataset, validation_fraction: float = DEFAULT_VALIDATION_FRACTION
 ) -> Tuple[MlbTrainingDataset, MlbTrainingDataset]:
-    """Divide `dataset` en (train, validation) ordenando por
-    `data_cutoff_timestamp` -- NUNCA aleatorio (PLAN_PHASE2.md §10:
-    "Split temporal, nunca random"). La validación es siempre la porción
-    cronológicamente MÁS RECIENTE -- nunca se valida con datos del pasado
-    usando un modelo que en la práctica "vio" datos futuros respecto a
-    esa validación. Este es un split simple train/validation (lo pedido
-    para 5b), no el walk-forward completo del futuro Paso 9 -- pero
-    reutiliza la MISMA `build_mlb_training_dataset` como única fuente de
-    verdad, para que Paso 9 pueda construir su walk-forward encima de este
-    mismo dataset sin duplicar la lógica de filtrado/join."""
-    ordered = sorted(dataset.samples, key=lambda s: (s.data_cutoff_timestamp, s.event_id))
-    n_validation = round(len(ordered) * validation_fraction)
-    n_validation = max(1, min(n_validation, len(ordered) - 1)) if len(ordered) > 1 else 0
+    """Divide `dataset` en (train, validation) agrupando por `event_id`
+    -- NUNCA aleatorio (PLAN_PHASE2.md §10: "Split temporal, nunca
+    random"), y NUNCA por muestra individual (Fase 4, Paso 4.3,
+    corrección de fuga de datos: un mismo evento puede tener varias
+    `feature_snapshots` a lo largo de varias horas -- capturado por
+    `run_e2e.py` horario -- y todas comparten el mismo resultado; si el
+    split partiera por muestra, el mismo evento podía terminar con
+    algunas muestras en `train` y otras, casi idénticas, en
+    `validation`, inflando la métrica de validación de forma optimista
+    sin que ningún test lo detectara -- ver CONTINUITY.md §0.26 para el
+    hallazgo real, verificado contra datos de producción).
 
-    train_samples = ordered[: len(ordered) - n_validation]
-    validation_samples = ordered[len(ordered) - n_validation :]
+    Cada evento se representa por el `data_cutoff_timestamp` MÍNIMO de
+    sus muestras (cuándo entró por primera vez al histórico observable);
+    los eventos se ordenan cronológicamente y la validación es siempre
+    la porción de EVENTOS cronológicamente más reciente -- nunca se
+    valida con datos del pasado usando un modelo que en la práctica
+    "vio" datos futuros respecto a esa validación. `validation_fraction`
+    se aplica sobre el número de EVENTOS, no de muestras -- con eventos
+    de distinto número de muestras, la fracción exacta de FILAS en
+    validación ya no puede garantizarse igual a `validation_fraction`,
+    consecuencia necesaria de eliminar la fuga, no un defecto.
+
+    Este es un split simple train/validation (lo pedido para 5b), no el
+    walk-forward completo del futuro Paso 9 -- pero reutiliza la MISMA
+    `build_mlb_training_dataset` como única fuente de verdad, para que
+    Paso 9 pueda construir su walk-forward encima de este mismo dataset
+    sin duplicar la lógica de filtrado/join."""
+    samples_by_event: Dict[str, List[MlbTrainingSample]] = {}
+    for sample in dataset.samples:
+        samples_by_event.setdefault(sample.event_id, []).append(sample)
+
+    event_order = sorted(
+        samples_by_event, key=lambda event_id: (min(s.data_cutoff_timestamp for s in samples_by_event[event_id]), event_id)
+    )
+    n_validation_events = round(len(event_order) * validation_fraction)
+    n_validation_events = max(1, min(n_validation_events, len(event_order) - 1)) if len(event_order) > 1 else 0
+
+    train_event_ids = set(event_order[: len(event_order) - n_validation_events])
+    train_samples = [s for s in dataset.samples if s.event_id in train_event_ids]
+    validation_samples = [s for s in dataset.samples if s.event_id not in train_event_ids]
 
     train = MlbTrainingDataset(
         samples=train_samples, feature_set_version=dataset.feature_set_version, warnings=[]

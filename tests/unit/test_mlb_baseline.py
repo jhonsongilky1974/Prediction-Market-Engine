@@ -354,6 +354,48 @@ def test_split_dataset_temporally_is_deterministic_across_calls(tmp_path):
     assert [s.event_id for s in val1.samples] == [s.event_id for s in val2.samples]
 
 
+def test_split_dataset_temporally_no_event_id_appears_in_both_partitions(tmp_path):
+    """Fase 4, Paso 4.3 -- regresión del hallazgo real de fuga de datos
+    (MODEL_TRAINING_SPEC.md §0.5.1, verificado contra producción: 120 de
+    120 event_id de tenis aparecían en ambas particiones). Simula el
+    patrón real de captura horaria: cada evento tiene VARIAS
+    feature_snapshots a lo largo del tiempo, todas con el mismo
+    resultado -- el split debe mantener cada evento entero de un solo
+    lado."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(10):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        # 3 snapshots por evento, separados por horas -- mismo evento,
+        # distinto computed_at (captura horaria real). El resultado se
+        # registra una sola vez (mismo patrón real: event_results se
+        # sincroniza aparte de feature_snapshots, no en cada captura).
+        for snapshot_offset in range(3):
+            _add_sample(
+                hist,
+                f"mlb_{i}",
+                t0 + timedelta(days=i, hours=snapshot_offset),
+                result=result if snapshot_offset == 2 else None,
+                recorded_at=t0 + timedelta(days=i, hours=3),
+            )
+
+    dataset = build_mlb_training_dataset(hist)
+    assert dataset.size == 30  # 10 eventos x 3 snapshots cada uno
+
+    train, validation = split_dataset_temporally(dataset, validation_fraction=0.2)
+
+    train_events = {s.event_id for s in train.samples}
+    validation_events = {s.event_id for s in validation.samples}
+    assert train_events.isdisjoint(validation_events)
+    # Todas las muestras de un evento quedan del mismo lado -- ninguna
+    # partición corta un evento a la mitad.
+    for event_id in train_events | validation_events:
+        sides = sum(1 for s in dataset.samples if s.event_id == event_id)
+        in_train = sum(1 for s in train.samples if s.event_id == event_id)
+        in_validation = sum(1 for s in validation.samples if s.event_id == event_id)
+        assert in_train == sides or in_validation == sides
+
+
 # ---------------------------------------------------------------------
 # Métricas + class_weight (Paso 5b, Bloque 4)
 # ---------------------------------------------------------------------

@@ -22,6 +22,17 @@ utilizable (`dataset.size`, ya sin fuga temporal ni resultados no
 binarios). Ningún umbral de Coverage Gate se fija aquí -- decisión
 explícita del usuario, `FASE4_EXECUTION_PLAN.md` §9.2/§6 Paso 4.2: se
 decide con evidencia real cuando GATE-0 esté cerca de cumplirse.
+
+Fase 4, Paso 4.3 (`MODEL_TRAINING_SPEC.md` §0.4): los conteos crudos de
+arriba son correctos para los clasificadores (`build_*_training_dataset`
+los usa tal cual), pero NO para Elo -- `train_mlb_elo_model` no usa
+`feature_snapshots` en absoluto, tiene su propia función de
+elegibilidad (`build_mlb_elo_game_sequence`, basada en
+`event_snapshots`+`event_results`). Verificado en producción: los
+conteos crudos daban `GATE-0[mlb_elo]=CUMPLIDO` cuando la elegibilidad
+real de Elo era 41 < 50 -- falso positivo. `eligible_count_fn` permite
+inyectar, por umbral, una función de elegibilidad real distinta de los
+conteos crudos, sin tocar la lógica de los clasificadores.
 """
 from __future__ import annotations
 
@@ -64,11 +75,22 @@ def build_sport_gate_report(
     thresholds: Dict[str, int],
     build_dataset_fn: Callable[[HistoryRepository], Any],
     feature_set_version: str,
+    eligible_count_fn: Optional[Dict[str, Callable[[HistoryRepository], int]]] = None,
 ) -> SportGateReport:
     """`build_dataset_fn` es `build_mlb_training_dataset`/
     `build_tennis_training_dataset` (inyectado, no importado aquí --
     este módulo no decide qué deportes existen, mismo principio de
-    extensibilidad que `SportAdapter`, Paso 4.1)."""
+    extensibilidad que `SportAdapter`, Paso 4.1).
+
+    `eligible_count_fn` (opcional, Paso 4.3): `{nombre_de_umbral:
+    función(history_repository) -> int}` -- para el/los umbral(es)
+    presentes en este dict, GATE-0 compara contra
+    `eligible_count_fn[nombre](history_repository)` en vez de los
+    conteos crudos (`feature_snapshots_total`/`event_results_total`).
+    Omitir un nombre (o el parámetro entero) preserva el comportamiento
+    exacto ya existente para ese umbral -- retrocompatible, ningún
+    llamador existente se ve afectado."""
+    eligible_count_fn = eligible_count_fn or {}
     feature_rows = history_repository.get_all_feature_snapshots()
     feature_snapshots_total = sum(
         1
@@ -81,10 +103,12 @@ def build_sport_gate_report(
 
     dataset = build_dataset_fn(history_repository)
 
-    gate_0_met = {
-        name: feature_snapshots_total >= n_min and event_results_total >= n_min
-        for name, n_min in thresholds.items()
-    }
+    gate_0_met = {}
+    for name, n_min in thresholds.items():
+        if name in eligible_count_fn:
+            gate_0_met[name] = eligible_count_fn[name](history_repository) >= n_min
+        else:
+            gate_0_met[name] = feature_snapshots_total >= n_min and event_results_total >= n_min
     coverage_ratio = dataset.size / feature_snapshots_total if feature_snapshots_total > 0 else None
 
     return SportGateReport(

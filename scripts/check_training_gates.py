@@ -27,7 +27,7 @@ from src.evaluation.gate_report import SportGateReport, build_sport_gate_report
 from src.evaluation.label_quality_audit import SportLabelQualityReport, build_label_quality_report
 from src.features.registry import CURRENT_FEATURE_SET_VERSION
 from src.models.mlb_baseline import DEFAULT_MIN_TRAINING_SAMPLES, build_mlb_training_dataset
-from src.models.mlb_elo import DEFAULT_MIN_GAMES
+from src.models.mlb_elo import DEFAULT_MIN_GAMES, build_mlb_elo_game_sequence
 from src.models.schemas import Sport
 from src.models.tennis_baseline import DEFAULT_MIN_TRAINING_SAMPLES_TENNIS, build_tennis_training_dataset
 from src.storage.history_repository import HistoryRepository
@@ -85,6 +85,9 @@ def main() -> int:
         thresholds={"mlb_classifier": DEFAULT_MIN_TRAINING_SAMPLES, "mlb_elo": DEFAULT_MIN_GAMES},
         build_dataset_fn=build_mlb_training_dataset,
         feature_set_version=CURRENT_FEATURE_SET_VERSION,
+        # mlb_elo NO usa feature_snapshots -- tiene su propia función de
+        # elegibilidad (Fase 4, Paso 4.3, MODEL_TRAINING_SPEC.md §0.4).
+        eligible_count_fn={"mlb_elo": lambda h: build_mlb_elo_game_sequence(h).size},
     )
     _print_report(mlb_report)
     _print_label_quality_report(build_label_quality_report(hist, Sport.MLB, mlb_report))

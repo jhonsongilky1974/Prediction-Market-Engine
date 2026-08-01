@@ -222,17 +222,28 @@ def build_tennis_training_dataset(history_repository: HistoryRepository) -> Tenn
 def split_dataset_temporally(
     dataset: TennisTrainingDataset, validation_fraction: float = DEFAULT_VALIDATION_FRACTION
 ) -> Tuple[TennisTrainingDataset, TennisTrainingDataset]:
-    """Split temporal simple train/validation -- NUNCA aleatorio, misma
-    semántica exacta que `mlb_baseline.split_dataset_temporally` (Paso
-    5b), duplicada aquí (no importada) para no acoplar `tennis_baseline.py`
-    a `mlb_baseline.py`. La validación es siempre la porción cronológicamente
-    MÁS RECIENTE."""
-    ordered = sorted(dataset.samples, key=lambda s: (s.data_cutoff_timestamp, s.event_id))
-    n_validation = round(len(ordered) * validation_fraction)
-    n_validation = max(1, min(n_validation, len(ordered) - 1)) if len(ordered) > 1 else 0
+    """Split temporal train/validation agrupado por `event_id` -- NUNCA
+    aleatorio, misma semántica exacta que
+    `mlb_baseline.split_dataset_temporally` (Paso 5b + corrección de
+    fuga de datos del Paso 4.3, ver docstring hermano para el detalle
+    completo del hallazgo), duplicada aquí (no importada) para no
+    acoplar `tennis_baseline.py` a `mlb_baseline.py`. La validación es
+    siempre la porción de EVENTOS (no de muestras individuales)
+    cronológicamente MÁS RECIENTE -- ningún `event_id` puede aparecer en
+    ambas particiones."""
+    samples_by_event: Dict[str, List[TennisTrainingSample]] = {}
+    for sample in dataset.samples:
+        samples_by_event.setdefault(sample.event_id, []).append(sample)
 
-    train_samples = ordered[: len(ordered) - n_validation]
-    validation_samples = ordered[len(ordered) - n_validation :]
+    event_order = sorted(
+        samples_by_event, key=lambda event_id: (min(s.data_cutoff_timestamp for s in samples_by_event[event_id]), event_id)
+    )
+    n_validation_events = round(len(event_order) * validation_fraction)
+    n_validation_events = max(1, min(n_validation_events, len(event_order) - 1)) if len(event_order) > 1 else 0
+
+    train_event_ids = set(event_order[: len(event_order) - n_validation_events])
+    train_samples = [s for s in dataset.samples if s.event_id in train_event_ids]
+    validation_samples = [s for s in dataset.samples if s.event_id not in train_event_ids]
 
     train = TennisTrainingDataset(
         samples=train_samples, feature_set_version=dataset.feature_set_version, warnings=[]
@@ -266,6 +277,32 @@ class TennisTrainedArtifact:
     accuracy: Optional[float] = None
     log_loss: Optional[float] = None
     brier_score: Optional[float] = None
+    # Fase 4, Paso 4.3 -- aditivo (MODEL_TRAINING_SPEC.md §0.5.2-4).
+    n_train_events: int = 0
+    """Eventos distintos (no muestras) del lado `train` -- transparencia
+    del split corregido por `event_id` (§0.5.1)."""
+    n_validation_events: int = 0
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+    f1: Optional[float] = None
+    ece: Optional[float] = None
+    """Expected Calibration Error del modelo CRUDO (sin calibrar) sobre
+    la validación -- reutiliza `src.backtesting.metrics.ece` (Fase 3,
+    Paso 3.8), no una fórmula nueva."""
+    reliability_diagram: Optional[List[Dict[str, float]]] = None
+    """Curva de calibración cruda (`src.backtesting.metrics.calibration_curve`)
+    serializada por bucket -- la evidencia más directa para decidir, en
+    un paso futuro, si vale la pena calibrar en absoluto."""
+    calibration_version: Optional[str] = None
+    """Permanece `None` hasta que exista una implementación real de
+    `Calibrator` (`src/calibration/calibration_layer.py`) -- estructura
+    del contrato declarada por adelantado, no un valor fabricado."""
+    calibration_method: Optional[str] = None
+    artifact_sha256: str = ""
+    """`sha256` del contenido binario del `.joblib` ya escrito -- mismo
+    principio que `PolicyManifest.manifest_hash`, aplicado al contenido
+    real del artefacto (detecta corrupción/reentrenamiento idéntico, no
+    solo diferencia por timestamp)."""
 
 
 def _tennis_metadata_path(models_dir: Path, model_version: str) -> Path:
@@ -294,6 +331,16 @@ def _save_tennis_artifact_metadata(artifact: TennisTrainedArtifact, models_dir: 
         "accuracy": artifact.accuracy,
         "log_loss": artifact.log_loss,
         "brier_score": artifact.brier_score,
+        "n_train_events": artifact.n_train_events,
+        "n_validation_events": artifact.n_validation_events,
+        "precision": artifact.precision,
+        "recall": artifact.recall,
+        "f1": artifact.f1,
+        "ece": artifact.ece,
+        "reliability_diagram": artifact.reliability_diagram,
+        "calibration_version": artifact.calibration_version,
+        "calibration_method": artifact.calibration_method,
+        "artifact_sha256": artifact.artifact_sha256,
     }
     path = _tennis_metadata_path(models_dir, artifact.model_version)
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -386,13 +433,24 @@ def train_tennis_baseline_model(
         f"tournament_round.{category}" for category in round_categories
     ]
 
+    import hashlib
+
     import joblib
     import numpy as np
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+    from sklearn.metrics import (
+        accuracy_score,
+        brier_score_loss,
+        f1_score,
+        log_loss,
+        precision_score,
+        recall_score,
+    )
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
+
+    from src.backtesting.metrics import calibration_curve, ece as compute_ece
 
     def _to_matrix(samples: List[TennisTrainingSample]):
         return np.array(
@@ -427,11 +485,34 @@ def train_tennis_baseline_model(
         logloss = None
         warnings.append(f"log_loss no pudo calcularse sobre la validación: {exc}")
 
+    # Fase 4, Paso 4.3 -- métricas adicionales sobre la MISMA validación
+    # ya calculada arriba, cero partición nueva. ece/reliability_diagram
+    # miden el modelo CRUDO (sin calibrar) -- ningún Calibrator real
+    # existe todavía (MODEL_TRAINING_SPEC.md §0.1).
+    precision = float(precision_score(y_val, val_pred, zero_division=0))
+    recall = float(recall_score(y_val, val_pred, zero_division=0))
+    f1 = float(f1_score(y_val, val_pred, zero_division=0))
+    val_ece = compute_ece(list(y_val), list(val_proba))
+    buckets = calibration_curve(list(y_val), list(val_proba))
+    reliability_diagram = [
+        {
+            "bin_lo": b.bin_lo,
+            "bin_hi": b.bin_hi,
+            "mean_predicted": b.mean_predicted,
+            "mean_actual": b.mean_actual,
+            "n_samples": b.n_samples,
+        }
+        for b in buckets
+    ] or None
+    n_train_events = len({s.event_id for s in train_dataset.samples})
+    n_validation_events = len({s.event_id for s in validation_dataset.samples})
+
     now = now or datetime.now(timezone.utc)
     model_version = f"tennis_baseline_logreg_v1_{now:%Y%m%dT%H%M%SZ}"
     models_dir.mkdir(parents=True, exist_ok=True)
     file_path = models_dir / f"{model_version}.joblib"
     joblib.dump(pipeline, file_path)
+    artifact_sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
 
     artifact = TennisTrainedArtifact(
         model_version=model_version,
@@ -448,6 +529,16 @@ def train_tennis_baseline_model(
         validation_fraction=validation_fraction,
         accuracy=accuracy,
         log_loss=logloss,
+        n_train_events=n_train_events,
+        n_validation_events=n_validation_events,
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        ece=val_ece,
+        reliability_diagram=reliability_diagram,
+        calibration_version=None,
+        calibration_method=None,
+        artifact_sha256=artifact_sha256,
         brier_score=brier,
     )
 

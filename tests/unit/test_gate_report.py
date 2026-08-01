@@ -154,3 +154,49 @@ def test_report_is_read_only_no_side_effects_on_history_repository(tmp_path):
     after = hist.get_all_feature_snapshots()
 
     assert before == after
+
+
+# ---------------------------------------------------------------------
+# eligible_count_fn (Fase 4, Paso 4.3) -- regresión del falso positivo
+# de GATE-0[mlb_elo] (MODEL_TRAINING_SPEC.md §0.4).
+# ---------------------------------------------------------------------
+
+
+def test_eligible_count_fn_overrides_raw_counts_for_named_threshold(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    for i in range(5):
+        _add_mlb_sample(hist, f"mlb_{i}", result="PARTICIPANT_A_WON")
+
+    # feature_snapshots_total=5, event_results_total=5 -- ambos >= 3
+    # (umbral "raw"), pero la función de elegibilidad inyectada (simula
+    # Elo) devuelve un número menor -- exactamente el bug real de §0.4.
+    report = build_sport_gate_report(
+        hist,
+        Sport.MLB,
+        event_id_prefix="mlb_",
+        thresholds={"raw_ok": 3, "elo_like": 3},
+        build_dataset_fn=build_mlb_training_dataset,
+        feature_set_version=CURRENT_FEATURE_SET_VERSION,
+        eligible_count_fn={"elo_like": lambda h: 2},
+    )
+
+    assert report.gate_0_met["raw_ok"] is True  # sin override -- comportamiento crudo de siempre
+    assert report.gate_0_met["elo_like"] is False  # con override -- 2 < 3, corregido
+
+
+def test_omitting_eligible_count_fn_preserves_exact_previous_behavior(tmp_path):
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    for i in range(5):
+        _add_mlb_sample(hist, f"mlb_{i}", result="PARTICIPANT_A_WON")
+
+    with_none = build_sport_gate_report(
+        hist, Sport.MLB, event_id_prefix="mlb_", thresholds={"t": 3},
+        build_dataset_fn=build_mlb_training_dataset, feature_set_version=CURRENT_FEATURE_SET_VERSION,
+        eligible_count_fn=None,
+    )
+    without_param = build_sport_gate_report(
+        hist, Sport.MLB, event_id_prefix="mlb_", thresholds={"t": 3},
+        build_dataset_fn=build_mlb_training_dataset, feature_set_version=CURRENT_FEATURE_SET_VERSION,
+    )
+
+    assert with_none.gate_0_met == without_param.gate_0_met == {"t": True}

@@ -261,6 +261,40 @@ def test_split_dataset_temporally_is_deterministic_across_calls(tmp_path):
     assert [s.event_id for s in val1.samples] == [s.event_id for s in val2.samples]
 
 
+def test_split_dataset_temporally_no_event_id_appears_in_both_partitions(tmp_path):
+    """Fase 4, Paso 4.3 -- regresión del hallazgo real de fuga de datos
+    (MODEL_TRAINING_SPEC.md §0.5.1), verificado originalmente contra
+    producción: 120 de 120 event_id de tenis aparecían en ambas
+    particiones. Mismo patrón real de captura horaria: varias
+    feature_snapshots por evento, mismo resultado."""
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(10):
+        result = "PARTICIPANT_A_WON" if i % 2 == 0 else "PARTICIPANT_B_WON"
+        for snapshot_offset in range(3):
+            _add_sample(
+                hist,
+                f"espn_tennis_atp_{i}",
+                t0 + timedelta(days=i, hours=snapshot_offset),
+                result=result if snapshot_offset == 2 else None,
+                recorded_at=t0 + timedelta(days=i, hours=3),
+            )
+
+    dataset = build_tennis_training_dataset(hist)
+    assert dataset.size == 30
+
+    train, validation = split_dataset_temporally(dataset, validation_fraction=0.2)
+
+    train_events = {s.event_id for s in train.samples}
+    validation_events = {s.event_id for s in validation.samples}
+    assert train_events.isdisjoint(validation_events)
+    for event_id in train_events | validation_events:
+        total = sum(1 for s in dataset.samples if s.event_id == event_id)
+        in_train = sum(1 for s in train.samples if s.event_id == event_id)
+        in_validation = sum(1 for s in validation.samples if s.event_id == event_id)
+        assert in_train == total or in_validation == total
+
+
 # ---------------------------------------------------------------------
 # Training pipeline
 # ---------------------------------------------------------------------
@@ -305,6 +339,67 @@ def test_train_at_threshold_produces_trained_artifact(tmp_path):
     assert set(artifact.round_categories) == {"Final", "Qualifying 1st Round"}
     metadata_path = models_dir / f"{artifact.model_version}.metadata.json"
     assert metadata_path.exists()
+
+    # Fase 4, Paso 4.3 -- campos nuevos del artefacto (MODEL_TRAINING_SPEC.md §0.5.2-4).
+    assert artifact.n_train_events + artifact.n_validation_events == 12  # 1 muestra/evento en este fixture
+    assert 0.0 <= artifact.precision <= 1.0
+    assert 0.0 <= artifact.recall <= 1.0
+    assert 0.0 <= artifact.f1 <= 1.0
+    assert artifact.ece is None or 0.0 <= artifact.ece <= 1.0
+    assert artifact.calibration_version is None  # ningún Calibrator real existe
+    assert artifact.calibration_method is None
+    assert len(artifact.artifact_sha256) == 64  # hexdigest de sha256
+    import hashlib
+
+    assert artifact.artifact_sha256 == hashlib.sha256(artifact.file_path.read_bytes()).hexdigest()
+
+
+def test_train_metrics_match_direct_computation_on_validation(tmp_path):
+    """precision/recall/f1/ece deben coincidir EXACTAMENTE con llamar
+    sklearn/src.backtesting.metrics directamente sobre la misma
+    partición de validación -- confirma reutilización literal, no una
+    fórmula reimplementada."""
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
+    from src.backtesting.metrics import ece as compute_ece
+    from src.models.tennis_baseline import _vectorize_features, build_tennis_training_dataset, split_dataset_temporally
+
+    hist = HistoryRepository(db_path=tmp_path / "hist.db")
+    t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    for i in range(6):
+        _add_sample(
+            hist, f"espn_tennis_atp_a{i}", t0 + timedelta(minutes=i), result="PARTICIPANT_A_WON",
+            rest_a=8.0, rest_b=1.0, round_context="Final",
+        )
+    for i in range(6):
+        _add_sample(
+            hist, f"espn_tennis_atp_b{i}", t0 + timedelta(minutes=100 + i), result="PARTICIPANT_B_WON",
+            rest_a=1.0, rest_b=8.0, round_context="Qualifying 1st Round",
+        )
+    models_dir = tmp_path / "models"
+
+    status, artifact, _ = train_tennis_baseline_model(hist, models_dir=models_dir, min_samples=10)
+    assert status == ModelStatus.TRAINED
+
+    # Reconstruye la MISMA partición e inferencia para comparar independientemente.
+    dataset = build_tennis_training_dataset(hist)
+    _, validation_dataset = split_dataset_temporally(dataset)
+    loaded = load_latest_tennis_artifact(models_dir)
+    assert loaded is not None
+    pipeline, loaded_artifact = loaded
+
+    X_val = [
+        [_vectorize_features(s.features, loaded_artifact.round_categories).get(c, float("nan")) for c in loaded_artifact.feature_columns]
+        for s in validation_dataset.samples
+    ]
+    y_val = [s.label for s in validation_dataset.samples]
+    val_proba = pipeline.predict_proba(X_val)[:, 1]
+    val_pred = (val_proba >= 0.5).astype(int)
+
+    assert artifact.precision == pytest.approx(precision_score(y_val, val_pred, zero_division=0))
+    assert artifact.recall == pytest.approx(recall_score(y_val, val_pred, zero_division=0))
+    assert artifact.f1 == pytest.approx(f1_score(y_val, val_pred, zero_division=0))
+    assert artifact.ece == pytest.approx(compute_ece(list(y_val), list(val_proba)))
 
 
 def test_train_discovers_round_categories_only_from_train_split(tmp_path):
