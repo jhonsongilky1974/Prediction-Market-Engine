@@ -6,6 +6,16 @@ de implementar. Sigue el mismo protocolo que `ORCHESTRATOR_SPEC.md`
 (Paso 4.1): investigación del código real primero, hallazgos reportados
 explícitamente, decisiones abiertas señaladas sin fabricar valores.
 
+**Revisión 2 (2026-08-01, mismo día):** el usuario aprobó el diseño y
+pidió una autoauditoría adicional antes de implementar, contra 4
+requisitos explícitos (partición sin data leakage, artefacto versionado
+con campos mínimos, estructura preparada para calibración futura,
+métricas suficientes para comparar versiones). La autoauditoría
+**encontró un bug real de fuga de datos entre entrenamiento y
+validación**, verificado contra datos de producción, nunca detectado
+porque ningún test existente lo podía revelar — ver §0.5. Se incorpora
+la corrección al diseño antes de implementar, según lo pedido.
+
 ---
 
 ## 0. Hallazgo central — "entrenar un calibrador real" no es ejecutable todavía
@@ -90,6 +100,134 @@ real) — es un caso no cubierto, encontrado ahora, que se corrige como
 parte de este paso (§7). Se reporta explícitamente en vez de dejarlo
 pasar en silencio.
 
+### 0.5 Autoauditoría adicional (Revisión 2) — contra los 4 requisitos del usuario, verificados contra código y datos reales
+
+#### 1. Partición train/validation — **bug real encontrado, corrección requerida**
+
+`split_dataset_temporally` (`mlb_baseline.py:252`/`tennis_baseline.py:222`,
+código idéntico duplicado a propósito en ambos módulos) ordena las
+**muestras individuales** por `(data_cutoff_timestamp, event_id)` y
+corta la cola más reciente como validación — **nunca agrupa por
+`event_id`**. Un mismo evento con varias `feature_snapshots` a lo largo
+de varias horas (exactamente lo que produce la captura horaria en
+producción) puede tener algunas de sus muestras en `train` y otras,
+del mismo evento, con el mismo resultado, en `validation`.
+
+**Verificado directamente contra `data/engine.db` de producción, no
+hipotético**:
+```
+dataset de tenis: 600 muestras, 120 event_id distintos
+split real (validation_fraction=0.2): train=480, validation=120
+event_id que aparecen en AMBAS particiones: 120 de 120 (el 100%)
+```
+**Los 120 eventos de validación son exactamente los mismos 120 eventos
+que el modelo ya vio en entrenamiento** (con features casi idénticas de
+horas antes) — la validación reportada no mide generalización a
+eventos nunca vistos, la infla de forma optimista. Confirmado que el
+mismo patrón existe letra por letra en `mlb_baseline.py` (aunque MLB no
+se entrena en este paso, se corrige también por consistencia, ver §7).
+
+**Por qué ningún test lo detectó**: los dos únicos tests que ejercitan
+`split_dataset_temporally`
+(`test_split_dataset_temporally_validation_is_most_recent_and_never_random`,
+`test_split_dataset_temporally_is_deterministic_across_calls`, en
+ambos archivos de test) usan exactamente **una muestra por `event_id`**
+(`mlb_0`...`mlb_9`, cada uno una sola vez) — con un evento por muestra,
+partición por muestra y partición por evento son indistinguibles, así
+que el bug es estructuralmente invisible en esos fixtures. Solo se
+manifiesta con el patrón real de captura repetida de Fase 2 en
+producción, nunca antes ejercitado a este volumen.
+
+**Corrección** (§7): `split_dataset_temporally` se reescribe para
+agrupar por `event_id` primero (representando cada evento por el
+`data_cutoff_timestamp` MÍNIMO de sus muestras), ordenar los EVENTOS
+cronológicamente, y asignar cada evento completo (todas sus muestras)
+a un solo lado de la partición — ningún `event_id` puede aparecer en
+ambas. `validation_fraction` sigue interpretándose sobre el número de
+eventos, no de muestras (la proporción exacta de muestras ya no puede
+garantizarse al tamaño exacto pedido, es una consecuencia necesaria de
+eliminar la fuga, documentada explícitamente en el docstring nuevo).
+**Comportamiento preservado exactamente para todo dato con una muestra
+por evento** (verificado: los tests existentes, que usan ese patrón,
+deben seguir pasando sin modificar sus aserciones).
+
+#### 2. Artefacto versionado e inmutable con campos mínimos — mayormente satisfecho, un hueco real
+
+Verificado campo por campo contra `TennisTrainedArtifact`
+(`tennis_baseline.py:253-268`):
+
+| Requisito | Estado | Nota |
+|---|---|---|
+| `model_version` | ✅ existe | string único con timestamp completo |
+| `feature_set_version` | ✅ existe | |
+| `training_timestamp` | ✅ existe como `trained_at` | mismo significado, nombre distinto — no se renombra sin necesidad |
+| `sample_count` | ✅ existe como `n_training_samples` | |
+| métricas de validación | ✅ existen | `accuracy`/`log_loss`/`brier_score` |
+| **identificador o hash del modelo** | ❌ **no existe** | ningún campo de hash en `TennisTrainedArtifact`/`MlbTrainedArtifact`, ni en `registry.py` (`grep -rn "hash"` sin resultados en los 3 archivos) |
+| nunca sobrescribe | ✅ confirmado | `model_version` incluye timestamp completo, `_save_tennis_artifact_metadata` siempre escribe un archivo nuevo (`{model_version}.metadata.json`), nunca reutiliza un nombre |
+
+**Corrección**: se añade `artifact_sha256: str`, calculado con
+`hashlib.sha256` sobre los bytes del archivo `.joblib` ya escrito —
+mismo principio ya usado en el proyecto para `PolicyManifest.manifest_hash`
+(hash de contenido real, no un identificador inventado), aplicado aquí
+al contenido binario real del artefacto en vez de a un JSON, porque es
+lo que permite detectar corrupción/reentrenamiento accidental idéntico,
+no solo diferenciar por timestamp.
+
+#### 3. Estructura preparada para calibración futura — hueco real, se añade sin fabricar valores
+
+`calibration_version`/`calibration_method` no existen hoy en
+`TennisTrainedArtifact` — **sí existen ya en `CalibrationOutput`**
+(`src/calibration/schemas.py`), pero ese contrato es por-predicción (en
+inferencia), no por-artefacto-entrenado. No hay hoy ningún lugar en el
+artefacto mismo que declare "qué calibrador corresponde a esta versión
+de modelo". Se añaden como `Optional[str] = None` — permanecen `None`
+literalmente (ningún `Calibrator` real existe, §0.1) hasta que un paso
+futuro los complete; esto NO es fabricar un valor, es declarar la forma
+del contrato por adelantado, mismo patrón ya usado repetidamente en
+este proyecto (p. ej. `CalibrationOutput.calibration_version` mismo).
+
+`ece` y una curva de fiabilidad (`reliability_diagram`) **si se pueden
+calcular hoy, sobre el modelo SIN calibrar** — no fabricar información
+que sí es real y barata de producir sería el error opuesto. Se añaden
+POBLADOS (no `None`):
+- `ece: Optional[float]` — reutiliza literalmente `src.backtesting.metrics.ece`
+  (Fase 3, Paso 3.8, ya implementado y testeado, confirmado con
+  `grep -n "^def ece" src/backtesting/metrics.py:109` — verificado
+  directamente, no asumido).
+- `reliability_diagram: Optional[List[Dict[str, float]]]` — reutiliza
+  literalmente `src.backtesting.metrics.calibration_curve` (misma
+  función, mismo paso de Fase 3), serializado como lista de
+  `{bucket_lower, bucket_upper, mean_predicted, mean_actual, n_samples}`
+  por bucket. Es la fiabilidad del modelo CRUDO, no de uno calibrado —
+  el dato más directo para decidir, en un futuro paso, si vale la pena
+  calibrar en absoluto.
+
+#### 4. Métricas suficientes para comparar versiones futuras — hueco parcial, se completa
+
+`accuracy`/`log_loss`/`brier_score` ya existen; `ece` se añade (arriba).
+`precision`/`recall`/`f1` **no existen** — se añaden, calculados sobre
+la misma partición de validación y las mismas predicciones (`y_val`/
+`val_pred`) ya usadas para `accuracy`, vía `sklearn.metrics.precision_score`/
+`recall_score`/`f1_score` (misma librería ya importada en la función,
+sin dependencia nueva). Justificación: `class_weight="balanced"` ya se
+usa por el desbalance de clases esperado — `accuracy` sola puede ser
+engañosa bajo desbalance, `precision`/`recall`/`f1` dan una imagen más
+completa para comparar versiones futuras entre sí.
+
+**Conclusión de la autoauditoría**: el diseño original (§1-§8 de la
+Revisión 1) queda vigente en su arquitectura y flujo general — el
+cambio real es en el CONTENIDO del artefacto (7 campos nuevos: 2 de
+calibración futura vacíos por diseño, 4 poblados con evidencia real ya
+computable, 1 hash) y una corrección de un bug de fuga de datos ya
+presente en Fase 2, encontrado por primera vez aquí porque nunca se
+había entrenado contra datos reales con múltiples muestras por evento.
+Ninguno de los 7 campos nuevos requiere inventar una fórmula: los 4
+poblados reutilizan funciones ya implementadas y testeadas de Fase 3,
+los 2 de calibración quedan `None` porque no hay nada real que poner
+todavía, y el hash reutiliza una técnica ya establecida en el proyecto
+(`PolicyManifest.manifest_hash`).
+
 ---
 
 ## 1. Alcance reencuadrado del Paso 4.3
@@ -113,20 +251,24 @@ qué partición, con qué tamaño mínimo) sin ninguna evidencia real de
 
 ### Dentro de alcance de este paso
 
-1. `scripts/train_tennis_model.py` (nuevo, mismo patrón que
+1. **Corrección de fuga de datos en `split_dataset_temporally`**
+   (`mlb_baseline.py` y `tennis_baseline.py`, ambos — §0.5.1): partición
+   por `event_id` agrupado, no por muestra individual. Prerrequisito de
+   correctitud antes de entrenar nada — sin esto, cualquier métrica de
+   validación reportada sería optimista de forma no detectada.
+2. `scripts/train_tennis_model.py` (nuevo, mismo patrón que
    `scripts/train_mlb_model.py`).
-2. Corrección del gate de Elo en `src/evaluation/gate_report.py` (o un
-   módulo hermano específico para Elo — ver §7).
-3. Enmienda aditiva a `train_tennis_baseline_model`: exponer `ece`
-   (Expected Calibration Error) en el artefacto, reutilizando
-   `src.backtesting.metrics.ece` (Fase 3, Paso 3.8, ya implementado y
-   testeado — verificado que existe, contrario a lo que se podría
-   asumir) — hoy el artefacto solo guarda `accuracy`/`brier_score`/
-   `log_loss`, no `ece`, pese a que `EVALUATION_LEARNING_SPEC.md` §2 lo
-   define como parte de "calidad de la probabilidad".
-4. Ejecutar el entrenamiento real contra `data/engine.db` de
+3. Corrección del gate de Elo en `src/evaluation/gate_report.py` (§0.4,
+   §4.3).
+4. Enmienda aditiva a `TennisTrainedArtifact`/`train_tennis_baseline_model`
+   (§0.5.2-4): `artifact_sha256` (hash del `.joblib`),
+   `calibration_version`/`calibration_method` (`None`, estructura
+   preparada), `ece`/`reliability_diagram` (poblados, reutilizando
+   `src.backtesting.metrics`), `precision`/`recall`/`f1` (poblados,
+   `sklearn`).
+5. Ejecutar el entrenamiento real contra `data/engine.db` de
    producción — con confirmación explícita separada antes de hacerlo
-   (§0.5 de esta sección — ver razón).
+   (ver "Consecuencia importante" más abajo).
 
 ### Fuera de alcance de este paso (diferido explícitamente)
 
@@ -224,20 +366,77 @@ Sin argumentos de CLI más allá de los ya usados en `train_mlb_model.py`
 (`--min-samples`, `--validation-fraction`, `--models-dir`) — mismo
 patrón, sin inventar opciones nuevas.
 
-### 4.2 Enmienda a `train_tennis_baseline_model` — `ece`
+### 4.0 Corrección de `split_dataset_temporally` (§0.5.1) — MLB y tenis
 
-Después de calcular `brier`/`logloss` (ya existente, sin tocar), una
-línea aditiva:
+Reescritura de la función (idéntica en ambos módulos, mismo patrón ya
+duplicado deliberadamente):
 ```python
-from src.backtesting.metrics import ece as compute_ece
-...
-val_ece = compute_ece(list(y_val), list(val_proba))
+def split_dataset_temporally(dataset, validation_fraction=DEFAULT_VALIDATION_FRACTION):
+    samples_by_event: Dict[str, List[Sample]] = {}
+    for s in dataset.samples:
+        samples_by_event.setdefault(s.event_id, []).append(s)
+
+    # Cada evento representado por su data_cutoff_timestamp MÍNIMO --
+    # cuándo entró por primera vez al histórico observable.
+    event_order = sorted(samples_by_event, key=lambda eid: min(s.data_cutoff_timestamp for s in samples_by_event[eid]))
+
+    n_validation_events = round(len(event_order) * validation_fraction)
+    n_validation_events = max(1, min(n_validation_events, len(event_order) - 1)) if len(event_order) > 1 else 0
+
+    train_events = set(event_order[: len(event_order) - n_validation_events])
+    train_samples = [s for s in dataset.samples if s.event_id in train_events]
+    validation_samples = [s for s in dataset.samples if s.event_id not in train_events]
+    ...  # construcción de los 2 TrainingDataset, igual que hoy
 ```
-`TennisTrainedArtifact` gana un campo `ece: Optional[float] = None`
-(aditivo, mismo patrón que los campos ya opcionales del artefacto) —
-`_save_tennis_artifact_metadata` ya serializa el dataclass completo por
-introspección (verificar en implementación; si serializa campo por
-campo explícito, se añade ahí también).
+`validation_fraction` sigue interpretándose sobre el número de EVENTOS,
+no de muestras — la proporción exacta de muestras deja de poder
+garantizarse al tamaño exacto pedido (consecuencia necesaria de
+eliminar la fuga), documentado en el docstring nuevo de la función.
+**Comportamiento preservado exactamente cuando cada evento tiene una
+sola muestra** (caso de todos los tests existentes, que deben seguir
+pasando sin tocar sus aserciones).
+
+### 4.1b Enmiendas a `TennisTrainedArtifact`/`train_tennis_baseline_model` (§0.5.2-4)
+
+```python
+@dataclass
+class TennisTrainedArtifact:
+    ...  # campos ya existentes, sin cambios
+    n_validation_events: int = 0          # nuevo, transparencia del split por evento
+    n_train_events: int = 0               # nuevo
+    precision: Optional[float] = None     # nuevo, poblado
+    recall: Optional[float] = None        # nuevo, poblado
+    f1: Optional[float] = None            # nuevo, poblado
+    ece: Optional[float] = None           # nuevo, poblado
+    reliability_diagram: Optional[List[Dict[str, float]]] = None  # nuevo, poblado
+    calibration_version: Optional[str] = None   # nuevo, permanece None
+    calibration_method: Optional[str] = None    # nuevo, permanece None
+    artifact_sha256: str = ""             # nuevo, poblado (hash real del .joblib)
+```
+Después de calcular `val_proba`/`val_pred` (ya existente, sin tocar):
+```python
+from sklearn.metrics import f1_score, precision_score, recall_score
+from src.backtesting.metrics import calibration_curve, ece as compute_ece
+
+precision = float(precision_score(y_val, val_pred, zero_division=0))
+recall = float(recall_score(y_val, val_pred, zero_division=0))
+f1 = float(f1_score(y_val, val_pred, zero_division=0))
+val_ece = compute_ece(list(y_val), list(val_proba))
+buckets = calibration_curve(list(y_val), list(val_proba))
+reliability_diagram = [
+    {"bin_lo": b.bin_lo, "bin_hi": b.bin_hi,
+     "mean_predicted": b.mean_predicted, "mean_actual": b.mean_actual, "n_samples": b.n_samples}
+    for b in buckets
+] or None
+```
+Después de `joblib.dump(pipeline, file_path)` (ya existente):
+```python
+import hashlib
+artifact_sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
+```
+`_save_tennis_artifact_metadata` gana las líneas explícitas
+correspondientes a cada campo nuevo (serializa campo por campo, no por
+introspección genérica — verificado directamente en el código real).
 
 ### 4.3 Corrección del gate de Elo
 
@@ -288,10 +487,25 @@ a stdout).
 
 ## 8. Enmiendas a código ya cerrado
 
-1. `src/models/tennis_baseline.py::train_tennis_baseline_model` —
-   aditiva, `ece` calculado y añadido al artefacto (§4.2). Cero cambio
-   de comportamiento en el resto de la función.
-2. `src/evaluation/gate_report.py::build_sport_gate_report` — aditiva,
+1. **`src/models/tennis_baseline.py::split_dataset_temporally` y
+   `src/models/mlb_baseline.py::split_dataset_temporally`** —
+   **corrección de comportamiento** (no aditiva pura como las demás):
+   elimina la fuga de datos de §0.5.1. Cambia el contenido exacto de la
+   partición train/validation para cualquier dataset con >1 muestra por
+   evento (nunca antes ejercitado con datos reales) — preserva el
+   comportamiento exacto para datasets con 1 muestra por evento
+   (verificado: todos los tests existentes deben seguir pasando sin
+   modificar sus aserciones). Se toca `mlb_baseline.py` aunque MLB no
+   se entrena en este paso, por consistencia — dejar el mismo bug sin
+   corregir en el gemelo del archivo sería diferir su descubrimiento,
+   no evitarlo.
+2. `src/models/tennis_baseline.py::TennisTrainedArtifact`/
+   `train_tennis_baseline_model` — aditiva, 9 campos nuevos (§4.1b):
+   `n_validation_events`/`n_train_events`/`precision`/`recall`/`f1`/
+   `ece`/`reliability_diagram`/`calibration_version`/`calibration_method`/
+   `artifact_sha256`. Cero cambio de comportamiento en el resto de la
+   función (algoritmo, umbral, artefacto `.joblib` en sí).
+3. `src/evaluation/gate_report.py::build_sport_gate_report` — aditiva,
    parámetro opcional `eligible_count_fn` con default `None` que
    preserva el comportamiento actual exacto para todo llamador
    existente (`mlb_classifier`/`tennis_classifier` no cambian). Corrige
@@ -299,7 +513,10 @@ a stdout).
    clasificadores.
 
 Ninguna otra enmienda — `src/models/mlb_elo.py`,
-`src/orchestration/*`, `src/policy/*` quedan sin tocar.
+`src/orchestration/*`, `src/policy/*` quedan sin tocar. La corrección
+de `split_dataset_temporally` en `mlb_baseline.py` (punto 1) es la
+única de las 3 que no es puramente aditiva — se señala con más énfasis
+por eso mismo.
 
 ---
 
@@ -352,16 +569,30 @@ conocer el problema.
 
 ## 11. Pruebas previstas
 
-- `tests/unit/test_tennis_baseline.py` (ampliado, no un archivo
-  nuevo): nuevo test confirmando que `TennisTrainedArtifact.ece` se
-  calcula y coincide con `src.backtesting.metrics.ece(y_val, val_proba)`
-  llamado directamente (mismo patrón que ya se usa para
-  `brier_score`/`log_loss` en los tests existentes de entrenamiento, si
-  existen — si no existen tests de esas métricas todavía, se añaden
-  ambos: uno para `ece` y confirmación de que no rompe nada existente).
-  Caso `INSUFFICIENT_HISTORY` verificado ya existente — confirmar que
-  `ece` no se calcula ni aparece cuando no se entrena (artefacto es
-  `None`).
+- **`split_dataset_temporally` (ambos archivos)** — la prueba central de
+  este paso: un dataset sintético con >1 muestra por `event_id` (mismo
+  patrón real que reveló el bug, §0.5.1) confirma que **ningún
+  `event_id` aparece en ambas particiones** tras el fix — regresión
+  directa del hallazgo real. Todos los tests ya existentes de
+  `split_dataset_temporally` (`..._validation_is_most_recent_and_never_random`,
+  `..._is_deterministic_across_calls`) deben seguir pasando SIN
+  modificar sus aserciones (confirma comportamiento preservado para 1
+  muestra/evento). Caso límite: un solo evento con muchas muestras (no
+  hay forma de particionar sin fuga — documentar el comportamiento
+  exacto, ej. devolver todo a `train`).
+- `tests/unit/test_tennis_baseline.py` (ampliado): un test por campo
+  nuevo del artefacto — `precision`/`recall`/`f1` coinciden con
+  `sklearn` llamado directamente sobre los mismos `y_val`/`val_pred`;
+  `ece`/`reliability_diagram` coinciden con
+  `src.backtesting.metrics.ece`/`calibration_curve` llamados
+  directamente; `artifact_sha256` coincide con
+  `hashlib.sha256(file_path.read_bytes()).hexdigest()` calculado en el
+  test; `calibration_version`/`calibration_method` son `None` siempre
+  (ningún calibrador existe); `n_train_events`/`n_validation_events`
+  sensatos (`<=` sus respectivos `n_train_samples`/`n_validation_samples`,
+  suman el total de eventos distintos). Caso `INSUFFICIENT_HISTORY`
+  verificado ya existente — confirmar que ninguno de los campos nuevos
+  aparece poblado cuando no se entrena (artefacto es `None`).
 - `tests/unit/test_gate_report.py` (ampliado): nuevo test para
   `eligible_count_fn` — con un `HistoryRepository` de prueba donde
   `feature_snapshots_total`/`event_results_total` superan el umbral
@@ -370,18 +601,11 @@ conocer el problema.
   como regresión exactamente el bug de §0.4. Test adicional
   confirmando que omitir `eligible_count_fn` preserva el comportamiento
   actual exacto (regresión de no-ruptura).
-- Nuevo, opcional si aplica: `tests/unit/test_train_tennis_model_script.py`
-  o extender el patrón ya usado — verificar que el script no falla con
-  `INSUFFICIENT_HISTORY` simulado (mismo nivel de test que
-  `data_maintenance.py`/scripts anteriores, si existiera un test
-  equivalente para `train_mlb_model.py`; si no existe ninguno, no se
-  inventa un nuevo nivel de cobertura no usado en ningún otro script,
-  se deja igual de cubierto que su precedente).
 - `tests/integration/test_e2e_real.py`: no se añade un test nuevo aquí
   — entrenar contra la API real no aplica (el entrenamiento lee de
   `HistoryRepository`, no de una API externa); el test de integración
   real de este paso es la propia ejecución manual contra
-  `data/engine.db` de producción (§13, evidencia esperada), igual que
+  `data/engine.db` de producción (§14, evidencia esperada), igual que
   Paso 4.0A/4.0B.
 - Suite completa re-ejecutada, sin regresión.
 
@@ -392,9 +616,16 @@ conocer el problema.
 - `scripts/train_tennis_model.py` existe, mismo patrón que
   `train_mlb_model.py`, exit 0 en ambos casos (`TRAINED`/
   `INSUFFICIENT_HISTORY`).
-- `TennisTrainedArtifact.ece` calculado y persistido cuando
-  `TRAINED`, reutilizando literalmente `src.backtesting.metrics.ece`.
-- `GATE-0[mlb_elo]` corregido — reporta `no cumplido` con los datos
+- `split_dataset_temporally` corregido en ambos archivos — ningún
+  `event_id` aparece en ambas particiones, verificado por test con
+  datos multi-muestra-por-evento (no solo con los fixtures antiguos de
+  1 muestra/evento, que nunca lo habrían revelado).
+- Los 9 campos nuevos de `TennisTrainedArtifact` calculados y
+  persistidos correctamente cuando `TRAINED`
+  (`precision`/`recall`/`f1`/`ece`/`reliability_diagram`/
+  `artifact_sha256`/`n_train_events`/`n_validation_events` poblados;
+  `calibration_version`/`calibration_method` en `None`).
+  `GATE-0[mlb_elo]` corregido — reporta `no cumplido` con los datos
   reales de hoy (41 < 50), verificado por test y por corrida real.
 - Con confirmación explícita separada (§9): entrenamiento real
   ejecutado contra `data/engine.db` de producción, artefacto real
@@ -433,21 +664,40 @@ conocer el problema.
   producción en absoluto** (ni siquiera como contrato) — mitigado por
   el criterio de aceptación que exige verificar la recogida real por el
   orquestador vía SQL, no solo confiar en que "debería funcionar".
+- **La corrección de `split_dataset_temporally` cambia las métricas de
+  validación reportadas respecto a lo que un entrenamiento con el bug
+  habría mostrado** (probablemente peores, al eliminar la fuga
+  optimista) — no es un riesgo a mitigar, es la corrección funcionando
+  como se espera; documentado aquí para que un futuro lector no lo
+  interprete como una regresión de calidad del modelo.
+- **`n_validation_events`/`n_train_events` pueden dar una validación
+  más pequeña de lo que `validation_fraction=0.2` sugeriría** (la
+  partición ahora es por evento, no por muestra — con eventos de
+  distinto número de muestras, la fracción exacta de FILAS ya no es
+  0.2 exacto) — documentado explícitamente en el docstring de la
+  función corregida, no oculto.
 
 ---
 
 ## 14. Evidencia esperada
 
+- Test dedicado demostrando la ausencia de fuga (cero `event_id` en
+  ambas particiones) contra un dataset sintético con múltiples muestras
+  por evento — la evidencia más directa de que el hallazgo de §0.5.1
+  quedó corregido, no solo documentado.
 - Salida completa de `scripts/train_tennis_model.py` corriendo contra
   `data/engine.db` real.
-- Contenido del archivo de metadata JSON generado (`ece` incluido).
+- Contenido completo del archivo de metadata JSON generado (los 9
+  campos nuevos incluidos, `calibration_version`/`calibration_method`
+  visiblemente `null`).
 - `python scripts/check_training_gates.py` re-ejecutado, mostrando
   `GATE-0[mlb_elo]: no cumplido` (corregido) sin cambios en los otros
   dos.
 - `SELECT model_version, calibration_version FROM opportunity_evaluations
   WHERE ...` tras una corrida real posterior de `run_e2e.py`,
   confirmando `model_version` no nulo para tenis por primera vez en el
-  proyecto.
+  proyecto, `calibration_version` todavía `NULL` (honesto, ningún
+  calibrador existe).
 - Suite completa (978 + nuevos), `git diff --stat`.
 
 ---
