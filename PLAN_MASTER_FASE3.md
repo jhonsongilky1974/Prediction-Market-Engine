@@ -288,11 +288,11 @@ contrato encontrados (incluye 2 adicionales de menor impacto).
 
 | Cod. | Decisión pendiente | Por qué no se resuelve aquí | Bloquea |
 |---|---|---|---|
-| D-1 | Reactivar el LaunchAgent de captura histórica | Es una decisión operativa del usuario (correr un proceso continuo, consumir cuota de APIs), no una decisión de diseño | Historical Backtesting real, Shadow Mode, calibración real de `ConfidenceProfile.model_reliability`, todo `EVALUATION_LEARNING_SPEC.md` con datos reales |
+| ~~D-1~~ | **RESUELTA** (2026-08-01, ver `CONTINUITY.md` §0.19) — reactivado el LaunchAgent de captura histórica de forma permanente, tras corregir una contradicción operacional (estaba cargado sin autorización de Fase 3, contradiciendo la documentación) y cerrar la Política de Retención de Datos (`DATA_RETENTION_POLICY.md`) con su mecanismo de mantenimiento automatizado. | Historical Backtesting real, Shadow Mode, calibración real de `ConfidenceProfile.model_reliability`, todo `EVALUATION_LEARNING_SPEC.md` con datos reales ya no están bloqueados por falta de captura — sí siguen dependiendo del volumen de datos que se acumule con el tiempo |
 | ~~D-2~~ | **RESUELTA** (post-cierre del roadmap, ver `CONTINUITY.md` §0.17) — el mapeo participante↔YES ya existía desde Fase 1 (`src/matching/market_matcher.py::_select_market`, selecciona el mercado de Kalshi cuyo `yes_sub_title` corresponde a `participant_a`); lo que faltaba era exponer su confianza. Se añadió `DataQuality.side_selection_confidence` (campo aditivo en Fase 1) y `unresolved_side_mapping` (Hard Hold, Fase 3) ahora la consume en vez de disparar como constante. | Ya no bloquea de forma incondicional — `unresolved_side_mapping` dispara solo cuando `side_selection_confidence` es `None` o está por debajo de `EVENT_NAME_MATCH_MIN_CONFIDENCE` |
 | D-3 | Fórmula exacta de incorporación de `exchange_fee`/spread/slippage en `PayoffEstimate` | **REENCUADRADA** (ver `CONTINUITY.md` §0.18): no es "esperar a que Kalshi exponga un campo" (nunca lo hará por diseño de su API) — es una fórmula pública basada en precio (`kalshi.com/docs/kalshi-fee-schedule.pdf`), verificable pero no verificada todavía (3 intentos de `WebFetch` a la fuente primaria devolvieron HTTP 429). Punto de enganche preparado (`_estimate_kalshi_taker_fee`, `src/payoff/payoff_model.py`), sin implementar la fórmula de fuentes secundarias | `net_ev_status` distinto de `UNKNOWN` en producción — sigue bloqueado hasta verificación directa contra la fuente primaria |
 
-Ningún GO se declara sobre D-1/D-3, las dos decisiones que siguen sin
-resolver — ver `FASE3_AUDIT_REPORT.md` §15 y `CONTINUITY.md` §0.17/§0.18
-para el estado actualizado tras la resolución de D-2 y el reencuadre de
-D-3.
+D-1 y D-2 quedan resueltas; D-3 permanece reencuadrada y sin resolver por
+diseño (dependencia externa verificable, no una decisión de arquitectura)
+— ver `FASE3_AUDIT_REPORT.md` §15 y `CONTINUITY.md` §0.17/§0.18/§0.19
+para el estado actualizado.

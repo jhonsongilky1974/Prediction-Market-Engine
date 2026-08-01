@@ -52,7 +52,16 @@ autorizada explícitamente (ver §0.17).** **Actualizado de nuevo:
 2026-07-31 — INVESTIGADA Y REENCUADRADA (no resuelta) la DECISIÓN
 PENDIENTE D-3 (fórmula de fees reales de Kalshi): infraestructura
 preparada, `net_ev_status` permanece `UNKNOWN` a la espera de
-verificación contra la fuente primaria (ver §0.18).**
+verificación contra la fuente primaria (ver §0.18).** **Actualizado de
+nuevo: 2026-08-01 — Investigado D-1: contradicción operacional
+encontrada y corregida (el LaunchAgent estaba cargado en `launchd`,
+contradiciendo la documentación); diseñada e implementada la Política de
+Retención de Datos (`DATA_RETENTION_POLICY.md`) con su mecanismo
+(`scripts/data_maintenance.py` + LaunchAgent propio); RESUELTA LA
+DECISIÓN PENDIENTE D-1: ambos LaunchAgents (captura histórica +
+mantenimiento) reactivados y confirmados en ejecución permanente (ver
+§0.19). **Cierra la última decisión pendiente de Fase 3 — D-1/D-2
+resueltas, D-3 reencuadrada y documentada como dependencia externa.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1360,6 +1369,146 @@ eso ocurra, el único cambio necesario es rellenar el cuerpo de
 archivo debería necesitar cambios, ese es el propósito del punto de
 enganche. **D-1 (histórico real) permanece como la única decisión
 restante no abordada todavía.**
+
+## 0.19 Resolución de D-1: contradicción operacional, Política de Retención, reactivación permanente (2026-08-01, RESUELTA)
+
+### Contexto y autorización
+
+Tras el reencuadre de D-3 (§0.18), el usuario autorizó abrir D-1
+(captura histórica) "siguiendo el mismo proceso de auditoría: si
+detectas cualquier contradicción arquitectónica, contractual o de
+diseño, detente, repórtala y espera aprobación".
+
+### Contradicción operacional encontrada (no de código)
+
+Investigación directa de `launchctl print
+gui/501/local.prediction-market-engine.run-e2e-historical` mostró un
+registro activo (`runs = 3`, `last exit code = 0`), no el error
+`"Could not find service"` que la documentación describía. Evidencia
+cruzada:
+
+- `logs/run_e2e.stdout.log` (552 KB) registraba **7 ejecuciones reales**
+  entre 2026-07-29 y 2026-07-31, con llamadas reales a MLB Stats API,
+  ESPN Tennis, SofaScore y Kalshi.
+- `data/engine.db` mostraba escrituras reales recientes en
+  `event_snapshots` (660+ filas nuevas).
+- `scripts/run_e2e.py` no fija sus propios paths de log -- las rutas
+  solo coinciden con las de `StandardOutPath`/`StandardErrorPath` del
+  plist si `launchd` lo invocó, descartando una ejecución manual.
+
+Esto contradecía directamente `CONTINUITY.md` (esta misma sección, texto
+histórico): *"El LaunchAgent sigue DESCARGADO... Debe permanecer
+descargado hasta finalizar la Fase 2 completa"* -- en algún momento
+posterior al cierre de Fase 2, el LaunchAgent fue cargado
+(`launchctl bootstrap`) fuera de cualquier sesión de este proyecto
+documentada, sin autorización de Fase 3. Reportado de inmediato, sin
+tomar ninguna acción, siguiendo la disciplina estándar de "detente y
+reporta".
+
+**Resolución (Alternativa 1, aprobada):** `launchctl bootout` sobre el
+job activo, restableciendo el estado documentado. Verificado:
+`launchctl print` volvió a devolver `"Could not find service"`,
+`launchctl list` dejó de mostrarlo. Revisión de
+`scripts/run_e2e.py`/`scripts/pipeline_lock.py` confirmó que
+`--mode historical` no tiene comportamiento oculto ni guardas de
+confirmación -- coincide exactamente con lo documentado en el commit
+`f931822`. Ninguna otra contradicción arquitectónica o contractual
+encontrada.
+
+### Política de Retención de Datos (prerrequisito exigido antes de reactivar)
+
+El usuario pidió cerrar la política de retención/purgado (recomendación
+#1 y #7 de `FASE2_CIERRE_FINAL.md` §7) antes de reactivar D-1 de forma
+permanente. Investigación previa a diseñar encontró una segunda
+contradicción real: la recomendación original pedía "purgado de
+`event_snapshots`/`feature_snapshots`", pero esas tablas son
+**append-only a nivel de base de datos** (`src/storage/history_repository.py`,
+triggers `RAISE(ABORT, ...)` en `UPDATE`/`DELETE`) y su inmutabilidad es
+un contrato explícito de `TEMPORAL_REPRODUCIBILITY_SPEC.md` §3
+(reproducibilidad determinística). Reportado, con 3 alternativas; el
+usuario aprobó la Alternativa 1: **retención indefinida, sin purga, para
+las tablas históricas del motor** -- rotación/compresión/purga
+únicamente para `data/raw/*.json` y `logs/*.log`, más respaldo periódico
+de `data/engine.db` completo. Archivado en frío de las tablas del motor
+queda explícitamente diferido.
+
+Documento resultante: [`DATA_RETENTION_POLICY.md`](DATA_RETENTION_POLICY.md)
+(propuesta completa, basada en tasas de crecimiento reales medidas:
+~2 MB/día en `engine.db`, ~9 MB/corrida en `data/raw`, 129 GiB libres).
+
+### Implementado (mecanismo de la política, Fase 3 únicamente)
+
+- `scripts/data_maintenance.py`: funciones puras e inyectables
+  (`classify_raw_file`, `classify_rotated_log`, `file_age_days`,
+  `process_raw_files`, `rotate_log_if_needed`, `purge_old_logs`,
+  `backup_database`, `prune_old_backups`, `run_maintenance`) -- mismo
+  patrón de pureza que `estimate_payoff`/`calibrate` (`now` inyectable,
+  sin I/O oculto). Backup de `engine.db` vía la API de backup en
+  caliente de `sqlite3` (segura en concurrencia con `run_e2e.py`, no
+  ejecuta SQL sobre las tablas del motor). Lock de instancia única
+  propio (`data/.maintenance.lock`, reutiliza
+  `scripts/pipeline_lock.py`), independiente del lock de
+  `run_e2e.py`. Nunca actúa sobre archivos con menos de 1 día de
+  antigüedad.
+- `scripts/launchd/local.prediction-market-engine.data-maintenance.plist`:
+  segundo LaunchAgent, diario a las 03:00, mismo protocolo que el
+  histórico (`RunAtLoad=false`, versionado en el repo, copia instalada
+  en `~/Library/LaunchAgents/`).
+- `config/settings.py`: nueva constante `DATA_BACKUPS_DIR` (`data/backups/`),
+  mismo patrón que los directorios existentes.
+- `.gitignore`: `data/backups/*` (excepto `.gitkeep`), `data/.maintenance.lock`.
+
+### Contratos afectados
+
+Ninguno. Este paso es puramente operacional (`scripts/`, `config/settings.py`,
+documentación) -- cero cambios en `src/`.
+
+### Auditoría de este cambio
+
+- **Tests nuevos**: 25 en `tests/unit/test_data_maintenance.py` --
+  umbrales exactos de clasificación (7/90/14 días), guarda de antigüedad
+  mínima, rotación por tamaño y por cambio de día, backup+restauración
+  verificada byte-a-byte, poda de backups, idempotencia end-to-end, y un
+  test AST (no substring, mismo patrón que Paso 3.4.1) que falla si
+  `data_maintenance.py` alguna vez importa `history_repository`.
+- **Suite completa**: `pytest -q` → **927 passed, 0 failed** (902 previos
+  + 25 nuevos).
+- **`data/models/`**: únicamente `.gitkeep`. **`v2.0-baseline`**: sin
+  mover (verificado explícitamente: `2d7e29329fef6c7bfe6ed2e6e31dcc9f26ca30df`,
+  intacto). **Fase 1/2 (`src/`)**: cero archivos tocados.
+- Dry-run manual contra `data/raw/` real de producción confirmó que
+  ningún archivo actual (todos <3 días) sería tocado -- comportamiento
+  esperado, sin pérdida de datos recientes.
+
+### Reactivación (D-1 RESUELTA)
+
+Con el mecanismo implementado, probado y auditado, ambos LaunchAgents
+fueron cargados de forma permanente:
+`local.prediction-market-engine.run-e2e-historical` (captura horaria,
+D-1) y `local.prediction-market-engine.data-maintenance` (mantenimiento
+diario 03:00) -- ambos vía `launchctl bootstrap` desde sus copias en
+`~/Library/LaunchAgents/`, verificados con `launchctl list`/`launchctl print`
+tras la carga. `RunAtLoad=false` en ambos: cargar no dispara una corrida
+inmediata, solo arma el próximo ciclo.
+
+### Documentación actualizada
+
+`DATA_RETENTION_POLICY.md` (nuevo), `FASE2_CIERRE_FINAL.md` §7 punto 1
+(D-1) y punto 7 (purgado) marcados resueltos, `PLAN_MASTER_FASE3.md` §8
+(D-1 marcada RESUELTA).
+
+### Estado para continuar
+
+**Las 3 decisiones pendientes de Fase 3 quedan cerradas**: D-1 resuelta
+(captura histórica activa de forma permanente, con mantenimiento
+automatizado), D-2 resuelta (§0.17), D-3 reencuadrada y documentada como
+dependencia externa verificable (§0.18, sin resolver por diseño --
+requiere fuente primaria). No hay ningún trabajo de Fase 3 adicional
+autorizado en este momento. El histórico real (`event_snapshots`/
+`feature_snapshots`) empezará a acumular volumen suficiente para
+calibración/backtesting con datos reales de forma orgánica a partir de
+ahora -- ningún paso de código adicional es necesario para eso, solo
+tiempo de captura.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

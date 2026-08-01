@@ -10,6 +10,9 @@ data/models/*
 !data/models/.gitkeep
 data/engine.db
 data/.run_e2e.lock
+data/.maintenance.lock
+data/backups/*
+!data/backups/.gitkeep
 logs/*
 !logs/.gitkeep
 .env

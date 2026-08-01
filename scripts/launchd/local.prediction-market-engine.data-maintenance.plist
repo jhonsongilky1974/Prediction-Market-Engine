@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.prediction-market-engine.data-maintenance</string>
+
+    <!-- Fase 3, DATA_RETENTION_POLICY.md: rota/comprime/purga data/raw y
+         logs/run_e2e.*.log, y respalda data/engine.db -- NUNCA toca
+         event_snapshots/feature_snapshots/event_results (retención
+         indefinida). Lock de instancia única propio
+         (data/.maintenance.lock, scripts/pipeline_lock.py) -- no comparte
+         lock con local.prediction-market-engine.run-e2e-historical. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/.venv/bin/python3</string>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/scripts/data_maintenance.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine</string>
+
+    <!-- Una corrida diaria a las 03:00 hora local, fuera de la ventana
+         horaria de captura. RunAtLoad se deja en false a propósito, mismo
+         motivo que el LaunchAgent de captura: cargarlo no dispara una
+         corrida inmediata. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/data_maintenance.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/data_maintenance.stderr.log</string>
+</dict>
+</plist>
