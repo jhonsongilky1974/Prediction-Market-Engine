@@ -1372,6 +1372,16 @@ archivo debería necesitar cambios, ese es el propósito del punto de
 enganche. **D-1 (histórico real) permanece como la única decisión
 restante no abordada todavía.**
 
+**Reintento (2026-08-01, tras el cierre formal de Fase 3, D-1 ya
+resuelta):** el usuario pidió reintentar la verificación de la fuente
+primaria. Dos `WebFetch` contra el dominio oficial:
+`https://kalshi.com/docs/kalshi-fee-schedule.pdf` (mismo PDF de siempre)
+y `https://kalshi.com/docs/fees` (ruta alternativa dentro del mismo
+dominio) -- **ambas devolvieron HTTP 429** de nuevo. Sin verificación
+inequívoca, D-3 sigue sin resolver, sin ningún cambio de código.
+`_estimate_kalshi_taker_fee()` sigue devolviendo siempre `None`, sin
+tocar.
+
 ## 0.19 Resolución de D-1: contradicción operacional, Política de Retención, reactivación permanente (2026-08-01, RESUELTA)
 
 ### Contexto y autorización
