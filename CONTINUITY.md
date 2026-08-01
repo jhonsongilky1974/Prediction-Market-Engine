@@ -82,8 +82,12 @@ aparece (esperado, D-3 sin resolver).** **Actualizado de nuevo:
 `src/evaluation/gate_report.py` + `scripts/check_training_gates.py`) —
 ver §0.24. Primera evaluación real: MLB Elo y clasificador de tenis ya
 cumplen GATE-0 de volumen bruto (no autoriza entrenar); clasificador
-MLB (N=300) sigue lejos. Sin avanzar a Paso 4.2.1, a la espera de
-aprobación explícita.**
+MLB (N=300) sigue lejos.** **Actualizado de nuevo: 2026-08-01 —
+Implementado el Paso 4.2.1 (auditoría de calidad de labels,
+`src/evaluation/label_quality_audit.py`, extiende
+`scripts/check_training_gates.py`) — ver §0.25. Sin anomalías reales
+encontradas en producción hoy (0 conflictos, 0 duplicados, 0 mismatches
+de sport). Sin avanzar a Paso 4.3, a la espera de aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2090,6 +2094,147 @@ temporal, no por partidos irrelevantes.
 **Paso 4.2 cerrado y verificado.** Por instrucción explícita del
 usuario, **no se avanza al Paso 4.2.1** (auditoría de calidad de
 labels) sin nueva aprobación — este informe se presenta primero.
+
+## 0.25 Fase 4 — Paso 4.2.1: Auditoría de calidad de labels (2026-08-01)
+
+### Contexto y autorización
+
+El usuario aprobó el informe final del Paso 4.2 y autorizó continuar
+con el Paso 4.2.1 (auditoría de calidad de labels) con la misma
+disciplina (implementación incremental, tests unitarios, tests de
+integración, evidencia verificable, auditoría final), sin avanzar al
+Paso 4.3 sin nueva aprobación. A diferencia del Paso 4.1, el usuario no
+pidió un documento de diseño separado antes de implementar — el alcance
+ya estaba suficientemente detallado en `FASE4_EXECUTION_PLAN.md` §6
+Paso 4.2.1 (4 chequeos concretos + una categoría abierta para hallazgos
+nuevos "en su momento"), sin ningún umbral/número que inventar.
+
+### Investigación previa (antes de diseñar, contra datos reales)
+
+Antes de implementar se verificó directamente en `data/engine.db` de
+producción si las anomalías que el plan anticipaba ya existían:
+
+- Resultados en conflicto por `event_id`: **0** encontrados (295 filas
+  de `event_results` en ese momento).
+- Duplicados exactos: **0** encontrados.
+- Distribución de `result`: 100% binario (`PARTICIPANT_A_WON`/
+  `PARTICIPANT_B_WON`) — ningún `CANCELLED`/`POSTPONED` sincronizado
+  todavía.
+- `sport` inconsistente entre `event_snapshots`/`event_results` para el
+  mismo `event_id`: **0** encontrados.
+
+Ninguna anomalía real existe hoy — la auditoría se implementa como
+infraestructura preventiva (el propio hallazgo de `ORCHESTRATOR_SPEC.md`
+§1.8: `event_results` no tiene `UNIQUE` sobre `event_id`, así que un
+conflicto/duplicado es estructuralmente posible aunque no haya ocurrido
+todavía), no porque se haya encontrado un problema activo. Se decidió
+incluir el chequeo de `sport` inconsistente (mencionado en el plan solo
+como ejemplo de "otra anomalía") porque la investigación confirmó que es
+barato (ambas tablas ya tienen columna `sport`) y ya estaba señalado
+como candidato explícito — no una fabricación de alcance nuevo.
+
+### Implementado
+
+**Código nuevo**:
+- `src/evaluation/label_quality_audit.py` — `build_label_quality_report()`,
+  función de solo lectura. Detecta y reporta (nunca corrige
+  automáticamente, Regla 3): resultados en conflicto por `event_id`,
+  duplicados exactos, distribución de resultados no binarios
+  (`CANCELLED`/`POSTPONED`/otros — informativo, no una anomalía por sí
+  solo, son estados esperados del dominio), `event_id` con `sport`
+  inconsistente entre `event_snapshots`/`event_results`. Reutiliza
+  literalmente `gate_report.exclusions["no_result"]` (Paso 4.2, vía un
+  `SportGateReport` ya construido e inyectado) para `unresolved_count`
+  — nunca lo recalcula por separado, exactamente como especificaba el
+  plan.
+- `scripts/check_training_gates.py` extendido (no un script nuevo — un
+  solo comando para "¿hay suficiente histórico, Y es confiable?"):
+  imprime la auditoría de labels justo después del reporte de GATE-0/
+  Coverage Gate de cada deporte, reutilizando el mismo `SportGateReport`
+  ya calculado en esa misma corrida.
+
+**Bug propio corregido antes de la suite completa** (no un hallazgo de
+diseño, un error de implementación detectado por el primer test que lo
+ejercitó): la primera versión del chequeo de `sport` inconsistente
+filtraba `event_results` por `sport == este_deporte` ANTES de comparar
+contra `event_snapshots` — exactamente el filtro que excluiría el caso
+real a detectar (un `event_result` que reclama el `sport` INCORRECTO
+nunca pasaría ese filtro). Corregido: se parte de los `event_id` que
+`event_snapshots` ya identifica como este deporte, y se compara contra
+el `sport` real (sin filtrar) de sus `event_results`.
+
+### Pruebas
+
+- `tests/unit/test_label_quality_audit.py` (9 nuevos): sin anomalías
+  con datos limpios; conflicto detectado y distinguido correctamente de
+  un duplicado exacto (mismo valor repetido); distribución de
+  `CANCELLED`/`POSTPONED` sin marcarse como anomalía; `unresolved_count`
+  verificado literalmente igual a `gate_report.exclusions["no_result"]`
+  (con un `SportGateReport` real, no mockeado); mismatch de `sport`
+  detectado; un `event_result` huérfano (sin `event_snapshot`
+  correspondiente) NO se marca como mismatch (sin evidencia con qué
+  comparar, no se fabrica una anomalía); `ValueError` si el
+  `SportGateReport` inyectado es de otro deporte; sin efectos
+  secundarios sobre `HistoryRepository`.
+- `tests/integration/test_e2e_real.py`: 1 nuevo
+  (`test_label_quality_audit_builds_honestly_on_real_mlb_pipeline_output_without_results`),
+  mismo patrón ya establecido (API real, `tmp_path` exclusivamente):
+  confirma cero anomalías fabricadas sin `event_results` reales en ese
+  entorno aislado, y que `unresolved_count` coincide exactamente con el
+  `SportGateReport` real de esa misma corrida.
+- Suite completa: 968 (cierre de §0.24) + 9 + 1 = **978 passed, 0
+  failed**.
+
+### Evidencia verificable (corrida real contra `data/engine.db` de producción, de solo lectura)
+
+`python scripts/check_training_gates.py` (extendido):
+
+| | MLB | TENNIS |
+|---|---|---|
+| `event_results` totales | 97 | 198 |
+| Sin resolución (= Coverage Gate `no_result`) | 31 | 498 |
+| Conflictos por `event_id` | 0 | 0 |
+| Duplicados exactos | 0 | 0 |
+| No binarios (`CANCELLED`/`POSTPONED`) | 0 | 0 |
+| `sport` inconsistente | 0 | 0 |
+| **Veredicto** | **sin anomalías** | **sin anomalías** |
+
+Coincide exactamente con la investigación previa por SQL directo — el
+código de producción y la verificación manual dan el mismo resultado.
+`unresolved_count` (31/498) verificado idéntico a
+`gate_report.exclusions["no_result"]` de la misma corrida, confirmando
+la reutilización literal, no solo en tests sintéticos sino contra datos
+reales.
+
+`git status`/`git diff --stat` limpios salvo los 4 archivos declarados
+(2 modificados, 2 nuevos). `data/models/` intacto, solo `.gitkeep`.
+
+### Auditoría final
+
+- Cero cambio de comportamiento en `src/evaluation/gate_report.py`
+  (Paso 4.2, ya cerrado) — solo consumido, nunca modificado.
+- Criterio de aceptación del Paso 4.2.1 (`FASE4_EXECUTION_PLAN.md` §6):
+  **cumplido** — reporte reproducible, `unresolved_count` reutilizado
+  literalmente (verificado por test e integración real), ninguna
+  corrección automática de datos implementada (solo detección/reporte).
+  Estado actual: **sin anomalías reales que resolver** — no bloquea
+  nada hacia adelante hoy, pero la infraestructura queda lista para la
+  próxima vez que se evalúe antes de entrenar.
+- Script sigue siendo de solo lectura, sin lock, invocable en cualquier
+  momento.
+
+### Estado para continuar
+
+**Paso 4.2.1 cerrado y verificado. Los 3 pasos que `ORCHESTRATOR_SPEC.md`
+§9.2/`FASE4_EXECUTION_PLAN.md` habían dejado pendientes de la Revisión 2
+(Coverage Gate, auditoría de labels) quedan ambos implementados.** Por
+instrucción explícita del usuario, **no se avanza al Paso 4.3**
+(entrenamiento de calibrador real) sin nueva aprobación — este informe
+se presenta primero. Recordatorio del propio hallazgo de este paso: GATE-0
+ya se cumple hoy para el baseline Elo de MLB y el clasificador de tenis,
+pero eso por sí solo no autoriza entrenar — el Paso 4.3 requeriría su
+propio diseño y aprobación explícita, evaluando también si conviene
+esperar a que el clasificador principal de MLB (N=300) se acerque más.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
