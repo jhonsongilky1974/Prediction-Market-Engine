@@ -108,6 +108,19 @@ consumía `CalibrationOutput`) y un hueco de carga (`load_latest_tennis_artifact
 no leía 9 campos ya persistidos desde el Paso 4.3). D-3/MLB siguen
 bloqueados por factores externos, sin fecha. Suite en 1002. Sin avanzar
 a la Fase 5, a la espera de aprobación explícita del informe.**
+**Actualizado de nuevo: 2026-08-01 — Cierre formal de Fase 4
+(`FASE4_CIERRE_FINAL.md`) e implementada la Fase 5: servicio HTTP
+FastAPI (`src/api/`, endpoint `GET /analyze/{ticker}`) — ver §0.28.
+Reutiliza `run_mlb_pipeline`/`run_tennis_pipeline`/`run_decision_pipeline`
+(Fase 1-4) sin modificarlos, verificado por `git diff --stat` que
+ningún archivo fuera de `src/api/`/tests/docs se tocó. Robinhood no
+está integrado (solo Kalshi); `P_consensus_no_vig` siempre `null`
+(capa nunca construida, Fase 2). Dos bugs reales corregidos en pruebas
+contra APIs en vivo (`staleness_seconds`/`data_freshness_seconds`
+negativos por capturar `now`/`analysis_timestamp` demasiado temprano).
+Hallazgo de latencia real (tenis >5min con SofaScore activado)
+reportado y resuelto con aprobación explícita del usuario
+(`enrich_sofascore=False` solo en la vía en vivo). Suite en 1024.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2607,6 +2620,165 @@ crece sustancialmente (sin umbral numérico fijado, evitando inventar
 uno sin evidencia). D-3 (fees Kalshi) y entrenamiento de MLB
 permanecen bloqueados por factores externos, sin fecha, exactamente
 como en el cierre del Paso 4.3.
+
+## 0.28 Fase 5 — servicio HTTP local `/analyze` (FastAPI) (2026-08-01)
+
+### Contexto y autorización
+
+Tras aprobar el informe de calibración (§0.27), el usuario pidió cerrar
+formalmente la Fase 4 (documentando D-3/MLB/calibración como deuda
+técnica, sin resolver ninguna) e iniciar la Fase 5: convertir el motor
+en un servicio HTTP local con FastAPI, endpoint `/analyze` que reciba
+"el identificador de un evento de Robinhood/Kalshi" y devuelva
+P_model/P_market/P_consensus_no_vig/EDGE/EV bruto y neto/incertidumbre
+desglosada/recomendación ENTER-WATCH-PASS/variables más influyentes,
+reutilizando el motor existente sin duplicar lógica ni modificar la
+predicción, con documentación, pruebas, comando `uvicorn`, ejemplos de
+uso, y auditoría técnica final corrigiendo cualquier deficiencia.
+`FASE4_CIERRE_FINAL.md` se escribió primero (mirroring
+`FASE2_CIERRE_FINAL.md`/`FASE3_CIERRE_FINAL.md`).
+
+Investigación previa (Regla 1) encontró dos puntos reales, reportados
+antes de diseñar: **Robinhood no está integrado en el proyecto**
+(único rastro: `MarketData.robinhood_price_observed`, vestigial, nunca
+poblado) -- confirmado con el usuario, el endpoint sirve solo Kalshi.
+**`P_consensus_no_vig` no es utilizable con datos reales hoy**
+(`src/pricing/odds_consensus.py` requiere odds ya etiquetadas YES/NO,
+capa nunca construida, diferida en Fase 2) -- el usuario ya lo había
+anticipado ("si está disponible"). El usuario resolvió los dos puntos
+de arquitectura genuinamente suyos vía `AskUserQuestion`: frescura de
+datos = **reejecutar el pipeline en vivo por request** (no leer el
+último snapshot cacheado), con metadatos de frescura obligatorios en
+la respuesta (`analysis_timestamp`/`market_timestamp`/
+`data_freshness_seconds`); identificador = ticker real de Kalshi
+(implícito en su pedido original). Diseño completo en
+`HTTP_SERVICE_SPEC.md` (commit `2a36be1`).
+
+### Implementado
+
+Nuevo paquete `src/api/` (capa de presentación pura, cero lógica de
+predicción/policy/edge/EV nueva):
+- **`event_resolver.py`**: `resolve_ticker(ticker)` -- deriva sport/tour
+  del prefijo de serie (`KXMLBGAME`/`KXATPMATCH`/`KXWTAMATCH`), pide en
+  vivo TODOS los eventos abiertos de esa serie (`KalshiConnector.get_all_events_for_sport`,
+  ya existente, ningún endpoint nuevo de Kalshi), localiza el ticker de
+  MERCADO exacto (rechaza `event_ticker` explícitamente, con la lista
+  de mercados válidos), deriva la fecha del propio `occurrence_datetime`
+  ya en vivo, y llama `run_mlb_pipeline`/`run_tennis_pipeline` (Fase
+  1/2, sin modificar) para esa fecha -- filtra el registro cuyo
+  `market_id` coincide exactamente. Sin match confidente (el matcher
+  existente de Fase 1 no llegó al umbral) -> `404` honesto, nunca se
+  fuerza un resultado.
+- **`analysis_service.py`**: `analyze_ticker(ticker)` -- llama
+  `run_decision_pipeline` (Fase 4, sin modificar) con `SPORT_ADAPTERS`/
+  `CONFIG_POLICY_DIR` importados LITERALMENTE de `scripts/run_e2e.py`
+  (cero redeclaración de esa construcción), recupera la
+  `OpportunityEvaluation` real del lado YES (`compute_opportunity_id`/
+  `compute_selection_id`, ya existentes) y compone la respuesta.
+- **`schemas.py`**: `AnalyzeResponse` (pydantic, capa de presentación).
+- **`main.py`**: app FastAPI, `GET /analyze/{ticker}`, traduce
+  `ResolverError`/excepciones a 400/404/502 -- nunca un 200 fabricado.
+- `requirements.txt`: `fastapi`, `uvicorn`, `httpx` (para
+  `TestClient`) -- primera dependencia externa de Fase 5.
+
+### Dos bugs reales encontrados y corregidos durante pruebas manuales contra APIs reales (no hipotéticos)
+
+1. **`staleness_seconds` negativo, rechazado por `AnalysisHealth`**:
+   `now` para `run_decision_pipeline` se capturaba al INICIO del
+   request, pero `compute_analysis_health` lo compara contra
+   `record.data_quality.source_timestamps`, que el pipeline en vivo
+   estampa DURANTE el fetch (que tarda decenas de segundos a varios
+   minutos) -- esos timestamps quedaban en el futuro respecto a `now`,
+   dando `staleness_seconds` negativo. Corregido: `now` para el
+   orquestador se captura DESPUÉS de `resolve_ticker()`, nunca antes.
+2. **`data_freshness_seconds` negativo** por el mismo motivo:
+   `analysis_timestamp` se capturaba al inicio, antes de que
+   `market_capture_ts` (dentro de `resolve_ticker`) existiera.
+   Corregido: `analysis_timestamp` se captura al FINAL del
+   procesamiento (justo antes de responder), garantizando por
+   construcción `analysis_timestamp >= market_capture_ts`.
+
+### Hallazgo de rendimiento real (reportado y resuelto con el usuario, no decidido en silencio)
+
+Medido contra APIs reales: pipeline MLB completo (15 juegos/día)
+~34s; pipeline de tenis ATP completo (349 partidos/día) **>5 minutos**
+con enriquecimiento SofaScore activado -- muy por encima de lo
+estimado ("~segundos") al pedir la aprobación del usuario para el
+diseño de pipeline-en-vivo. Reportado explícitamente (no absorbido en
+silencio) vía `AskUserQuestion`. **Aprobado**: `enrich_sofascore=False`
+(parámetro YA EXISTENTE de `run_tennis_pipeline`, ninguna lógica
+nueva) SOLO en la vía en vivo de `/analyze` -- la captura programada
+(LaunchAgent horario) sigue enriqueciendo completo, sin cambios.
+Latencia de tenis bajó a ~30-40s. Añadidos, también aprobados
+explícitamente: `enrichment_mode` (`"full"`/`"reduced"`) y
+`processing_time_ms` en la respuesta, para monitoreo.
+
+### Pruebas
+
+- `tests/unit/test_event_resolver.py` (14 tests): helpers puros
+  (`_sport_and_tour_for_ticker`/`_find_market`/`_date_from_market`) +
+  `resolve_ticker` con `KalshiConnector`/`run_mlb_pipeline`/
+  `run_tennis_pipeline` monkeypatcheados (ya probados en sus propios
+  archivos, no se vuelven a probar aquí) -- happy path, Kalshi caído
+  (502), sin match confidente (404), `enrich_sofascore=False` en tenis.
+- `tests/unit/test_analysis_service.py` (3 tests): `run_decision_pipeline`
+  real (sin mockear) contra `tmp_path`, `resolve_ticker` mockeado --
+  composición de la respuesta, orden de `most_influential_variables`,
+  efecto secundario de persistencia real verificado por SQL.
+- `tests/unit/test_api_main.py` (4 tests): `TestClient`, traducción de
+  códigos HTTP, `analyze_ticker` mockeado.
+- `tests/integration/test_analyze_real.py` (1 test, `pytest.mark.integration`):
+  APIs reales (Kalshi + MLB Stats API), descubre un ticker MLB
+  actualmente abierto en vivo, `tmp_path` exclusivamente -- nunca
+  `data/engine.db`. Acepta 400/404 como resultado honesto válido (el
+  matcher de Fase 1 puede no confirmar el match ese día).
+- Suite completa: 1002 (cierre de §0.27) + 22 = **1024 passed, 0
+  failed** (`tests/unit` + `tests/integration`, incluyendo red real).
+
+### Evidencia verificable (contra APIs reales en vivo)
+
+`GET /analyze/KXATPMATCH-26AUG01NAKFRI-NAK` (real, capturado durante
+este paso): `200 OK`, `p_model=0.00228` (modelo real de tenis del Paso
+4.3), `p_market=0.38`, `edge=-0.378`, `recommendation=WATCH`,
+`model_version=tennis_baseline_logreg_v1_20260801T184245Z`,
+`p_consensus_no_vig=null` (con razón explícita),
+`net_ev_status=UNKNOWN` (D-3), `enrichment_mode=reduced`,
+`processing_time_ms≈40383`, `freshness.data_freshness_seconds≈40.4`
+(positivo, confirmando el fix del bug #2). `GET /analyze/{ticker
+inválido}` -> `400` con mensaje real. Confirmado en vivo que un ticker
+de Kalshi real y actualmente abierto pero sin match confidente contra
+los datos de MLB/tenis de esa fecha produce `404` honesto (caso real
+observado con `KXMLBGAME-26AUG011507STLTOR-STL`, discrepancia de 180min
+entre MLB Stats API y `occurrence_datetime` de Kalshi -- comportamiento
+correcto del matcher de Fase 1, no un bug de este paso).
+
+### Auditoría final
+
+- `git diff --stat` de todo el paso: **ningún archivo fuera de
+  `src/api/`/`tests/`/`requirements.txt`/documentación tocado** --
+  verificado explícitamente, cero cambios a la lógica de predicción/
+  policy/edge/EV de Fases 1-4, tal como exigió el usuario.
+- Los 9 campos pedidos por el usuario están presentes en la respuesta;
+  `P_consensus_no_vig` honestamente `null` con razón explícita (el
+  propio usuario anticipó esta posibilidad).
+- Dos bugs reales encontrados en el propio código de este paso
+  (staleness/freshness negativos) corregidos antes de dar el paso por
+  cerrado, no dejados para después.
+- Hallazgo de rendimiento real reportado y resuelto con aprobación
+  explícita del usuario, no absorbido ni decidido en silencio.
+- `v2.0-baseline` intacto, `data/models/` sin cambios adicionales.
+- Cinco commits: `2a36be1` (diseño), `b3dd039` (implementación +
+  tests), `12459fa` (documentación), más los dos de cierre de Fase 4
+  (`e795ba3`) y este informe.
+
+### Estado para continuar
+
+**Fase 5 (`/analyze`) implementada, probada contra APIs reales, y
+documentada.** Explícitamente fuera de alcance (sin cambios): ningún
+endpoint adicional, ninguna ejecución de trades (`src/risk/`,
+Principio 21), Robinhood, `P_consensus_no_vig` real. D-3 y
+entrenamiento de MLB permanecen como deuda técnica documentada, sin
+fecha (§ `FASE4_CIERRE_FINAL.md`).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
