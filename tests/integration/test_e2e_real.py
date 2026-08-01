@@ -292,6 +292,49 @@ def test_gate_report_builds_honestly_on_real_mlb_pipeline_output_without_results
         assert report.exclusions["no_result"] >= 1
 
 
+def test_label_quality_audit_builds_honestly_on_real_mlb_pipeline_output_without_results(
+    tmp_repository, tmp_history_repository
+):
+    """Fase 4, Paso 4.2.1, prueba controlada real (E): confirma que
+    `build_label_quality_report` no falla contra un `HistoryRepository`
+    alimentado por una corrida real del pipeline MLB, reutilizando el
+    `SportGateReport` real (Paso 4.2) -- sin `event_results` reales
+    sincronizados en este entorno, no hay conflictos/duplicados que
+    detectar (nada que auditar todavía es un estado honesto, no una
+    anomalía) y `unresolved_count` debe coincidir exactamente con
+    `gate_report.exclusions["no_result"]`, nunca recalculado por
+    separado."""
+    from src.evaluation.gate_report import build_sport_gate_report
+    from src.evaluation.label_quality_audit import build_label_quality_report
+    from src.features.registry import CURRENT_FEATURE_SET_VERSION
+    from src.models.mlb_baseline import DEFAULT_MIN_TRAINING_SAMPLES, build_mlb_training_dataset
+    from src.models.schemas import Sport
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(
+        mlb_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    gate_report = build_sport_gate_report(
+        tmp_history_repository,
+        Sport.MLB,
+        event_id_prefix="mlb_",
+        thresholds={"mlb_classifier": DEFAULT_MIN_TRAINING_SAMPLES},
+        build_dataset_fn=build_mlb_training_dataset,
+        feature_set_version=CURRENT_FEATURE_SET_VERSION,
+    )
+    label_report = build_label_quality_report(tmp_history_repository, Sport.MLB, gate_report)
+
+    assert label_report.total_event_results == 0
+    assert label_report.conflicting_results == []
+    assert label_report.exact_duplicate_count == 0
+    assert label_report.has_anomalies is False
+    assert label_report.unresolved_count == gate_report.exclusions["no_result"]
+
+
 def test_orchestrator_end_to_end_real(tmp_repository, tmp_history_repository, tmp_path):
     """Fase 4, Paso 4.1, prueba controlada real (E): confirma que el
     orquestador completo (captura real -> Policy Engine ->

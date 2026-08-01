@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""Chequeo repetible de GATE-0 + Coverage Gate (Fase 4, Paso 4.2). Ver
-`FASE4_EXECUTION_PLAN.md` §6 Paso 4.2 y `src/evaluation/gate_report.py`.
+"""Chequeo repetible de GATE-0 + Coverage Gate + Auditoría de calidad de
+labels (Fase 4, Pasos 4.2 y 4.2.1). Ver `FASE4_EXECUTION_PLAN.md` §6 y
+`src/evaluation/gate_report.py`/`label_quality_audit.py`.
+
+Un solo comando para la pregunta completa de "¿hay suficiente histórico
+entrenable, y es confiable?" -- la auditoría de labels (Paso 4.2.1)
+reutiliza literalmente el `SportGateReport` ya calculado aquí (campo
+`exclusions["no_result"]`), nunca lo recalcula por separado.
 
 Invocación MANUAL, en cualquier momento -- de solo lectura, no
 desbloquea ni activa nada por sí solo. Sin lock de instancia única: no
@@ -18,12 +24,34 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.evaluation.gate_report import SportGateReport, build_sport_gate_report
+from src.evaluation.label_quality_audit import SportLabelQualityReport, build_label_quality_report
 from src.features.registry import CURRENT_FEATURE_SET_VERSION
 from src.models.mlb_baseline import DEFAULT_MIN_TRAINING_SAMPLES, build_mlb_training_dataset
 from src.models.mlb_elo import DEFAULT_MIN_GAMES
 from src.models.schemas import Sport
 from src.models.tennis_baseline import DEFAULT_MIN_TRAINING_SAMPLES_TENNIS, build_tennis_training_dataset
 from src.storage.history_repository import HistoryRepository
+
+
+def _print_label_quality_report(report: SportLabelQualityReport) -> None:
+    print(f"\n=== Auditoría de calidad de labels: {report.sport.value} ===")
+    print(f"  event_results totales:              {report.total_event_results}")
+    print(f"  Sin resolución todavía (reutilizado de Coverage Gate): {report.unresolved_count}")
+    print(f"  Resultados en conflicto por event_id: {len(report.conflicting_results)}")
+    for conflict in report.conflicting_results[:10]:
+        print(f"    - {conflict.event_id}: {conflict.distinct_results} ({conflict.row_count} filas)")
+    print(f"  Duplicados exactos (misma fila repetida): {report.exact_duplicate_count}")
+    print("  Resultados no binarios (CANCELLED/POSTPONED/otros):")
+    if report.non_binary_result_counts:
+        for value, count in sorted(report.non_binary_result_counts.items()):
+            print(f"    {value}: {count}")
+    else:
+        print("    (ninguno)")
+    print(f"  event_id con sport inconsistente vs. event_snapshots: {len(report.sport_mismatches)}")
+    for event_id in report.sport_mismatches[:10]:
+        print(f"    - {event_id}")
+    veredicto = "ANOMALÍAS ENCONTRADAS -- requieren revisión antes de entrenar" if report.has_anomalies else "sin anomalías"
+    print(f"  Veredicto: {veredicto}")
 
 
 def _print_report(report: SportGateReport) -> None:
@@ -59,6 +87,7 @@ def main() -> int:
         feature_set_version=CURRENT_FEATURE_SET_VERSION,
     )
     _print_report(mlb_report)
+    _print_label_quality_report(build_label_quality_report(hist, Sport.MLB, mlb_report))
 
     tennis_report = build_sport_gate_report(
         hist,
@@ -69,6 +98,7 @@ def main() -> int:
         feature_set_version=CURRENT_FEATURE_SET_VERSION,
     )
     _print_report(tennis_report)
+    _print_label_quality_report(build_label_quality_report(hist, Sport.TENNIS, tennis_report))
 
     print(f"\nHistory DB: {hist.db_path}")
     return 0
