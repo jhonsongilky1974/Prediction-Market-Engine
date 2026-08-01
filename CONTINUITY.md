@@ -77,8 +77,13 @@ de `event_results` vía nuevo `scripts/sync_results.py` + LaunchAgent
 paquete `src/orchestration/`, wiring en `run_e2e.py`) — ver §0.23.
 `opportunities`/`opportunity_evaluations` con filas reales
 por primera vez en `data/engine.db`, verificado por SQL, `ENTER` nunca
-aparece (esperado, D-3 sin resolver). Sin avanzar a Paso 4.2, a la
-espera de aprobación explícita.**
+aparece (esperado, D-3 sin resolver).** **Actualizado de nuevo:
+2026-08-01 — Implementado el Paso 4.2 (GATE-0 + Coverage Gate,
+`src/evaluation/gate_report.py` + `scripts/check_training_gates.py`) —
+ver §0.24. Primera evaluación real: MLB Elo y clasificador de tenis ya
+cumplen GATE-0 de volumen bruto (no autoriza entrenar); clasificador
+MLB (N=300) sigue lejos. Sin avanzar a Paso 4.2.1, a la espera de
+aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1967,6 +1972,124 @@ usuario, **no se avanza a Paso 4.2** sin nueva aprobación — este
 informe se presenta primero. Próximo paso pendiente de autorización:
 Paso 4.2 (Verificación de GATE-0 y Coverage Gate como chequeo
 repetible) y Paso 4.2.1 (auditoría de calidad de labels).
+
+## 0.24 Fase 4 — Paso 4.2: GATE-0 + Coverage Gate como chequeo repetible (2026-08-01)
+
+### Contexto y autorización
+
+El usuario aprobó el informe final del Paso 4.1 y autorizó el Paso 4.2
+con la misma disciplina (implementación incremental, tests unitarios,
+tests de integración, auditoría final, evidencia verificable), sin
+avanzar al Paso 4.2.1 (auditoría de calidad de labels, un paso distinto
+en el roadmap) sin nueva aprobación.
+
+### Implementado
+
+**Enmienda aditiva a código ya cerrado de Fase 2** (señalada
+explícitamente, mismo patrón que las de Paso 4.1): `MlbTrainingDataset`/
+`TennisTrainingDataset` (`src/models/mlb_baseline.py`/`tennis_baseline.py`)
+ganan un campo `exclusions: Dict[str, int]` — los 5 contadores
+(`wrong_sport`/`wrong_version`/`no_result`/`leakage`/`non_binary_result`)
+que `build_mlb_training_dataset`/`build_tennis_training_dataset` ya
+calculaban internamente, hasta ahora solo expuestos como texto libre
+dentro de `warnings`. Cero cálculo nuevo, cero cambio de comportamiento
+en `samples`/`size`/`warnings`.
+
+**Código nuevo**:
+- `src/evaluation/gate_report.py` — `build_sport_gate_report()`, función
+  de solo lectura (sin efectos secundarios; "pura" en el sentido usado
+  en todo el proyecto, no en el sentido de "sin I/O"). Combina, por
+  deporte: GATE-0 (`feature_snapshots.count()`/`event_results.count()`
+  crudos contra N_min) y el Coverage Gate (`dataset.size` — filas
+  etiquetadas y utilizables, ya filtradas por el dataset builder real —
+  sobre el total de `feature_snapshots`). Reutiliza LITERALMENTE
+  `build_mlb_training_dataset`/`build_tennis_training_dataset` (Fase 2,
+  sin tocar su lógica) vía inyección (`build_dataset_fn`), mismo
+  principio de extensibilidad que `SportAdapter` (Paso 4.1) — este
+  módulo no importa ni decide qué deportes existen.
+- `scripts/check_training_gates.py` — CLI de invocación manual, sin
+  lock (de solo lectura, seguro en paralelo con cualquier otro script),
+  imprime el reporte de ambos deportes.
+
+**Sin umbral fijado para el Coverage Gate** — decisión explícita ya
+tomada en `FASE4_EXECUTION_PLAN.md` §6 Paso 4.2 ("se decide con
+evidencia real cuando GATE-0 esté cerca de cumplirse"), respetada aquí:
+el reporte expone el ratio, nunca lo compara contra un número inventado.
+
+### Pruebas
+
+- `tests/unit/test_gate_report.py` (8 nuevos): conteos filtrados
+  correctamente por prefijo/versión/deporte, GATE-0 cumplido solo
+  cuando ambos conteos superan el umbral, `coverage_labeled_count`
+  coincide exactamente con `build_mlb_training_dataset(hist).size` real
+  (no un mock), `coverage_ratio=None` cuando no hay `feature_snapshots`,
+  `exclusions`/`warnings` idénticos a los del dataset builder real,
+  prefijo de tenis, y una prueba explícita de que el reporte no
+  modifica `HistoryRepository` (antes/después idénticos).
+- `tests/unit/test_mlb_baseline.py`/`test_tennis_baseline.py`: cada uno
+  de los 5 tests ya existentes de exclusión (uno por categoría) ganó
+  una aserción sobre `dataset.exclusions[...]`, en vez de duplicar
+  cobertura en un archivo nuevo.
+- `tests/integration/test_e2e_real.py`: 1 nuevo
+  (`test_gate_report_builds_honestly_on_real_mlb_pipeline_output_without_results`),
+  mismo patrón ya establecido (API real, `tmp_path` exclusivamente):
+  confirma que, sin `event_results` sincronizados en ese entorno
+  aislado, GATE-0 reporta honestamente "no cumplido" y el Coverage Gate
+  0 etiquetados — nunca fabricado.
+- Suite completa: 959 (cierre de §0.23) + 8 + 1 = **968 passed, 0
+  failed**.
+
+### Evidencia verificable (corrida real contra `data/engine.db` de producción, de solo lectura)
+
+`python scripts/check_training_gates.py`:
+
+| | MLB | TENNIS |
+|---|---|---|
+| `feature_snapshots` (versión actual) | 118 | 1338 |
+| `event_results` | 97 | 198 |
+| GATE-0 `mlb_classifier` (N=300) | no cumplido | — |
+| GATE-0 `mlb_elo` (N=50) | **CUMPLIDO** | — |
+| GATE-0 `tennis_classifier` (N=30) | — | **CUMPLIDO** |
+| Coverage (etiquetados/total) | 87/118 = 73.73% | 600/1338 = 44.84% |
+
+Consistencia cruzada verificada: el `wrong_sport=1338` que reporta el
+desglose de exclusiones de MLB coincide exactamente con el total de
+`feature_snapshots` que reporta TENNIS — confirma que ambos reportes
+escanean la misma tabla real, sin doble conteo ni omisión.
+
+**Primera vez que GATE-0 se evalúa contra números reales**: el baseline
+Elo de MLB y el clasificador de tenis ya cumplen su umbral de volumen
+bruto — esto **no autoriza entrenar nada todavía** (ni siquiera lo
+pretende: es exactamente el chequeo informativo que este paso debía
+producir, nada más) — el clasificador principal de MLB (N=300) sigue
+lejos, y el Coverage Gate (sin umbral fijado, por diseño) muestra que
+una fracción significativa de lo capturado en tenis (55%) todavía no
+tiene etiqueta utilizable, mayormente por `no_result`/`leakage`
+temporal, no por partidos irrelevantes.
+
+`git status`/`git diff --stat` limpios salvo los 8 archivos declarados
+(5 modificados, 3 nuevos). `data/models/` intacto, solo `.gitkeep`.
+
+### Auditoría final
+
+- Cero cambio de comportamiento en `build_mlb_training_dataset`/
+  `build_tennis_training_dataset` más allá de exponer `exclusions`
+  (aditivo) — confirmado por los 44 tests ya existentes de ambos
+  archivos, sin modificar ninguno, solo extendidos con una aserción.
+- Criterio de aceptación del Paso 4.2 (`FASE4_EXECUTION_PLAN.md` §6):
+  **cumplido** — reporte reproducible, sin efectos secundarios, `now`
+  no aplica aquí (el reporte no tiene componente temporal propio más
+  allá de lo que ya encapsula el dataset builder), cero duplicación de
+  la lógica de exclusión (verificado por test: `report.exclusions ==
+  real_dataset.exclusions` literalmente).
+- El script es invocable manualmente en cualquier momento, sin lock,
+  sin escribir nada — no desbloquea ni activa nada por sí solo.
+
+### Estado para continuar
+
+**Paso 4.2 cerrado y verificado.** Por instrucción explícita del
+usuario, **no se avanza al Paso 4.2.1** (auditoría de calidad de
+labels) sin nueva aprobación — este informe se presenta primero.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
