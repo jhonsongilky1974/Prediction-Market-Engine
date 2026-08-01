@@ -72,7 +72,13 @@ de `event_results`, D-4A resuelta) — ver §0.21.** **Actualizado de
 nuevo: 2026-08-01 — Implementado el Paso 4.0B (sincronización continua
 de `event_results` vía nuevo `scripts/sync_results.py` + LaunchAgent
 `local.prediction-market-engine.sync-results`, D-4B resuelta) — ver
-§0.22. Sin avanzar a Paso 4.1, a la espera de aprobación explícita.**
+§0.22.** **Actualizado de nuevo: 2026-08-01 — Implementado el Paso 4.1
+(orquestador captura → Policy Engine → `OpportunityRepository`, nuevo
+paquete `src/orchestration/`, wiring en `run_e2e.py`) — ver §0.23.
+`opportunities`/`opportunity_evaluations` con filas reales
+por primera vez en `data/engine.db`, verificado por SQL, `ENTER` nunca
+aparece (esperado, D-3 sin resolver). Sin avanzar a Paso 4.2, a la
+espera de aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1785,6 +1791,182 @@ aprobación. Próximo paso pendiente de autorización: Paso 4.1
 (orquestador captura → Policy Engine → `OpportunityRepository`), con su
 pregunta de diseño abierta ya señalada en `FASE4_EXECUTION_PLAN.md`
 (dónde vive el orquestador).
+
+## 0.23 Fase 4 — Paso 4.1: Orquestador (captura → Policy Engine → OpportunityRepository) (2026-08-01)
+
+### Contexto y autorización
+
+El usuario aprobó `ORCHESTRATOR_SPEC.md` en su totalidad (Alternativa 2
+de §9.1, mapeo `PROVISIONAL_V1` de §9.2, evaluar ambos lados YES/NO de
+§9.3, arquitectura §2, flujo §4, manejo de errores §5, enmiendas §8),
+añadiendo un requisito arquitectónico nuevo: extensibilidad — deportes
+futuros deben incorporarse sin modificar el núcleo del orquestador. Se
+documentó como §2.3 (`SportAdapter`) antes de escribir código, comiteado
+por separado (`39203c2`). Autorizó implementación completa
+(implementación, tests unitarios, tests de integración, auditoría
+final, evidencia verificable), instrucción explícita de no avanzar al
+Paso 4.2 sin nueva aprobación.
+
+### Correcciones encontradas durante la implementación (reportadas, no ocultas)
+
+1. **`enter_global_threshold=101.0` (aprobado en §9.1) viola el propio
+   contrato**: `PolicyManifest._validate_invariants` exige
+   `_require_percent_range` (`[0,100]`) también sobre
+   `enter_global_threshold`, no solo sobre `watch_global_threshold` —
+   `101.0` habría lanzado `ValidationError` en el primer intento de
+   construir el manifiesto. Corregido a `100.0` (el techo real del
+   contrato) — sigue satisfaciendo el espíritu de la Alternativa 2
+   (límite, no una estimación): `100.0` exige un `aggregate_soft_score`
+   perfecto, y `ENTER` permanece bloqueado de forma independiente
+   porque `ev_neto_strength` es siempre `None` (no compensable). No
+   requirió nueva aprobación del usuario — es una corrección técnica
+   para lograr el mismo valor aprobado en concepto, no un cambio de
+   decisión. `ORCHESTRATOR_SPEC.md` §9.1/§10/§13 actualizados con la
+   corrección documentada explícitamente.
+2. **Orden de construcción corregido**: el flujo original de §4.2
+   calculaba `confidence_profile` como paso 4 (compartido entre ambos
+   lados), pero `ConfidenceProfile.opportunity_id` es obligatorio y
+   `opportunity_id` solo se conoce dentro del bucle por lado (pasos
+   5-6) — `confidence_profile` se mueve a calcularse una vez por lado,
+   no una vez por registro (costo despreciable, función pura sin I/O).
+3. **`previous_signal_id` mal entendido inicialmente**: la primera
+   implementación lo llenaba con `previous_opportunity.opportunity_id`
+   (identidad estable, no cambia entre versiones). `CONTRACTS_FASE3.md`
+   §12 y `tests/unit/test_opportunity_repository.py` confirman que debe
+   encadenar al `evaluation_id` de la `OpportunityEvaluation` anterior
+   — corregido antes de ejecutar ningún test, detectado por lectura
+   directa del contrato.
+4. **`feature_schema_version` bug propio**: la primera versión de
+   `evaluate_opportunity` escribía `policy_manifest.policy_version` en
+   ambos campos (`policy_version` y `feature_schema_version`) —
+   corregido para usar `CURRENT_FEATURE_SET_VERSION`
+   (`src/features/registry.py`, `"phase2_registry_v1"`) en
+   `feature_schema_version`, detectado por lectura de código antes de
+   ejecutar, no por un test que fallara.
+
+Ninguna de las 4 requirió reabrir la aprobación del usuario — son
+correcciones técnicas para lograr exactamente lo ya aprobado, detectadas
+por lectura de contrato/código durante la implementación, no
+desviaciones de diseño.
+
+### Implementado
+
+**Enmiendas aditivas a código ya cerrado** (§8 de `ORCHESTRATOR_SPEC.md`,
+señaladas explícitamente antes de tocarlas):
+- `src/pipelines/mlb_pipeline.py`/`tennis_pipeline.py`:
+  `MlbPipelineResult`/`TennisPipelineResult` ganan
+  `feature_inputs_list`/`feature_cutoffs` (aditivo, cero cálculo nuevo
+  — ya se computaban internamente y se descartaban al retornar).
+- `src/opportunity/schemas.py`: `OpportunityEvaluation.model_version`
+  rectificado de `str` a `Optional[str] = None` — mismo error de
+  transcripción ya corregido una vez en `CalibrationOutput.model_version`
+  (Paso 3.1, §0.3.1), esta vez en `OpportunityEvaluation` (Paso 3.5),
+  nunca detectado porque ningún test construía ese contrato desde un
+  `PModelOutput` real.
+
+**Código nuevo** (paquete `src/orchestration/`, ninguna regla de
+negocio nueva — pura composición de Fase 2/3 ya cerrada):
+- `sport_adapter.py` — `SportAdapter` (extensibilidad, §2.3).
+- `signal_builder.py` — `build_signal_inputs()`, primer compositor real
+  de `SignalInputs` del proyecto; captura explícitamente (no silencia)
+  el caso `exchange_fee` poblado + `NotImplementedError` de
+  `compute_ev_*_neto` (D-3).
+- `confidence_profile_builder.py` — `build_confidence_profile()`,
+  mapeo `PROVISIONAL_V1` aprobado (§9.2), reescala `[0,1]->[0,100]`
+  explícitamente (`ConfidenceProfile` exige `_require_percent_range`).
+- `decision_pipeline.py` — `evaluate_opportunity()` (una `Opportunity`+
+  `OpportunityEvaluation` por `(record, side)`) y `run_decision_pipeline()`
+  (batch, aislamiento de fallos por registro y por lado — el
+  orquestador NO hereda la fragilidad ya documentada de
+  `mlb_pipeline.py`/`tennis_pipeline.py`, que sí abortan el lote ante
+  una excepción no capturada).
+
+**Config nuevo**: `config/policy/mlb_v1.json`/`tennis_v1.json` —
+generados programáticamente reutilizando únicamente constantes ya
+aprobadas (`HARD_BLOCK_RULE_IDS`/`HARD_HOLD_RULE_IDS` completos,
+`DEFAULT_SOFT_SCORE_WEIGHTS`, `DEFAULT_CRITICAL_MINIMUMS`,
+`DEFAULT_PENDING_LINEUP_HOURS_THRESHOLD`, etc.), tenis excluye
+`unconfirmed_pitcher` (específica de MLB). `enter_global_threshold=100.0`/
+`watch_global_threshold=0.0` (Alternativa 2 corregida, ver arriba).
+Ambos validados con `validate_policy_manifest()` antes de escribirse
+(`save_policy_manifest`, sin cambios).
+
+**Wiring**: `scripts/run_e2e.py::_run()` gana un tercer bloque, después
+de los bloques MLB/tenis existentes — opera sobre
+`mlb_result.records`/`tennis_result.records` ya en memoria, sin volver
+a leer la base de datos. `SPORT_ADAPTERS: Dict[Sport, SportAdapter]` a
+nivel de módulo — incorporar un deporte nuevo requiere solo añadir su
+entrada ahí, cero cambios en `src/orchestration/`.
+
+### Pruebas
+
+- `tests/unit/test_signal_builder.py` (6), `test_confidence_profile_builder.py`
+  (10), `test_decision_pipeline.py` (8, incluida la garantía central de
+  aislamiento de fallos por registro Y por lado, probada con
+  `monkeypatch` inyectando un fallo real; test de arquitectura AST
+  confirmando que ningún paquete de Fase 3 importa
+  `src/orchestration/`; regresión fijando que `ENTER` nunca aparece
+  con el manifiesto real aprobado).
+- `tests/unit/test_opportunity_schemas.py`: 2 nuevos, espejo exacto de
+  la rectificación ya aplicada a `CalibrationOutput` en el Paso 3.1.
+- `tests/integration/test_e2e_real.py`: 1 nuevo
+  (`test_orchestrator_end_to_end_real`) — mismo patrón ya establecido
+  del archivo (API real, `tmp_path` exclusivamente, nunca
+  `data/engine.db`): captura real de MLB → orquestador completo →
+  `OpportunityRepository`, con el manifiesto real aprobado, confirma
+  `MODEL_NOT_TRAINED` en cascada y `ENTER` ausente contra datos reales.
+- Suite completa: 934 (tras §0.21/§0.22 + 2 de la rectificación) + 6 +
+  10 + 8 + 1 = **959 passed, 0 failed**.
+
+### Evidencia verificable (corrida real contra `data/engine.db` de producción)
+
+`python scripts/run_e2e.py --mode sample` ejecutado manualmente (1
+juego MLB + 5 partidos de tenis):
+
+- Tablas `opportunities`/`opportunity_evaluations` **creadas por primera
+  vez** en `data/engine.db` (`CREATE TABLE IF NOT EXISTS` de
+  `OpportunityRepository`, nunca antes instanciado contra la base real
+  — confirma el hallazgo §1.6 de `ORCHESTRATOR_SPEC.md`).
+- MLB: 1 registro evaluado, sin `market_id` (matching de Kalshi no
+  resuelto para ese evento) → 0 oportunidades, correctamente omitido
+  (§4.2), no fabricado.
+- Tenis: 5 registros evaluados, 3 con `market_id` → **6 oportunidades
+  creadas** (3 eventos × 2 lados), **6 evaluaciones**, 0 errores.
+- Verificado directamente por SQL (no solo el resumen impreso):
+  `SELECT signal_type, COUNT(*) FROM opportunity_evaluations` →
+  `WATCH: 6` — **cero `ENTER`**, tal como predice §1.7.
+  `model_version IS NULL` en las 6 filas (honesto, `MODEL_NOT_TRAINED`).
+  Inspección completa de una fila (`evaluation_json`): `p_model=null`,
+  `edge=null`, `ev_neto=null` en cascada, `market_price=0.42` (de
+  `yes_ask` real), `confidence=0.8259...` (de `quality_score` real) —
+  nada fabricado, todo trazable a una fuente real o `None`.
+- `git status`/`git diff --stat` limpios salvo los 13 archivos
+  declarados (7 modificados, 6 nuevos) — nada fuera de alcance.
+- `data/models/` intacto, solo `.gitkeep`.
+
+### Auditoría final
+
+- Ningún cambio de comportamiento en `src/policy/`, `src/opportunity/`
+  (salvo la rectificación de contrato §8.2, aditiva/ampliadora, no
+  restrictiva) — confirmado por `git diff --stat`.
+- Criterio de aceptación del Paso 4.1 (`ORCHESTRATOR_SPEC.md` §12):
+  **cumplido** — filas reales verificadas por SQL, `ENTER` nunca
+  aparece (documentado, no investigado como anomalía), aislamiento de
+  fallos probado por test, enmiendas exactamente las declaradas,
+  manifiestos validados, suite en verde, `CONTINUITY.md` actualizado
+  antes del commit.
+- Extensibilidad (requisito añadido por el usuario): verificada por el
+  test de arquitectura AST (§11) — ningún paquete de Fase 1/2/3 importa
+  `src/orchestration/`, y `decision_pipeline.py` nunca importa
+  `mlb_baseline`/`tennis_baseline`/`registry` directamente.
+
+### Estado para continuar
+
+**Paso 4.1 cerrado y verificado.** Por instrucción explícita del
+usuario, **no se avanza a Paso 4.2** sin nueva aprobación — este
+informe se presenta primero. Próximo paso pendiente de autorización:
+Paso 4.2 (Verificación de GATE-0 y Coverage Gate como chequeo
+repetible) y Paso 4.2.1 (auditoría de calidad de labels).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
