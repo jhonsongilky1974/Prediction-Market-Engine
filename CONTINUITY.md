@@ -62,6 +62,8 @@ DECISIÓN PENDIENTE D-1: ambos LaunchAgents (captura histórica +
 mantenimiento) reactivados y confirmados en ejecución permanente (ver
 §0.19). **Cierra la última decisión pendiente de Fase 3 — D-1/D-2
 resueltas, D-3 reencuadrada y documentada como dependencia externa.**
+**Actualizado de nuevo: 2026-08-01 — CIERRE FORMAL DE FASE 3, aprobado
+por el usuario (ver §0.20 y [`FASE3_CIERRE_FINAL.md`](FASE3_CIERRE_FINAL.md)).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1509,6 +1511,31 @@ autorizado en este momento. El histórico real (`event_snapshots`/
 calibración/backtesting con datos reales de forma orgánica a partir de
 ahora -- ningún paso de código adicional es necesario para eso, solo
 tiempo de captura.
+
+## 0.20 CIERRE FORMAL DE FASE 3 (2026-08-01)
+
+**Fase 3 queda declarada oficialmente cerrada.** Todo el alcance REQUIRED
+FOR PHASE 3 (`IMPLEMENTATION_ROADMAP_FASE3.md`) está implementado,
+testeado (927 tests, 0 regresiones) y committeado. Las 3 decisiones
+pendientes de la auditoría original (`FASE3_AUDIT_REPORT.md` §13) están
+cerradas: D-1 resuelta (§0.19), D-2 resuelta (§0.17), D-3 reencuadrada y
+documentada como dependencia externa verificable, no resuelta por diseño
+(§0.18). Informe completo: [`FASE3_CIERRE_FINAL.md`](FASE3_CIERRE_FINAL.md).
+
+El usuario aprobó el cierre explícitamente, reconociendo la disciplina
+de detenerse ante cada contradicción arquitectónica/contractual/operacional
+encontrada durante todo el proceso (rectificación de `CalibrationOutput.model_version`
+§0.3.1, invariante de `AnalysisHealth` §0.14, contradicción operacional
+del LaunchAgent y de la política de purgado §0.19, entre otras).
+
+**Estado para la siguiente fase**: ver `FASE3_CIERRE_FINAL.md` §5 para la
+propuesta de alto nivel (no un plan aprobado) — orden de dependencia:
+acumulación orgánica de histórico real → calibrador entrenado →
+verificación de D-3 → backtesting/Shadow Mode reales → recalibración de
+heurísticas → solo entonces, lógica de clasificación ENTER/WATCH/PASS.
+Ningún trabajo de Fase 4 está autorizado todavía — requiere su propia
+auditoría contractual/arquitectónica antes de un plan de ejecución,
+siguiendo el mismo proceso institucional usado en Fase 2 y Fase 3.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
