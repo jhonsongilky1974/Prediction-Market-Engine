@@ -448,16 +448,22 @@ implementarse, según la metodología. Los pasos 4.3 en adelante son
   `PolicyDecision` con `ev_neto_strength`/mínimos críticos en `None` —
   mismo hallazgo ya probado en Paso 3.4.4 de Fase 3, útil para
   contract-testing pero no para acumular decisiones evaluables).
-- **Alcance a definir con el usuario antes de codificar**: ¿vive dentro
-  de `run_e2e.py` (mismo LaunchAgent horario) o es un script
-  independiente? ¿Corre sobre cada `NormalizedRecord` nuevo o sobre un
-  batch periódico? Esto es una decisión de diseño real, no debe
-  decidirse unilateralmente — se reporta aquí como pregunta abierta, no
-  como parte ya aprobada del alcance.
+- **Diseño completo**: [`ORCHESTRATOR_SPEC.md`](ORCHESTRATOR_SPEC.md)
+  (propuesto 2026-08-01, pendiente de aprobación) — resuelve la
+  pregunta abierta de dónde vive el orquestador (dentro de
+  `run_e2e.py`, §2.2 de ese documento) y documenta 3 decisiones que
+  requieren aprobación explícita antes de implementar (umbrales
+  globales del `PolicyManifest`, mapeo `PROVISIONAL_V1` de
+  `ConfidenceProfile`, evaluar uno o ambos lados YES/NO), más 2
+  enmiendas aditivas necesarias a código ya cerrado de Fase 1/2/3
+  (`MlbPipelineResult`/`TennisPipelineResult`, y una rectificación de
+  contrato en `OpportunityEvaluation.model_version` — mismo error ya
+  corregido una vez en `CalibrationOutput` durante el Paso 3.1).
 - **Criterio de aceptación**: tablas `opportunities`/
   `opportunity_evaluations` existen y tienen filas reales en
   `data/engine.db`; cero cambios de comportamiento en `src/policy/`,
-  `src/opportunity/` (código de Fase 3 ya cerrado, reutilizado tal cual).
+  `src/opportunity/` (código de Fase 3 ya cerrado, reutilizado tal
+  cual) — ver `ORCHESTRATOR_SPEC.md` §12 para el criterio completo.
 
 ### Paso 4.2 — Verificación de GATE-0 y Coverage Gate como chequeo repetible
 - **Alcance**: función pura + script/reporte que evalúe, por deporte:
