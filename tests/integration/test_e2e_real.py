@@ -252,6 +252,46 @@ def test_compare_baselines_builds_honestly_on_real_mlb_pipeline_output_without_r
     assert any("0 predicciones" in w for w in report.warnings)
 
 
+def test_gate_report_builds_honestly_on_real_mlb_pipeline_output_without_results(
+    tmp_repository, tmp_history_repository
+):
+    """Fase 4, Paso 4.2, prueba controlada real (E): confirma que
+    `build_sport_gate_report` no falla contra un `HistoryRepository`
+    alimentado por una corrida real del pipeline MLB. Sin `event_results`
+    reales sincronizados en este entorno (tmp_path, nunca data/engine.db),
+    GATE-0 debe reportar honestamente "no cumplido" y el Coverage Gate
+    0 etiquetados utilizables -- nunca fabricar una etiqueta ni un
+    cumplimiento de gate."""
+    from src.evaluation.gate_report import build_sport_gate_report
+    from src.features.registry import CURRENT_FEATURE_SET_VERSION
+    from src.models.mlb_baseline import DEFAULT_MIN_TRAINING_SAMPLES, build_mlb_training_dataset
+    from src.models.schemas import Sport
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(
+        mlb_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    report = build_sport_gate_report(
+        tmp_history_repository,
+        Sport.MLB,
+        event_id_prefix="mlb_",
+        thresholds={"mlb_classifier": DEFAULT_MIN_TRAINING_SAMPLES},
+        build_dataset_fn=build_mlb_training_dataset,
+        feature_set_version=CURRENT_FEATURE_SET_VERSION,
+    )
+
+    assert report.event_results_total == 0
+    assert report.gate_0_met["mlb_classifier"] is False
+    assert report.coverage_labeled_count == 0
+    if report.feature_snapshots_total > 0:
+        assert report.coverage_ratio == 0.0
+        assert report.exclusions["no_result"] >= 1
+
+
 def test_orchestrator_end_to_end_real(tmp_repository, tmp_history_repository, tmp_path):
     """Fase 4, Paso 4.1, prueba controlada real (E): confirma que el
     orquestador completo (captura real -> Policy Engine ->

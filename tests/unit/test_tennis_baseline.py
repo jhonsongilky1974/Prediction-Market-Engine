@@ -131,6 +131,7 @@ def test_dataset_builder_excludes_leakage_when_result_recorded_before_features(t
 
     assert dataset.size == 0
     assert any("leakage" in w for w in dataset.warnings)
+    assert dataset.exclusions["leakage"] == 1
 
 
 def test_dataset_builder_excludes_non_tennis_event_ids(tmp_path):
@@ -155,6 +156,7 @@ def test_dataset_builder_excludes_non_tennis_event_ids(tmp_path):
 
     assert dataset.size == 0
     assert any("espn_tennis_" in w for w in dataset.warnings)
+    assert dataset.exclusions["wrong_sport"] == 1
 
 
 def test_dataset_builder_excludes_mismatched_feature_set_version(tmp_path):
@@ -166,6 +168,7 @@ def test_dataset_builder_excludes_mismatched_feature_set_version(tmp_path):
 
     assert dataset.size == 0
     assert any("feature_set_version" in w for w in dataset.warnings)
+    assert dataset.exclusions["wrong_version"] == 1
 
 
 def test_dataset_builder_excludes_events_without_result(tmp_path):
@@ -177,6 +180,7 @@ def test_dataset_builder_excludes_events_without_result(tmp_path):
 
     assert dataset.size == 0
     assert any("sin event_result" in w for w in dataset.warnings)
+    assert dataset.exclusions["no_result"] == 1
 
 
 def test_dataset_builder_excludes_non_binary_results(tmp_path):
@@ -188,6 +192,7 @@ def test_dataset_builder_excludes_non_binary_results(tmp_path):
 
     assert dataset.size == 0
     assert any("PARTICIPANT_A_WON/PARTICIPANT_B_WON" in w for w in dataset.warnings)
+    assert dataset.exclusions["non_binary_result"] == 1
 
 
 def test_dataset_builder_uses_latest_result_for_duplicated_event(tmp_path):

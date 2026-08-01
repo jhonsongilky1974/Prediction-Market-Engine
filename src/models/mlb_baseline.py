@@ -133,6 +133,11 @@ class MlbTrainingDataset:
     samples: List[MlbTrainingSample] = field(default_factory=list)
     feature_set_version: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
+    # Fase 4, Paso 4.2 (Coverage Gate) -- aditivo, cero cálculo nuevo: ya
+    # se contaban internamente (ver el bucle de abajo) pero solo se
+    # exponían como texto dentro de `warnings`. Claves estables:
+    # wrong_sport/wrong_version/no_result/leakage/non_binary_result.
+    exclusions: Dict[str, int] = field(default_factory=dict)
 
     @property
     def size(self) -> int:
@@ -232,7 +237,16 @@ def build_mlb_training_dataset(history_repository: HistoryRepository) -> MlbTrai
         )
 
     feature_set_version = CURRENT_FEATURE_SET_VERSION if samples else None
-    return MlbTrainingDataset(samples=samples, feature_set_version=feature_set_version, warnings=warnings)
+    exclusions = {
+        "wrong_sport": excluded_wrong_sport,
+        "wrong_version": excluded_wrong_version,
+        "no_result": excluded_no_result,
+        "leakage": excluded_leakage,
+        "non_binary_result": excluded_non_binary_result,
+    }
+    return MlbTrainingDataset(
+        samples=samples, feature_set_version=feature_set_version, warnings=warnings, exclusions=exclusions
+    )
 
 
 def split_dataset_temporally(
