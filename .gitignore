@@ -11,6 +11,7 @@ data/models/*
 data/engine.db
 data/.run_e2e.lock
 data/.maintenance.lock
+data/.sync-results.lock
 data/backups/*
 !data/backups/.gitkeep
 logs/*

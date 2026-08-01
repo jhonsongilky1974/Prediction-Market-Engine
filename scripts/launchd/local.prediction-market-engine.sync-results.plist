@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.prediction-market-engine.sync-results</string>
+
+    <!-- Fase 4, Paso 4.0B (D-4B): sincronización continua de
+         event_results (MLB + tenis ATP), scripts/sync_results.py.
+         Lock de instancia única propio (data/.sync-results.lock,
+         scripts/pipeline_lock.py) -- no comparte lock con
+         local.prediction-market-engine.run-e2e-historical ni con
+         local.prediction-market-engine.data-maintenance, mismas
+         garantías de concurrencia SQLite ya probadas en producción
+         entre esos dos (timeout=30s en HistoryRepository._connect). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/.venv/bin/python3</string>
+        <string>/Users/jhonsongil/Prediction-Market-Engine/scripts/sync_results.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine</string>
+
+    <!-- Una corrida diaria a las 03:30 hora local -- 30 minutos después
+         de data-maintenance (03:00), separación operativa limpia entre
+         los dos jobs diarios (no estrictamente necesaria para la
+         concurrencia, que ya está garantizada por locks independientes,
+         pero evita que ambos toquen data/engine.db en el mismo
+         instante). Los resultados de un evento no cambian una vez
+         decidido, a diferencia de los precios de mercado -- cadencia
+         diaria es suficiente, no requiere StartInterval horario.
+         RunAtLoad se deja en false a propósito, mismo motivo que los
+         otros dos LaunchAgents: cargarlo no dispara una corrida
+         inmediata, solo arma el próximo ciclo. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/sync_results.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonsongil/Prediction-Market-Engine/logs/sync_results.stderr.log</string>
+</dict>
+</plist>
