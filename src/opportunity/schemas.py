@@ -121,7 +121,13 @@ class OpportunityEvaluation(StrictModel):
     decision_timestamp: datetime
     data_cutoff_timestamp: datetime
     market_snapshot_timestamp: Optional[datetime] = None
-    model_version: str
+    # Fase 4, Paso 4.1: rectificado de `str` obligatorio a `Optional[str]`
+    # -- mismo error de transcripción ya corregido una vez en
+    # `CalibrationOutput.model_version` (Paso 3.1, CONTINUITY.md §0.3.1).
+    # `PModelOutput.model_version` (src/models/base.py) es `Optional[str]`,
+    # y en producción es siempre `None` (ningún modelo entrenado existe
+    # todavía) -- este campo debe reflejar exactamente esa fuente.
+    model_version: Optional[str] = None
     calibration_version: Optional[str] = None
     policy_version: str
     feature_schema_version: str

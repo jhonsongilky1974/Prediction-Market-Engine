@@ -35,6 +35,12 @@ class PipelineStepResult:
 class MlbPipelineResult:
     records: List[Any] = field(default_factory=list)
     steps: List[PipelineStepResult] = field(default_factory=list)
+    # Fase 4, Paso 4.1 (orquestador) -- aditivo, cero cálculo nuevo: ya se
+    # computaban internamente (ver el bucle de abajo) pero se descartaban
+    # al retornar. Alineados 1:1 por índice con `records`, mismo invariante
+    # ya documentado para feature_inputs_list/feature_cutoffs locales.
+    feature_inputs_list: List[Optional[MlbFeatureInputs]] = field(default_factory=list)
+    feature_cutoffs: List[Optional[datetime]] = field(default_factory=list)
 
 
 def run_mlb_pipeline(
@@ -169,7 +175,9 @@ def run_mlb_pipeline(
                     )
 
     steps.append(PipelineStepResult("pipeline", "normalized_records", True, count=len(records)))
-    return MlbPipelineResult(records=records, steps=steps)
+    return MlbPipelineResult(
+        records=records, steps=steps, feature_inputs_list=feature_inputs_list, feature_cutoffs=feature_cutoffs
+    )
 
 
 def _fetch_probable_pitcher_stats(

@@ -252,6 +252,66 @@ def test_compare_baselines_builds_honestly_on_real_mlb_pipeline_output_without_r
     assert any("0 predicciones" in w for w in report.warnings)
 
 
+def test_orchestrator_end_to_end_real(tmp_repository, tmp_history_repository, tmp_path):
+    """Fase 4, Paso 4.1, prueba controlada real (E): confirma que el
+    orquestador completo (captura real -> Policy Engine ->
+    OpportunityRepository) funciona end-to-end contra un
+    NormalizedRecord real de la API, con el PolicyManifest real
+    aprobado (config/policy/mlb_v1.json) -- escribiendo únicamente en
+    tmp_path, nunca en data/engine.db. Sin modelo entrenado en este
+    entorno -> MODEL_NOT_TRAINED en cascada, ENTER nunca aparece
+    (ORCHESTRATOR_SPEC.md §1.7), honesto, nunca fabricado."""
+    from config.settings import PROJECT_ROOT
+    from src.models.registry import load_latest_mlb_artifact
+    from src.models.mlb_baseline import predict_mlb_baseline
+    from src.models.schemas import Sport
+    from src.opportunity.opportunity_repository import OpportunityRepository
+    from src.orchestration.decision_pipeline import run_decision_pipeline
+    from src.orchestration.sport_adapter import SportAdapter
+    from src.policy.manifest import load_policy_manifest
+
+    mlb_date = _next_mlb_date_with_games()
+    if mlb_date is None:
+        pytest.skip("no hay juegos MLB próximos disponibles vía la API")
+    result = run_mlb_pipeline(
+        mlb_date, repository=tmp_repository, history_repository=tmp_history_repository, limit=1
+    )
+    assert len(result.records) == 1
+
+    opp_repository = OpportunityRepository(db_path=tmp_path / "opportunities.db")
+    manifest = load_policy_manifest(PROJECT_ROOT / "config" / "policy" / "mlb_v1.json")
+    adapter = SportAdapter(Sport.MLB, predict_mlb_baseline, load_latest_mlb_artifact)
+
+    summary = run_decision_pipeline(
+        records=result.records,
+        feature_inputs_list=result.feature_inputs_list,
+        feature_cutoffs=result.feature_cutoffs,
+        sport=Sport.MLB,
+        adapter=adapter,
+        history_repository=tmp_history_repository,
+        opportunity_repository=opp_repository,
+        policy_manifest=manifest,
+    )
+
+    assert summary.skipped_errors == []
+    record = result.records[0]
+    if record.market_id is None:
+        # matching de Kalshi no resuelto para este evento -- honesto,
+        # nada que evaluar, no se fabrica una oportunidad (§4.2).
+        assert summary.opportunities_created == 0
+        assert summary.skipped_no_market_id == 1
+    else:
+        assert summary.opportunities_created == 2  # YES + NO
+        assert summary.evaluations_created == 2
+        assert "ENTER" not in summary.signal_type_counts
+        evaluation = opp_repository.get_latest_evaluation(
+            f"opp:{record.event_id}:{record.market_id}:YES"
+        )
+        assert evaluation is not None
+        assert evaluation.signal_inputs.model_status.value == "MODEL_NOT_TRAINED"
+        assert evaluation.model_version is None
+
+
 def test_edge_and_ev_compute_honestly_on_real_mlb_pipeline_output(tmp_repository):
     """Paso 8, prueba controlada real (E): confirma que
     `compute_edge_yes`/`compute_edge_no`/`compute_ev_yes_bruto`/

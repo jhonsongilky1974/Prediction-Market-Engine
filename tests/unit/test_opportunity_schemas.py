@@ -137,6 +137,19 @@ def test_opportunity_evaluation_naive_decision_timestamp_raises():
         make_opportunity_evaluation(decision_timestamp=datetime(2026, 7, 30, 12, 0, 0))
 
 
+def test_opportunity_evaluation_model_not_trained_case_has_none_model_version():
+    """Caso real de producción (Fase 4, Paso 4.1): model_status=MODEL_NOT_TRAINED
+    implica PModelOutput.model_version=None -- OpportunityEvaluation debe
+    aceptarlo sin fabricar un string. Mismo caso ya cubierto para
+    CalibrationOutput.model_version (Paso 3.1, ver test_calibration_schemas.py)."""
+    evaluation = make_opportunity_evaluation(model_version=None)
+    assert evaluation.model_version is None
+
+
+def test_opportunity_evaluation_round_trip_with_model_version_none():
+    assert_round_trip(make_opportunity_evaluation(model_version=None))
+
+
 def test_opportunity_evaluation_payoff_estimate_can_be_none():
     evaluation = make_opportunity_evaluation(payoff_estimate=None)
     assert evaluation.payoff_estimate is None

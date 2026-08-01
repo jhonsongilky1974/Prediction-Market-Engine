@@ -39,6 +39,10 @@ def _is_upcoming(match: Dict[str, Any]) -> bool:
 class TennisPipelineResult:
     records: List[Any] = field(default_factory=list)
     steps: List[PipelineStepResult] = field(default_factory=list)
+    # Fase 4, Paso 4.1 (orquestador) -- aditivo, cero cálculo nuevo, mismo
+    # motivo que MlbPipelineResult (src/pipelines/mlb_pipeline.py).
+    feature_inputs_list: List[Optional[TennisFeatureInputs]] = field(default_factory=list)
+    feature_cutoffs: List[Optional[datetime]] = field(default_factory=list)
 
 
 def run_tennis_pipeline(
@@ -164,7 +168,9 @@ def run_tennis_pipeline(
                     )
 
     steps.append(PipelineStepResult("pipeline", "normalized_records", True, count=len(records)))
-    return TennisPipelineResult(records=records, steps=steps)
+    return TennisPipelineResult(
+        records=records, steps=steps, feature_inputs_list=feature_inputs_list, feature_cutoffs=feature_cutoffs
+    )
 
 
 def _fetch_tennis_feature_inputs(history_repository: HistoryRepository, record: NormalizedRecord) -> TennisFeatureInputs:

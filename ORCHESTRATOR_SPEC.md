@@ -554,15 +554,24 @@ tipo de número que la Corrección C del proyecto prohíbe sin evidencia
 derivado de nada real.
 
 **Alternativa 2 — Umbrales "límite", sin pretender saber un corte real
-(recomendada)**: `enter_global_threshold` fuera del rango alcanzable
-(ej. `101.0` — el agregado nunca puede pasar de 100, así que `ENTER`
-queda estructuralmente imposible por construcción, coherente y
-explícito con el hallazgo §1.7, en vez de depender accidentalmente de
-que `ev_neto_strength` sea `None`); `watch_global_threshold=0.0` — todo
-lo que sobreviva a Hard Block/Hard Hold y tenga un `aggregate_soft_score`
-calculable se clasifica `WATCH`, nunca se descarta a `PASS` por un
-corte arbitrario de score. No pretende saber nada que no se sabe —
-documenta la ausencia de evidencia en vez de simularla.
+(recomendada)**: `enter_global_threshold=100.0` — el valor máximo que el
+propio contrato permite (`PolicyManifest._validate_invariants` exige
+`_require_percent_range`, `[0,100]`; **corrección aplicada durante la
+implementación**: el valor `101.0` propuesto originalmente en esta
+sección está fuera de ese rango y `PolicyManifest` lo rechazaría con
+`ValidationError` — se usa `100.0`, el techo real del contrato, no
+`101.0`). Sigue satisfaciendo el espíritu de la alternativa: `100.0`
+exige un `aggregate_soft_score` perfecto, y aun así `ENTER` permanece
+estructuralmente bloqueado de forma independiente porque
+`ev_neto_strength` (componente crítico) es siempre `None` mientras D-3
+no se resuelva — la "no compensación" de `soft_score.py` ya impide
+`ENTER` sin importar el umbral (hallazgo §1.7), así que `100.0` es un
+límite real, doblemente reforzado, no una estimación. `watch_global_threshold=0.0`
+— todo lo que sobreviva a Hard Block/Hard Hold y tenga un
+`aggregate_soft_score` calculable se clasifica `WATCH`, nunca se
+descarta a `PASS` por un corte arbitrario de score. No pretende saber
+nada que no se sabe — documenta la ausencia de evidencia en vez de
+simularla.
 
 **Alternativa 3 — No construir ningún `PolicyManifest` todavía, dejar
 el Paso 4.1 sin llamar a `decide()`**: descartada como impráctica —
@@ -631,7 +640,7 @@ ya existentes y aprobadas en `src/policy/hard_rules.py`/`soft_score.py`
     "temporarily_stale_data_threshold_seconds": 3600.0,
     "temporarily_insufficient_liquidity_minimum": 1000.0
   },
-  "enter_global_threshold": 101.0,
+  "enter_global_threshold": 100.0,
   "watch_global_threshold": 0.0,
   "manifest_hash": "<calculado>",
   "created_at": "<fecha real de creación>",
@@ -719,7 +728,7 @@ comitear — criterio de aceptación explícito (§12).
 - **Falsa expectativa de que "no hay `ENTER`" es un bug** — mitigado
   documentándolo explícitamente en criterios de aceptación (§12) y en
   el resumen impreso (§7).
-- **`enter_global_threshold=101.0`/`watch_global_threshold=0.0` (§9.1,
+- **`enter_global_threshold=100.0`/`watch_global_threshold=0.0` (§9.1,
   Alternativa 2) parecen "números mágicos" fuera de contexto** —
   mitigado con el comentario explícito en el propio manifiesto JSON y
   en este documento sobre por qué son límites, no estimaciones.

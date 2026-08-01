@@ -28,10 +28,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import PROJECT_ROOT
 from scripts.pipeline_lock import LockAcquisitionError, single_instance_lock
+from src.models.mlb_baseline import predict_mlb_baseline
+from src.models.registry import load_latest_mlb_artifact
+from src.models.schemas import Sport
+from src.models.tennis_baseline import load_latest_tennis_artifact, predict_tennis_baseline
+from src.opportunity.opportunity_repository import OpportunityRepository
+from src.orchestration.decision_pipeline import DecisionPipelineSummary, run_decision_pipeline
+from src.orchestration.sport_adapter import SportAdapter
 from src.pipelines.mlb_pipeline import PipelineStepResult, run_mlb_pipeline
 from src.pipelines.tennis_pipeline import run_tennis_pipeline
+from src.policy.manifest import load_policy_manifest
 from src.storage.history_repository import HistoryRepository
 from src.storage.repository import Repository
+
+# Fase 4, Paso 4.1 (orquestador): registro de deportes soportados --
+# incorporar un deporte nuevo requiere únicamente añadir su propio
+# SportAdapter aquí, cero cambios en src/orchestration/decision_pipeline.py
+# (ORCHESTRATOR_SPEC.md §2.3).
+SPORT_ADAPTERS = {
+    Sport.MLB: SportAdapter(Sport.MLB, predict_mlb_baseline, load_latest_mlb_artifact),
+    Sport.TENNIS: SportAdapter(Sport.TENNIS, predict_tennis_baseline, load_latest_tennis_artifact),
+}
+CONFIG_POLICY_DIR = PROJECT_ROOT / "config" / "policy"
 
 # Paso 0d (subfase de preparación): un único lock de archivo evita que dos
 # corridas de este script se solapen y escriban a la vez -- ver
@@ -82,6 +100,20 @@ def _steps_to_rows(steps: List[PipelineStepResult]) -> List[dict]:
             }
         )
     return rows
+
+
+def _print_decision_summary(summary: DecisionPipelineSummary) -> None:
+    print(f"\n=== Policy Engine / Opportunity Lifecycle: {summary.sport.value} ===")
+    print(f"  Registros evaluados:            {summary.records_evaluated}")
+    print(f"  Sin market_id (sin evaluar):     {summary.skipped_no_market_id}")
+    print(f"  Opportunities creadas:           {summary.opportunities_created}")
+    print(f"  Evaluaciones creadas:            {summary.evaluations_created}")
+    for signal_type, count in sorted(summary.signal_type_counts.items()):
+        print(f"  signal_type={signal_type}: {count}")
+    print(f"  Errores (aislados, no abortan):  {len(summary.skipped_errors)}")
+    for event_id, side, error in summary.skipped_errors[:5]:
+        print(f"    - {event_id} [{side}]: {error}")
+    print(f"  exchange_fee poblado inesperadamente: {summary.exchange_fee_populated_unexpectedly}")
 
 
 def _find_next_mlb_date_with_games() -> str:
@@ -168,6 +200,42 @@ def _run(args: argparse.Namespace) -> int:
         print(f"    completeness={r.data_quality.data_completeness_score}")
         print(f"    missing_fields ({len(r.data_quality.missing_fields)}): (omitido, ver DB/raw)")
         print(f"    match_warnings: {r.data_quality.match_warnings}")
+
+    # Fase 4, Paso 4.1: tercer bloque, orquestador captura -> Policy Engine
+    # -> OpportunityRepository (ORCHESTRATOR_SPEC.md §4.1). Opera sobre los
+    # NormalizedRecord ya en memoria de esta misma corrida -- sin volver a
+    # leer la base de datos. Reutiliza hist_repo (ya construido arriba) y
+    # abre OpportunityRepository sobre el mismo archivo que repo/hist_repo.
+    now = datetime.now(timezone.utc)
+    opp_repo = OpportunityRepository(db_path=repo.db_path)
+
+    mlb_manifest = load_policy_manifest(CONFIG_POLICY_DIR / "mlb_v1.json")
+    mlb_decision_summary = run_decision_pipeline(
+        records=mlb_result.records,
+        feature_inputs_list=mlb_result.feature_inputs_list,
+        feature_cutoffs=mlb_result.feature_cutoffs,
+        sport=Sport.MLB,
+        adapter=SPORT_ADAPTERS[Sport.MLB],
+        history_repository=hist_repo,
+        opportunity_repository=opp_repo,
+        policy_manifest=mlb_manifest,
+        now=now,
+    )
+    _print_decision_summary(mlb_decision_summary)
+
+    tennis_manifest = load_policy_manifest(CONFIG_POLICY_DIR / "tennis_v1.json")
+    tennis_decision_summary = run_decision_pipeline(
+        records=tennis_result.records,
+        feature_inputs_list=tennis_result.feature_inputs_list,
+        feature_cutoffs=tennis_result.feature_cutoffs,
+        sport=Sport.TENNIS,
+        adapter=SPORT_ADAPTERS[Sport.TENNIS],
+        history_repository=hist_repo,
+        opportunity_repository=opp_repo,
+        policy_manifest=tennis_manifest,
+        now=now,
+    )
+    _print_decision_summary(tennis_decision_summary)
 
     print("\n=== TABLA RESUMEN ===\n")
 
