@@ -87,7 +87,16 @@ Implementado el Paso 4.2.1 (auditoría de calidad de labels,
 `src/evaluation/label_quality_audit.py`, extiende
 `scripts/check_training_gates.py`) — ver §0.25. Sin anomalías reales
 encontradas en producción hoy (0 conflictos, 0 duplicados, 0 mismatches
-de sport). Sin avanzar a Paso 4.3, a la espera de aprobación explícita.**
+de sport).** **Actualizado de nuevo: 2026-08-01 — Implementado el Paso
+4.3: PRIMER MODELO REAL DEL PROYECTO entrenado y en producción
+(`tennis_baseline_logreg_v1_20260801T184245Z`, `data/models/` ya no
+vacío) — ver §0.26. Autoauditoría previa encontró y corrigió una fuga
+de datos real en `split_dataset_temporally` (120/120 eventos de tenis
+se solapaban entre train/validation antes del fix, verificado contra
+producción) y un falso positivo en `GATE-0[mlb_elo]` del Paso 4.2.
+Orquestador confirmado usando `p_model_yes` real por primera vez
+(verificado por SQL); `ENTER` sigue sin aparecer (D-3). Sin avanzar a
+ningún paso posterior, a la espera de aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2235,6 +2244,164 @@ ya se cumple hoy para el baseline Elo de MLB y el clasificador de tenis,
 pero eso por sí solo no autoriza entrenar — el Paso 4.3 requeriría su
 propio diseño y aprobación explícita, evaluando también si conviene
 esperar a que el clasificador principal de MLB (N=300) se acerque más.
+
+## 0.26 Fase 4 — Paso 4.3: primer modelo real entrenado (tenis) + corrección de fuga de datos (2026-08-01)
+
+### Contexto y autorización
+
+El usuario aprobó el diseño del Paso 4.3 (`MODEL_TRAINING_SPEC.md`) y
+pidió una autoauditoría adicional antes de implementar, contra 4
+requisitos explícitos (partición sin data leakage, artefacto
+versionado con campos mínimos, estructura preparada para calibración
+futura, métricas suficientes para comparar versiones) — ver
+`MODEL_TRAINING_SPEC.md` §0.5 y el commit `f2d87ad` para el detalle
+completo de la autoauditoría. Autorizó implementación completa con la
+misma disciplina de siempre, y confirmó explícitamente (pregunta
+separada, Regla 6) ejecutar el entrenamiento real contra
+`data/engine.db` de producción como parte de este mismo paso.
+
+### Hallazgo real de la autoauditoría — fuga de datos en `split_dataset_temporally`
+
+**Verificado contra producción, no hipotético**: `split_dataset_temporally`
+(`mlb_baseline.py`/`tennis_baseline.py`, código duplicado idéntico)
+particionaba por MUESTRA individual, no por `event_id` — un mismo
+evento con varias `feature_snapshots` (captura horaria real) podía
+tener muestras en `train` Y en `validation` simultáneamente. Antes de
+la corrección: **120 de 120 `event_id` distintos del dataset real de
+tenis aparecían en ambas particiones** — la validación reportada nunca
+midió generalización a eventos nuevos. Ningún test lo detectó porque
+los 2 únicos tests que ejercitan la función usan 1 muestra por evento
+(partición por muestra y por evento son indistinguibles en ese caso).
+
+**Corregido** en ambos archivos (MLB también, aunque no se entrena en
+este paso, por consistencia): partición por `event_id` agrupado (cada
+evento representado por su `data_cutoff_timestamp` mínimo). Verificado
+tras la corrección, contra los mismos datos reales: **0 de 96/24
+eventos train/validation se solapan**. Comportamiento preservado
+exactamente para 1 muestra/evento — los 44 tests ya existentes de
+ambos archivos pasaron sin modificar ninguna aserción.
+
+### Implementado
+
+- **`split_dataset_temporally`** (ambos archivos) — corrección de
+  comportamiento, no aditiva pura (única de las enmiendas de este paso
+  que cambia el resultado para datos con >1 muestra/evento).
+- **`TennisTrainedArtifact`** — 9 campos nuevos:
+  `artifact_sha256` (hash real del `.joblib`, mismo principio que
+  `PolicyManifest.manifest_hash`), `calibration_version`/
+  `calibration_method` (permanecen `None` — ningún `Calibrator` real
+  existe), `ece`/`reliability_diagram` (poblados, reutilizan
+  literalmente `src.backtesting.metrics.ece`/`calibration_curve`, Fase
+  3 Paso 3.8), `precision`/`recall`/`f1` (poblados, `sklearn`),
+  `n_train_events`/`n_validation_events` (transparencia del split
+  corregido).
+- **`scripts/train_tennis_model.py`** (nuevo) — mismo patrón exacto que
+  `scripts/train_mlb_model.py` (Fase 2), primer script de entrenamiento
+  de tenis del proyecto.
+- **`src/evaluation/gate_report.py`** — parámetro opcional
+  `eligible_count_fn` por umbral, corrige el falso positivo de
+  `GATE-0[mlb_elo]` (ver siguiente sección).
+
+### Hallazgo adicional — `GATE-0[mlb_elo]` del Paso 4.2 era un falso positivo
+
+Verificado en vivo antes de tocar código: `build_mlb_elo_game_sequence(hist).size
+== 41`, no ≥50 — pero `check_training_gates.py` (Paso 4.2) reportaba
+`CUMPLIDO` porque comparaba conteos crudos de `feature_snapshots`/
+`event_results` (ambos ≥50 individualmente), no la elegibilidad real de
+Elo (que no usa `feature_snapshots` en absoluto). Corregido con
+`eligible_count_fn={"mlb_elo": lambda h: build_mlb_elo_game_sequence(h).size}`
+— retrocompatible, `mlb_classifier`/`tennis_classifier` sin cambios
+(verificado por test explícito de no-ruptura). Confirmado tras la
+corrección, corrida real: `GATE-0[mlb_elo]: no cumplido` (antes decía
+`CUMPLIDO` incorrectamente).
+
+### Pruebas
+
+- Regresión de fuga de datos (ambos archivos): dataset sintético con
+  múltiples muestras por evento, confirma 0 solapamiento tras el fix.
+- 9 campos nuevos del artefacto: valores dentro de rango, coinciden
+  exactamente con llamar `sklearn`/`src.backtesting.metrics`
+  directamente sobre la misma validación (no una reimplementación),
+  `calibration_version`/`calibration_method` siempre `None`,
+  `artifact_sha256` coincide con el hash real del archivo.
+- `eligible_count_fn`: override correcto por umbral nombrado, omitir el
+  parámetro preserva el comportamiento exacto anterior.
+- `scripts/train_tennis_model.py`: mismo patrón de test que
+  `train_mlb_model.py` (`INSUFFICIENT_HISTORY` honesto, entrenamiento
+  real aislado en `tmp_path`).
+- `tests/integration/test_e2e_real.py`: 1 nuevo, mismo patrón ya
+  establecido (API real, `tmp_path` exclusivamente) — confirma
+  `train_tennis_baseline_model` honesto (`INSUFFICIENT_HISTORY`) contra
+  volumen real de un solo partido capturado en el test.
+- Suite completa: 978 (cierre de §0.25) + 3 + 2 + 2 + 1 = **986 passed,
+  0 failed**.
+
+### Evidencia verificable (entrenamiento real ejecutado contra `data/engine.db` de producción)
+
+`python scripts/train_tennis_model.py`:
+- **Primer modelo real del proyecto**: `model_status=TRAINED`,
+  `model_version=tennis_baseline_logreg_v1_20260801T184245Z`, 600
+  muestras (480 train / 96 eventos, 120 validation / 24 eventos).
+- Métricas de validación: `accuracy=0.867`, `precision=0.789`,
+  `recall=1.0`, `f1=0.882`, `log_loss=0.334`, `brier_score=0.103`,
+  `ece=0.068` (modelo crudo ya razonablemente calibrado, sin necesidad
+  aparente urgente de calibración — evidencia real para la decisión
+  futura de §10 del diseño). `calibration_version`/`calibration_method`
+  confirmados `null` en el JSON de metadata. `artifact_sha256` presente
+  (64 caracteres hex).
+- **Aviso honesto, no oculto**: `sklearn` emitió `RuntimeWarning`
+  (`divide by zero`/`overflow`/`invalid value encountered in matmul`)
+  durante el ajuste de `LogisticRegression` — comportamiento ya
+  existente del algoritmo de Fase 2 (no introducido por este paso,
+  `class_weight="balanced"` sobre un dataset pequeño con posible
+  cuasi-separación perfecta en alguna categoría de ronda). No bloquea
+  `TRAINED` ni invalida las métricas, pero se registra aquí para que
+  quede visible, no silenciado.
+- `python scripts/check_training_gates.py` re-ejecutado:
+  `GATE-0[mlb_elo]: no cumplido` (corregido), `mlb_classifier`/
+  `tennis_classifier` sin cambios respecto a §0.25/§0.24.
+- **Orquestador confirmado recogiendo el modelo real**, verificado por
+  SQL directo tras una corrida manual (`run_e2e.py --mode sample`):
+  6 nuevas `opportunity_evaluations` con
+  `model_version=tennis_baseline_logreg_v1_20260801T184245Z`,
+  `calibration_version` todavía `NULL` (honesto), `signal_inputs.model_status=TRAINED`,
+  `p_model` con valores reales (`0.263`, `0.002`, ...) por primera vez
+  en el proyecto -- `edge` también real, `signal_type=WATCH` en el
+  100%, **`ENTER` sigue sin aparecer nunca** (D-3 sigue bloqueando
+  independientemente, confirmado, no solo asumido).
+- `git status`/`git diff --stat` limpios salvo los 10 archivos
+  declarados (8 modificados, 2 nuevos) — `data/models/*.joblib`/
+  `*.metadata.json` gitignored, no aparecen en el diff (mismo patrón ya
+  establecido que `data/engine.db`).
+
+### Auditoría final
+
+- Ningún cambio de comportamiento fuera de lo declarado — la única
+  enmienda no puramente aditiva (`split_dataset_temporally`) está
+  señalada explícitamente y verificada retrocompatible para el caso ya
+  cubierto por tests.
+- Criterio de aceptación del Paso 4.3 (`MODEL_TRAINING_SPEC.md` §12):
+  **cumplido** en su totalidad — script existe, split corregido y
+  verificado sin solapamiento, 9 campos nuevos calculados y
+  persistidos correctamente, `GATE-0[mlb_elo]` corregido, entrenamiento
+  real ejecutado con confirmación explícita separada, artefacto
+  inspeccionado, recogida real por el orquestador verificada por SQL,
+  `ENTER` sigue ausente, suite en verde.
+- `data/models/` ya no está vacío por primera vez en el proyecto —
+  contiene el primer artefacto real, gitignored (no versionado, mismo
+  tratamiento que `data/engine.db`).
+
+### Estado para continuar
+
+**Paso 4.3 cerrado y verificado.** Por instrucción explícita del
+usuario, **no se avanza a ningún paso posterior** sin nueva aprobación
+— este informe se presenta primero. Próximo paso futuro, explícitamente
+sin diseñar todavía (`MODEL_TRAINING_SPEC.md` §10): calibración real
+(Platt/isotónica) de este modelo, una vez se decida sobre qué partición
+ajustarla y con qué umbral mínimo — ninguno definido hoy en ningún
+documento aprobado. MLB (clasificador y Elo) siguen sin alcanzar sus
+umbrales — este paso no adelantó ningún trabajo de MLB sin datos reales
+suficientes.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
