@@ -68,8 +68,11 @@ por el usuario (ver §0.20 y [`FASE3_CIERRE_FINAL.md`](FASE3_CIERRE_FINAL.md)).*
 [`FASE4_EXECUTION_PLAN.md`](FASE4_EXECUTION_PLAN.md) (borrador, Revisión
 2 con Coverage Gate + auditoría de calidad de labels). Aprobados D-4A,
 D-4B y el alcance de §4/§5; implementado el Paso 4.0A (backfill puntual
-de `event_results`, D-4A resuelta) — ver §0.21. Sin avanzar a Paso 4.0B
-ni 4.1, a la espera de aprobación explícita.**
+de `event_results`, D-4A resuelta) — ver §0.21.** **Actualizado de
+nuevo: 2026-08-01 — Implementado el Paso 4.0B (sincronización continua
+de `event_results` vía nuevo `scripts/sync_results.py` + LaunchAgent
+`local.prediction-market-engine.sync-results`, D-4B resuelta) — ver
+§0.22. Sin avanzar a Paso 4.1, a la espera de aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1658,6 +1661,130 @@ explicación.
 usuario, **no se avanza a Paso 4.0B ni a Paso 4.1** sin nueva
 aprobación — este informe se presenta primero, a la espera de esa
 aprobación.
+
+## 0.22 Fase 4 — Paso 4.0B: Resolución de D-4B, sincronización continua de `event_results` (2026-08-01)
+
+### Contexto y autorización
+
+El usuario aprobó el informe final del Paso 4.0A y autorizó comenzar el
+Paso 4.0B con la misma disciplina (diseño → implementación → tests →
+auditoría final → evidencia verificable), instrucción explícita de no
+avanzar a Paso 4.1 sin nueva aprobación.
+
+### Diseño
+
+Nuevo script `scripts/sync_results.py`, combinando
+`sync_mlb_event_results`/`sync_tennis_event_results`
+(`src/pipelines/mlb_results_sync.py`/`tennis_results_sync.py`, Fase 2,
+**cero cambios**) en una sola invocación diaria — mismo patrón que
+`scripts/data_maintenance.py`: función de orquestación inyectable
+(`run_results_sync(hist, mlb, espn, today=None, ...)`, mismo estilo que
+`run_maintenance()`) envuelta por un `main()` fino con lock de instancia
+única propio (`data/.sync-results.lock`, vía `scripts/pipeline_lock.py`
+ya existente, sin modificar). `--lookback-days=3` por defecto para ambos
+deportes — el mismo umbral ya usado y testeado en
+`sync_mlb_results.py`/`sync_tennis_results.py` desde Fase 2, no uno
+nuevo inventado para este paso. Tenis solo sincroniza ATP (confirmado en
+Paso 4.0A: `run_e2e.py --tour` default `atp`, sin flag en el `.plist` de
+captura — WTA nunca se captura, sincronizarla no tendría ningún
+`feature_snapshot` con el que emparejarse).
+
+Nuevo LaunchAgent `local.prediction-market-engine.sync-results`
+(`scripts/launchd/*.plist`, versionado): `StartCalendarInterval` diaria
+03:30 local (30 min después de `data-maintenance`, separación operativa
+limpia — no estrictamente necesaria para la concurrencia, ya garantizada
+por locks independientes y el `timeout=30.0` de
+`HistoryRepository._connect`, pero evita que dos jobs diarios toquen
+`data/engine.db` en el mismo instante exacto). `RunAtLoad=false`, mismo
+motivo que los otros dos LaunchAgents.
+
+### Implementación
+
+- `scripts/sync_results.py` (nuevo).
+- `tests/unit/test_sync_results.py` (nuevo, 5 tests) — mismo patrón de
+  `monkeypatch`/`tmp_path` que `test_mlb_results_sync.py`/
+  `test_tennis_results_sync.py`, sin re-testear la lógica de mapeo de
+  resultados (ya cubierta ahí): combinación de ambos deportes en un solo
+  resumen, tour por defecto ATP, idempotencia en una segunda llamada,
+  un error de fetch de un deporte no bloquea al otro,
+  `lookback_days` independiente por deporte.
+- `scripts/launchd/local.prediction-market-engine.sync-results.plist`
+  (nuevo, validado con `plutil -lint` → OK).
+- `.gitignore`: añadida `data/.sync-results.lock` (mismo patrón que las
+  otras dos entradas de lock ya existentes).
+
+Cero archivos de Fase 1/2/3 modificados.
+
+### Pruebas
+
+5 tests nuevos, todos en verde. Suite completa: 927 + 5 = **932 passed,
+0 failed** (re-ejecutada dos veces, antes y después de cargar el
+LaunchAgent, sin regresión en ningún momento).
+
+### Evidencia verificable (más allá de los tests unitarios)
+
+- **Dry-run manual** (`python scripts/sync_results.py`, sin `launchctl`)
+  contra `data/engine.db` real: idempotente (0 registros nuevos —
+  `event_results` se mantuvo en 295, todo ya sincronizado por el Paso
+  4.0A), exit 0.
+- **Contención de lock real, no solo mockeada**: proceso en segundo
+  plano sosteniendo `data/.sync-results.lock` durante 5s, corrida
+  concurrente de `sync_results.py` → `LockAcquisitionError` capturado
+  correctamente, **exit code 75** (`EXIT_ALREADY_RUNNING`, mismo
+  convenio que `run_e2e.py`/`data_maintenance.py`).
+- **`git status`/`git diff --stat`**: limpios salvo los 4 archivos
+  declarados (`sync_results.py`, `test_sync_results.py`, el `.plist`,
+  `.gitignore`) — nada fuera de alcance.
+
+### Carga del LaunchAgent (D-4B, confirmación explícita separada obtenida antes de ejecutar, Regla 6)
+
+Antes de tocar `launchctl`, se reportó explícitamente que cargar un
+LaunchAgent nuevo es una acción operativa de otra clase de riesgo que
+implementar código, aunque D-4B ya estuviera aprobada en términos
+generales — se pidió confirmación específica, el usuario respondió "Sí,
+cargar y probar ahora".
+
+- `.plist` copiado a `~/Library/LaunchAgents/`, `plutil -lint` → OK.
+- `launchctl bootstrap gui/501 ...` → exit 0. `launchctl list` mostró
+  `LastExitStatus=0` **antes** de cualquier ejecución real —
+  verificado explícitamente que era solo el valor por defecto:
+  `logs/sync_results.std{out,err}.log` no existían todavía en ese
+  momento (`RunAtLoad=false`, diseño deliberado, ningún efecto
+  secundario solo por cargar).
+- `launchctl kickstart -k gui/501/local.prediction-market-engine.sync-results`
+  → exit 0, forzó una ejecución real inmediata (sin esperar al
+  calendario de las 03:30). Verificado tras la corrida:
+  `logs/sync_results.stdout.log` con el resumen esperado (0 nuevos, 25
+  MLB / 360 tenis ya registrados — coincide exactamente con lo esperado
+  dado el estado ya sincronizado), `stderr.log` solo con el warning
+  benigno ya conocido de `urllib3`/LibreSSL, `launchctl list` con
+  `LastExitStatus=0` correspondiente a esta ejecución real (timestamp
+  del log coincide con el momento del `kickstart`, no con el dry-run
+  manual anterior), `event_results` sin cambios (295, idempotente).
+
+### Auditoría final
+
+- Ningún archivo de `src/` tocado — confirmado por `git diff --stat`.
+- Criterio de aceptación del Paso 4.0B (`FASE4_EXECUTION_PLAN.md` §6):
+  **cumplido** — LaunchAgent cargado, `LastExitStatus=0` tras al menos
+  una ejecución real verificada, sin coincidir en horario con
+  `run-e2e-historical` (lock independiente, cadencia diaria vs. horaria).
+- D-4B queda **resuelta**. GATE-0, Coverage Gate y la auditoría de
+  calidad de labels **siguen sin ejecutar** — este paso no los toca, por
+  diseño explícito del alcance aprobado.
+- Tres LaunchAgents activos de forma permanente en la máquina:
+  `run-e2e-historical` (horaria), `data-maintenance` (diaria 03:00),
+  `sync-results` (diaria 03:30, nuevo).
+
+### Estado para continuar
+
+**Paso 4.0B cerrado y verificado. D-4A y D-4B quedan ambas resueltas.**
+Por instrucción explícita del usuario, **no se avanza a Paso 4.1** sin
+nueva aprobación — este informe se presenta primero, a la espera de esa
+aprobación. Próximo paso pendiente de autorización: Paso 4.1
+(orquestador captura → Policy Engine → `OpportunityRepository`), con su
+pregunta de diseño abierta ya señalada en `FASE4_EXECUTION_PLAN.md`
+(dónde vive el orquestador).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
