@@ -170,19 +170,91 @@ cerrado) recibe una adición — señalado explícitamente, no oculto, y es
 estrictamente aditivo (nuevo bloque de código al final de `_run()`,
 cero líneas existentes modificadas salvo las dos enmiendas de §8).
 
-### 2.3 Diagrama de dependencias
+### 2.3 Extensibilidad — `SportAdapter` (añadido tras aprobación del usuario, 2026-08-01)
+
+**Requisito añadido explícitamente por el usuario al aprobar este
+diseño**: el núcleo del orquestador debe permitir incorporar deportes
+futuros mediante nuevos pipelines/adaptadores, sin modificar
+`src/orchestration/decision_pipeline.py`.
+
+Barrido completo de `src/` (`grep -rln "Sport\.MLB\|Sport\.TENNIS"`)
+confirma que **todo** lo que el orquestador invoca aguas abajo de
+`predict_fn` ya es genérico por deporte — `market_pricing.py`,
+`edge.py`, `expected_value.py`, `quality_score.py`,
+`calibration_layer.py`, `payoff_model.py`, `evidence_engine.py`,
+`analysis_health.py` y el propio `decide()` operan únicamente sobre
+`NormalizedRecord`/`PModelOutput`/`Sport` (el enum, como dato, nunca
+como rama de código) — el único lugar del *Policy Engine* que sí
+branchea por deporte es la regla `unconfirmed_pitcher`
+(`hard_rules.py:341`, `record.sport == Sport.MLB`), y esa rama vive
+dentro de `hard_rules.py` (Fase 3, sin tocar) y además solo se activa
+si el `PolicyManifest` de ese deporte la incluye en
+`hard_hold_rules` — el orquestador no necesita saber que existe.
+
+Las **únicas** dos piezas realmente específicas por deporte, ya
+identificadas en el flujo (§4.2, pasos 1 y sus dependencias), son
+`predict_fn`/`load_artifact_fn` — y ambas firmas ya coinciden
+estructuralmente entre MLB y tenis:
+
+```python
+predict_mlb_baseline(record, inputs: MlbFeatureInputs, data_cutoff_timestamp, loaded_artifact) -> PModelOutput
+predict_tennis_baseline(record, inputs: TennisFeatureInputs, data_cutoff_timestamp, loaded_artifact) -> PModelOutput
+load_latest_mlb_artifact(models_dir=DATA_MODELS_DIR) -> Optional[Tuple[Any, MlbTrainedArtifact]]
+load_latest_tennis_artifact(models_dir=DATA_MODELS_DIR) -> Optional[Tuple[Any, TennisTrainedArtifact]]
+```
+
+Se formaliza esto en un tipo nuevo, `SportAdapter`
+(`src/orchestration/sport_adapter.py`), en vez de pasar
+`predict_fn`/`load_artifact_fn` como parámetros sueltos:
+
+```python
+@dataclass(frozen=True)
+class SportAdapter:
+    sport: Sport
+    predict_fn: Callable[[NormalizedRecord, Any, datetime, Optional[Tuple[Any, Any]]], PModelOutput]
+    load_artifact_fn: Callable[[], Optional[Tuple[Any, Any]]]
+```
+
+`decision_pipeline.py` nunca importa `mlb_baseline`/`tennis_baseline`/
+`registry` directamente — solo recibe un `SportAdapter` ya construido.
+`run_e2e.py` (la capa de composición, ya conoce ambos deportes) arma
+un registro:
+
+```python
+SPORT_ADAPTERS: Dict[Sport, SportAdapter] = {
+    Sport.MLB: SportAdapter(Sport.MLB, predict_mlb_baseline, load_latest_mlb_artifact),
+    Sport.TENNIS: SportAdapter(Sport.TENNIS, predict_tennis_baseline, load_latest_tennis_artifact),
+}
+```
+
+**Incorporar un tercer deporte en el futuro** requiere, exclusivamente:
+(1) su propio pipeline de captura (ya el patrón establecido en Fase
+1/2, fuera del alcance del orquestador); (2) su propia
+`predict_<deporte>_baseline`/`load_latest_<deporte>_artifact`; (3) un
+`SportAdapter(...)` nuevo registrado en `SPORT_ADAPTERS`; (4) su propio
+`config/policy/<deporte>_v1.json`. **Cero líneas de
+`decision_pipeline.py`, `signal_builder.py` o
+`confidence_profile_builder.py` cambian** — verificado por el test de
+arquitectura de §11 (ningún import de `mlb_baseline`/`tennis_baseline`
+dentro de `src/orchestration/`, salvo en el propio registro de
+`run_e2e.py`, que es composición, no núcleo).
+
+### 2.4 Diagrama de dependencias
 
 ```
 scripts/run_e2e.py  (composición, ya existe)
         |
+        +--> src/models/{mlb_baseline,tennis_baseline,registry}.py (Fase 2, sin cambios)
+        |     -- construye SPORT_ADAPTERS: Dict[Sport, SportAdapter], §2.3
+        |
         | (nuevo, tercer bloque en _run())
         v
-src/orchestration/decision_pipeline.py  (nuevo)
+src/orchestration/decision_pipeline.py  (nuevo, recibe un SportAdapter ya construido -- nunca importa mlb_baseline/tennis_baseline directamente)
         |
         +--> src/orchestration/signal_builder.py            (nuevo)
         +--> src/orchestration/confidence_profile_builder.py (nuevo)
+        +--> src/orchestration/sport_adapter.py               (nuevo, tipo SportAdapter -- §2.3)
         |
-        +--> src/models/{mlb_baseline,tennis_baseline,registry}.py   (Fase 2, sin cambios)
         +--> src/pricing/market_pricing.py                            (Fase 2, sin cambios)
         +--> src/signals/{edge,expected_value}.py                     (Fase 2, sin cambios)
         +--> src/uncertainty/quality_score.py                         (Fase 2, sin cambios)
