@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import PROJECT_ROOT
 from scripts.pipeline_lock import LockAcquisitionError, single_instance_lock
-from src.calibration.tennis_calibrator_training import load_latest_tennis_calibrator
 from src.models.mlb_baseline import predict_mlb_baseline
 from src.models.registry import load_latest_mlb_artifact
 from src.models.schemas import Sport
@@ -46,17 +45,18 @@ from src.storage.repository import Repository
 # incorporar un deporte nuevo requiere únicamente añadir su propio
 # SportAdapter aquí, cero cambios en src/orchestration/decision_pipeline.py
 # (ORCHESTRATOR_SPEC.md §2.3).
-# `load_calibrator_fn` (calibración real, CALIBRATION_SPEC.md §4.3): solo
-# tenis tiene hoy la posibilidad de un calibrador real; `load_latest_tennis_calibrator`
-# devuelve `None` si no existe ningún artefacto de calibrador emparejado
-# con el `model_version` cargado -- inerte hasta que
-# `scripts/train_tennis_calibrator.py` produzca uno real. MLB queda sin
-# `load_calibrator_fn` (default `None`), cero cambio de comportamiento.
+# `load_calibrator_fn` (calibración real, CALIBRATION_SPEC.md §4.3/§6):
+# NO cableado hoy -- el primer calibrador real entrenado
+# (tennis_calibrator_platt_v1_20260801T202949Z) no cumplió el criterio
+# de aceptación (calibrated_ece_oof=0.137 > raw_ece=0.068, evidencia
+# real contra data/engine.db, ver CONTINUITY.md) -- calibrar empeora el
+# modelo con el volumen de datos actual. La infraestructura
+# (SportAdapter.load_calibrator_fn, load_latest_tennis_calibrator)
+# queda lista y probada para cuando exista evidencia que sí lo
+# justifique -- no se activa mientras la propia evidencia lo contradiga.
 SPORT_ADAPTERS = {
     Sport.MLB: SportAdapter(Sport.MLB, predict_mlb_baseline, load_latest_mlb_artifact),
-    Sport.TENNIS: SportAdapter(
-        Sport.TENNIS, predict_tennis_baseline, load_latest_tennis_artifact, load_latest_tennis_calibrator
-    ),
+    Sport.TENNIS: SportAdapter(Sport.TENNIS, predict_tennis_baseline, load_latest_tennis_artifact),
 }
 CONFIG_POLICY_DIR = PROJECT_ROOT / "config" / "policy"
 
