@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.connectors.kalshi import KalshiConnector
 from src.matching.market_matcher import apply_kalshi_match, find_best_kalshi_event
 from src.models.schemas import MatchMethod, NormalizedRecord, Sport
@@ -97,6 +99,63 @@ def test_apply_kalshi_match_flags_unexpected_kalshi_schema(kalshi_atp_events_sam
     apply_kalshi_match(record, match, missing)
 
     assert any("cambio de schema" in e and "yes_ask_dollars" in e for e in record.data_quality.validation_errors)
+
+
+# --- Resolución de D-2 (Fase 3, ver CONTINUITY.md): la confianza de
+# selección de lado YES, antes calculada y descartada dentro de
+# _select_market, ahora se expone en KalshiEventMatch.market_selection_confidence
+# y se persiste en DataQuality.side_selection_confidence. Extensión
+# aditiva -- ningún test de arriba se modificó.
+
+
+def test_find_best_kalshi_event_exposes_market_selection_confidence(kalshi_atp_events_sample):
+    events = KalshiConnector.extract_events(kalshi_atp_events_sample)
+    start = datetime(2026, 7, 21, 12, 30, tzinfo=timezone.utc)
+    result = find_best_kalshi_event(
+        "Daniel Merida", "Kyrian Jacquet", start, events, tolerance_minutes=240
+    )
+    assert result.market_selection_confidence is not None
+    assert 0.0 <= result.market_selection_confidence <= 1.0
+    # nombre exacto (mismo texto que yes_sub_title) -> similitud máxima
+    assert result.market_selection_confidence == pytest.approx(1.0)
+
+
+def test_apply_kalshi_match_confident_populates_side_selection_confidence(kalshi_atp_events_sample):
+    events = KalshiConnector.extract_events(kalshi_atp_events_sample)
+    start = datetime(2026, 7, 21, 12, 30, tzinfo=timezone.utc)
+    match = find_best_kalshi_event("Daniel Merida", "Kyrian Jacquet", start, events, tolerance_minutes=240)
+
+    record = NormalizedRecord(sport=Sport.TENNIS, event_id="e4")
+    apply_kalshi_match(record, match, [])
+
+    assert record.data_quality.side_selection_confidence == pytest.approx(1.0)
+
+
+def test_apply_kalshi_match_needs_review_leaves_side_selection_confidence_none(kalshi_atp_events_sample):
+    """Cuando el match de EVENTO no es confidente, no se adjunta ningún
+    dato de mercado (regla ya existente) -- side_selection_confidence
+    tampoco se puebla, coherente con que ningún otro campo dependiente
+    del mercado se puebla en ese caso."""
+    events = KalshiConnector.extract_events(kalshi_atp_events_sample)
+    far_off_time = datetime(2026, 7, 21, 12, 30, tzinfo=timezone.utc) + timedelta(days=30)
+    match = find_best_kalshi_event(
+        "Unrelated Player One", "Unrelated Player Two", far_off_time, events, tolerance_minutes=240
+    )
+
+    record = NormalizedRecord(sport=Sport.TENNIS, event_id="e5")
+    apply_kalshi_match(record, match, [])
+
+    assert record.data_quality.side_selection_confidence is None
+
+
+def test_market_selection_confidence_none_when_participant_a_missing(kalshi_atp_events_sample):
+    """participant_a ausente -> _select_market toma markets[0] a ciegas,
+    sin comparar nada -- no hay una puntuación real que reportar."""
+    events = KalshiConnector.extract_events(kalshi_atp_events_sample)
+    start = datetime(2026, 7, 21, 12, 30, tzinfo=timezone.utc)
+    result = find_best_kalshi_event(None, "Kyrian Jacquet", start, events, tolerance_minutes=240)
+    if result.selected_market is not None:
+        assert result.market_selection_confidence is None
 
 
 def test_find_best_kalshi_event_skips_malformed_candidate_without_crashing(kalshi_atp_events_sample):

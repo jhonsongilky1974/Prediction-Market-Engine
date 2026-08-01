@@ -67,14 +67,17 @@ control de flujo verificado por contrato (`PolicyDecision` con
 | `temporarily_stale_data` | `AnalysisHealth.staleness_seconds` por encima de un umbral | `health/analysis_health.py` (nuevo) |
 | `temporarily_insufficient_liquidity` | `market.volume`/`open_interest` por debajo de un mínimo operable (distinto del componente informativo de `quality_score.py`) | `NormalizedRecord.market` |
 | `recoverable_missing_information` | Campos no-críticos de `CORE_FIELDS` ausentes pero no bloqueantes | `DataQuality.missing_fields` |
-| `unresolved_side_mapping` **[añadido en esta auditoría]** | Siempre `triggered=True` mientras la Ambigüedad #2 de Fase 2 (mapeo participante↔YES de un contrato Kalshi concreto) no esté resuelta — ver `PLAN_MASTER_FASE3.md` §5, Hallazgo #2 y DECISIÓN PENDIENTE D-2 | Constante de configuración, no derivada del registro individual — aplica a todo `Opportunity` de MLB/Tenis hasta que D-2 se resuelva |
+| `unresolved_side_mapping` **[RESUELTA post-cierre del roadmap, ver `CONTINUITY.md` §0.17]** | `DataQuality.side_selection_confidence` es `None` o está por debajo de `EVENT_NAME_MATCH_MIN_CONFIDENCE` | `DataQuality.side_selection_confidence` (Fase 1, `src/matching/market_matcher.py::_select_market`, campo aditivo nuevo en `DataQuality` que expone la confianza — ya calculada en Fase 1, antes descartada — de que el `market_id` seleccionado corresponde al lado YES de `participant_a`) |
 
-**Consecuencia directa de `unresolved_side_mapping`:** con el catálogo de
-arriba, ninguna `Opportunity` puede alcanzar `ENTER` hasta que D-2 se
-resuelva explícitamente — el sistema queda, por diseño, en el estado más
-conservador posible (nunca `WATCH` se degrada a `ENTER` por accidente).
-Esto es intencional y debe declararse así en cualquier ejecución real
-antes de que D-2 se resuelva.
+**Consecuencia de `unresolved_side_mapping` (actualizada tras la
+resolución de D-2):** ya no es una constante — dispara por registro
+individual, según la confianza real de la selección de lado hecha en
+Fase 1. Un registro con `side_selection_confidence` alta (mercado
+seleccionado con alta similitud de nombre contra `participant_a`) ya NO
+bloquea por esta regla; uno sin esa confianza (o sin ella calculada)
+sigue quedando en `WATCH` como antes. El sistema conserva su postura
+conservadora por defecto (ausencia de evidencia ⟹ `WATCH`), pero ya no
+es incondicional.
 
 Todo `rule_id` fuera de estas dos listas es rechazado por
 `policy/validation.py` (Corrección H) al cargar un `PolicyManifest`

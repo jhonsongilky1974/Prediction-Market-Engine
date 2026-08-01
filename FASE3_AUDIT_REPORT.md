@@ -174,12 +174,15 @@ puntos 1 y 2). Conclusión: **CONDITIONAL GO** — ver §15.
   producción**: mitigado por Policy Validation obligatoria antes de
   cualquier uso (`POLICY_ENGINE_SPEC.md` §5), incluida validación
   cross-field contra el catálogo cerrado de `rule_id`/`component_name`.
-- **Riesgo de "bloqueo permanente disfrazado de temporal"**: el Hard Hold
-  `unresolved_side_mapping` nunca se resuelve automáticamente — es
-  responsabilidad explícita de DECISIÓN PENDIENTE D-2. Riesgo aceptado y
-  documentado, no oculto: mientras D-2 no se resuelva, el sistema no
-  puede producir un `ENTER` real, lo cual es la postura correcta dado el
-  Principio 2 (prioridad conservadora), no un defecto del diseño.
+- **Riesgo de "bloqueo permanente disfrazado de temporal"**: mitigado.
+  **Actualización post-cierre del roadmap** (ver `CONTINUITY.md` §0.17):
+  D-2 se resolvió — Fase 1 ya calculaba la confianza del mapeo
+  participante↔YES (`_select_market`) y solo la descartaba; ahora se
+  expone (`DataQuality.side_selection_confidence`) y
+  `unresolved_side_mapping` la consume en vez de disparar como
+  constante. El riesgo que este párrafo describía (un bloqueo que nunca
+  podría levantarse) no se materializó — la resolución fue encontrar una
+  señal que ya existía, no inventar una nueva.
 
 ---
 
@@ -248,15 +251,17 @@ dependen de D-1/D-2/D-3 (§13).
 | Cod. | Decisión | Bloquea |
 |---|---|---|
 | D-1 | Reactivar LaunchAgent de captura histórica | Historical backtesting real, Shadow Mode real, calibración real, recalibración de `HEURISTIC_V1`/umbrales |
-| D-2 | Resolver mapeo participante↔YES de un contrato Kalshi específico | `ENTER` real (el Hard Hold `unresolved_side_mapping` permanece activo indefinidamente sin esto) |
+| ~~D-2~~ | **RESUELTA post-cierre del roadmap** (ver `CONTINUITY.md` §0.17) — el mapeo participante↔YES ya existía desde Fase 1; se expuso su confianza (`DataQuality.side_selection_confidence`) y `unresolved_side_mapping` ahora la consume en vez de disparar como constante | Ya no bloquea `ENTER` de forma incondicional — bloquea solo por registro cuando la confianza de selección de lado es baja o ausente |
 | D-3 | Fórmula de incorporación de `exchange_fee`/spread/slippage reales | `net_ev_status=COMPUTED` en producción (el mínimo crítico `ev_neto_strength` permanece imposible de cumplir sin esto) |
 
-Ninguna de las tres se resuelve, asume, ni se decide unilateralmente en
-esta auditoría — quedan explícitamente abiertas, tal como exige la
-restricción "no declares GO si existen decisiones contractuales sin
-resolver" (interpretada aquí como: la especificación arquitectónica
-completa sí puede declararse GO; la puesta en producción de las etapas
-que dependen de D-1/D-2/D-3 no puede).
+D-2 se resolvió después del cierre original de esta auditoría, siguiendo
+el mismo criterio metodológico (hallazgo → alternativas → aprobación
+explícita → implementación → auditoría). D-1 y D-3 se mantienen
+explícitamente abiertas — no se resuelven, asumen, ni deciden
+unilateralmente aquí, tal como exige la restricción "no declares GO si
+existen decisiones contractuales sin resolver" (interpretada aquí como:
+la especificación arquitectónica completa sí puede declararse GO; la
+puesta en producción de las etapas que dependen de D-1/D-3 no puede).
 
 ---
 
@@ -270,6 +275,14 @@ desde `explainability/`/`opportunity/`, que son terminales del grafo).
 ---
 
 ## 15. Implementation Readiness Assessment — Conclusión
+
+**Actualización post-cierre del roadmap (ver `CONTINUITY.md` §0.17):
+D-2 se resolvió.** El texto original de esta sección (conservado sin
+reescribir, como todo el historial de este documento) se apoyaba en 3
+decisiones pendientes; ahora son 2 (D-1, D-3). La conclusión sigue
+siendo **CONDITIONAL GO** — D-2 no era la única condición, y su
+resolución no habilita por sí sola ningún `ENTER` real (`ev_neto_strength`
+sigue bloqueado por D-3 de forma independiente).
 
 **CONDITIONAL GO.**
 

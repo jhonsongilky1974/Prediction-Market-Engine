@@ -15,7 +15,7 @@ Sport Adapter  ->  Market Adapter  ->  Feature Builder  ->  Probabilistic Model 
 | Capa | Responsabilidad | Estado en Fase 2 | Acción en Fase 3 |
 |---|---|---|---|
 | **Sport Adapter** | Traduce `NormalizedRecord` (agnóstico de deporte) a la vista específica de deporte | Implícito: `mlb_features.py`/`tennis_features.py` ya separan por deporte, pero no hay una interfaz `SportAdapter` formal | Formalizar como interfaz explícita (`Protocol`) sin mover lógica de `mlb_features.py`/`tennis_features.py` — envoltorio, no reescritura |
-| **Market Adapter** | Traduce el contrato de mercado concreto (Kalshi binario YES/NO) a la forma que el modelo espera | No existe — es exactamente el hueco de la Ambigüedad #2 (mapeo participante↔YES) | Diseño de interfaz aquí (§2); implementación real depende de DECISIÓN PENDIENTE D-2 |
+| **Market Adapter** | Traduce el contrato de mercado concreto (Kalshi binario YES/NO) a la forma que el modelo espera | **RESUELTO post-cierre del roadmap** (ver §2 y `CONTINUITY.md` §0.17) — `src/matching/market_matcher.py::_select_market` (Fase 1) ya selecciona el mercado cuyo YES corresponde a `participant_a`; su confianza se expone en `DataQuality.side_selection_confidence` | Ya cubierto -- ver §2. `unresolved_side_mapping` (Hard Hold) consume esa confianza en vez de bloquear incondicionalmente |
 | **Feature Builder** | Calcula el vector de features desde `ModelInputs`/`TennisVariables` | `src/features/mlb_features.py`, `tennis_features.py`, `registry.py` (Fase 2) | REUTILIZAR sin cambios |
 | **Probabilistic Model** | Produce `PModelOutput` (`p_model_yes`, `model_status`) | `src/models/mlb_baseline.py`, `mlb_elo.py`, `tennis_baseline.py` (Fase 2) | REUTILIZAR sin cambios |
 | **Calibration Layer** | Produce `CalibrationOutput` (`p_model_raw` → `p_model_calibrated`) | No existe | CREAR (`src/calibration/`) |
@@ -31,27 +31,34 @@ código probado.
 
 ---
 
-## 2. Market Adapter — el eslabón que hoy no existe
+## 2. Market Adapter — RESUELTO (D-2), no vía la interfaz `Protocol` esbozada originalmente
 
-Es la pieza que resolvería la Ambigüedad #2 de forma definitiva
-(DECISIÓN PENDIENTE D-2, `PLAN_MASTER_FASE3.md` §8). Su contrato
-propuesto (para cuando D-2 se resuelva, **no implementado en Fase 3**):
+Este documento proponía originalmente un `MarketAdapter.native_label_to_side()`
+que tradujera explícitamente, en tiempo de inferencia, la etiqueta
+nativa del modelo al `Side` real de un `market_id` concreto. Al resolver
+D-2 (ver `CONTINUITY.md` §0.17) se encontró que el problema ya estaba
+resuelto por otro camino, existente desde Fase 1: `_select_market`
+(`src/matching/market_matcher.py`) no traduce una etiqueta después del
+hecho -- **selecciona, en el momento del matching, el mercado de Kalshi
+cuyo YES ya corresponde a `participant_a`** (comparando `participant_a`
+contra el `yes_sub_title` de cada mercado candidato del evento). Por
+construcción, para todo registro con un `market_id` adjunto,
+`Side.YES` del contrato seleccionado coincide con la etiqueta nativa del
+modelo (`P(participant_a gana)`) -- la única pieza que faltaba era la
+CONFIANZA de esa selección, ahora expuesta en
+`DataQuality.side_selection_confidence` (mismo `best_score` que Fase 1
+ya calculaba y descartaba).
 
-```python
-class MarketAdapter(Protocol):
-    def native_label_to_side(self, market_id: str, native_probability_target: str) -> Side:
-        """Traduce la etiqueta nativa del modelo (p.ej. 'participant_a gana')
-        al Side (YES/NO) del contrato Kalshi real para ese market_id."""
-```
-
-Mientras D-2 no se resuelva, `src/calibration/calibration_layer.py`
-**no invoca ningún `MarketAdapter`** — `p_model_raw` sigue
-interpretándose, exactamente como en Fase 2, como "probabilidad de la
-etiqueta nativa del modelo", y el Hard Hold `unresolved_side_mapping`
-(`POLICY_ENGINE_SPEC.md` §2.2) queda activo permanentemente hasta
-entonces. Esto es lo que impide que la ausencia del Market Adapter real
-se oculte silenciosamente detrás de una interfaz que aparenta estar
-completa.
+No se implementó el `Protocol` `MarketAdapter` tal como se había
+esbozado -- hacerlo habría sido redundante con un mecanismo que ya
+resuelve el mismo problema. `src/calibration/calibration_layer.py`
+sigue sin cambios (Paso 3.1, no modificado por esta resolución):
+`p_model_raw` sigue siendo la probabilidad de la etiqueta nativa, que
+ahora sabemos (con una confianza medible) que coincide con el YES real
+del contrato seleccionado. El Hard Hold `unresolved_side_mapping`
+(`POLICY_ENGINE_SPEC.md` §2.2) ya no bloquea de forma incondicional --
+dispara solo cuando esa confianza es baja o ausente para un registro
+concreto.
 
 ---
 

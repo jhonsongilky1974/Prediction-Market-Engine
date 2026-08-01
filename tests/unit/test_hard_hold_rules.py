@@ -1,7 +1,8 @@
 """Tests de las 6 reglas HARD_HOLD_WATCH (Fase 3, Paso 3.4.3). Ver
 FASE3_EXECUTION_PLAN.md, Paso 3.4.3, y POLICY_ENGINE_SPEC.md §2.2 -- un
-test por regla, más el test explícito de unresolved_side_mapping como
-constante (DECISIÓN PENDIENTE D-2).
+test por regla. `unresolved_side_mapping` ya no es una constante --
+resuelta como D-2 (ver CONTINUITY.md): ahora depende de
+`DataQuality.side_selection_confidence`.
 """
 from __future__ import annotations
 
@@ -215,29 +216,47 @@ def test_recoverable_missing_information_does_not_trigger_when_empty():
 
 
 # ---------------------------------------------------------------------
-# unresolved_side_mapping -- SIEMPRE triggered=True (D-2 sin resolver)
+# unresolved_side_mapping -- RESUELTO (D-2, ver CONTINUITY.md): ya no es
+# una constante, depende de DataQuality.side_selection_confidence
 # ---------------------------------------------------------------------
 
 
-def test_unresolved_side_mapping_always_triggered():
-    """DECISIÓN PENDIENTE D-2 (PLAN_MASTER_FASE3.md §5 Hallazgo #2, §8):
-    el mapeo participante<->YES de un contrato Kalshi concreto sigue sin
-    resolver. Mientras eso no cambie mediante una decisión explícita del
-    usuario, esta regla debe disparar SIEMPRE -- si este test empieza a
-    fallar porque alguien "corrigió" la función para que deje de
-    disparar sin pasar por esa decisión, eso es una regresión que debe
-    bloquear el paso, no un mejor comportamiento."""
-    result = check_unresolved_side_mapping(NOW)
+def test_unresolved_side_mapping_triggers_when_confidence_is_none():
+    """Sin side_selection_confidence (default -- ningún mercado
+    seleccionado, o participant_a ausente al seleccionar en Fase 1) la
+    regla sigue disparando: sin evidencia, no hay mapeo resuelto."""
+    record = _record(data_quality=DataQuality(side_selection_confidence=None))
+    result = check_unresolved_side_mapping(record, NOW)
     assert result.triggered is True
     assert result.category == HardRuleCategory.HOLD
 
 
-@pytest.mark.parametrize(
-    "now",
-    [NOW, NOW + timedelta(days=365), NOW - timedelta(days=365)],
-)
-def test_unresolved_side_mapping_triggered_regardless_of_time(now):
-    assert check_unresolved_side_mapping(now).triggered is True
+def test_unresolved_side_mapping_triggers_when_confidence_below_threshold():
+    record = _record(data_quality=DataQuality(side_selection_confidence=0.50))
+    result = check_unresolved_side_mapping(record, NOW)
+    assert result.triggered is True
+
+
+def test_unresolved_side_mapping_does_not_trigger_when_confidence_high():
+    """Con evidencia real (Fase 1, _select_market) de que el market_id
+    seleccionado corresponde al lado YES de participant_a, la regla ya
+    no bloquea -- el mapeo está resuelto para este registro concreto."""
+    record = _record(data_quality=DataQuality(side_selection_confidence=0.95))
+    result = check_unresolved_side_mapping(record, NOW)
+    assert result.triggered is False
+
+
+def test_unresolved_side_mapping_uses_same_threshold_as_event_matching():
+    """No se inventa un umbral nuevo -- reutiliza
+    EVENT_NAME_MATCH_MIN_CONFIDENCE (Fase 1, config/settings.py), la
+    misma constante que ya usa _select_market (Fase 1) para decidir si
+    emitir su propia advertencia."""
+    from config.settings import EVENT_NAME_MATCH_MIN_CONFIDENCE
+
+    just_below = _record(data_quality=DataQuality(side_selection_confidence=EVENT_NAME_MATCH_MIN_CONFIDENCE - 0.01))
+    just_at = _record(data_quality=DataQuality(side_selection_confidence=EVENT_NAME_MATCH_MIN_CONFIDENCE))
+    assert check_unresolved_side_mapping(just_below, NOW).triggered is True
+    assert check_unresolved_side_mapping(just_at, NOW).triggered is False
 
 
 # ---------------------------------------------------------------------

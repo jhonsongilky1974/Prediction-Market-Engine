@@ -45,7 +45,10 @@ rectificación al invariante del Principio 5 en `CONTRACTS_FASE3.md` §5
 3.8 de Fase 3 (Evaluation & Learning Framework, andamiaje con fixtures
 sintéticos) (ver §0.15).** **Actualizado de nuevo: 2026-07-31 — Paso 3.9
 declarado innecesario por hallazgo arquitectónico; CIERRE DEL ROADMAP
-REQUIRED FOR PHASE 3 (ver §0.16).**
+REQUIRED FOR PHASE 3 (ver §0.16).** **Actualizado de nuevo: 2026-07-31 —
+RESUELTA LA DECISIÓN PENDIENTE D-2 (mapeo participante↔YES de Kalshi):
+primera modificación de código de Fase 1/2 en todo el proceso de Fase 3,
+autorizada explícitamente (ver §0.17).**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1113,6 +1116,142 @@ Payoff Model, Evidence/Explainability, Opportunity Lifecycle, Evaluation
 Framework) están listas y probadas con fixtures; la puesta en producción
 de cualquier etapa que dependa de histórico real, del mapeo de Kalshi, o
 de costos reales, sigue bloqueada por D-1/D-2/D-3, sin resolver.
+
+## 0.17 Resolución de D-2: mapeo participante↔YES (2026-07-31)
+
+### Contexto y autorización
+
+Tras el cierre del roadmap REQUIRED FOR PHASE 3 (§0.16), el usuario
+autorizó explícitamente abordar DECISIÓN PENDIENTE D-2 ("resolver el
+mapeo participante↔YES de un contrato Kalshi concreto"), con la misma
+disciplina de todo el proceso: detenerse ante cualquier contradicción
+arquitectónica/contractual/de diseño, reportarla con alternativas antes
+de decidir, y no ampliar el alcance sin aprobación.
+
+### Investigación (antes de proponer nada)
+
+Se inspeccionó directamente el código y datos reales capturados
+(`data/raw/kalshi/*.json`) antes de diseñar cualquier solución. Hallazgo
+central: **D-2 estaba, en gran parte, ya resuelto desde Fase 1**
+(commit baseline `c5eb9e7`, anterior a Fase 2). Cada evento de Kalshi
+publica 2 mercados (uno por participante), cada uno con un
+`yes_sub_title` que nombra explícitamente a qué participante se refiere
+ese YES (verificado contra 2 eventos reales, MLB y ATP:
+`"yes_sub_title": "Atlanta"` / `"Terence Atmane"`, con el `title` del
+mercado literalmente fraseado como "¿Ganará X?"). `src/matching/market_matcher.py::_select_market`
+ya selecciona, de esos 2 mercados, el que tiene mayor similitud de
+nombre (`name_similarity`) entre `yes_sub_title` y `participant_a` --
+es decir, el `market_id` que llega a `NormalizedRecord` ya es, por
+construcción, el contrato cuyo YES corresponde a `participant_a`. Esto
+es exactamente la "capa de integración participante→YES" que 4 archivos
+de Fase 1/2 (`src/models/base.py`, `mlb_baseline.py`,
+`tennis_baseline.py`, `src/signals/edge.py`) documentaban reiteradamente
+como inexistente -- una afirmación desactualizada desde Fase 1, nunca
+corregida en Fase 2, heredada sin verificar en toda la documentación de
+Fase 3 (incluida la propia auditoría original, por mí).
+
+**El hueco real, no cosmético**: `_select_market` es heurístico (fuzzy
+name matching) y su confianza (`best_score`) se calculaba pero se
+descartaba -- solo se convertía en una advertencia de texto libre
+(`match_warnings`) cuando caía por debajo de `0.72`, y se perdía en
+silencio cuando era alta. No existía ningún campo estructurado y
+consultable con el que el Policy Engine pudiera saber "qué tan seguro
+estoy de que este `market_id` es el lado de `participant_a`".
+
+### Decisión (reportada, con alternativas, autorizada explícitamente)
+
+Se detuvo la implementación antes de escribir código, se presentaron 3
+alternativas (exponer la confianza como campo nuevo en `DataQuality`;
+resolver solo documentalmente sin tocar Fase 1/2; reconstruir la señal
+parseando texto de `match_warnings`). El usuario autorizó la
+Alternativa 1 explícitamente, incluyendo tocar código de Fase 1/2 --
+**la primera vez en las 17 commits previas de todo el proceso de Fase 3
+que se modifica un archivo de Fase 1/2**.
+
+### Implementado
+
+**Fase 1 (autorizado explícitamente, cambios estrictamente aditivos)**:
+- `src/models/schemas.py` -- `DataQuality.side_selection_confidence: Optional[float] = None`
+  (campo nuevo, default `None`, retrocompatible -- `StrictModel` con
+  `extra="forbid"`, ninguna construcción existente de `DataQuality` en
+  ~15 archivos de test se ve afectada).
+- `src/matching/market_matcher.py` -- `_select_market()` ahora devuelve
+  también el `best_score` ya calculado (antes descartado) como tercer
+  elemento de la tupla; `KalshiEventMatch` gana el campo
+  `market_selection_confidence: Optional[float] = None`;
+  `find_best_kalshi_event()` lo propaga; `apply_kalshi_match()` lo
+  persiste en `record.data_quality.side_selection_confidence`
+  únicamente cuando efectivamente se adjuntan datos de mercado (mismo
+  gate ya existente para `MARKET_DEPENDENT_FIELDS`). Ningún
+  comportamiento de selección/matching existente cambia -- se sigue
+  eligiendo exactamente el mismo mercado que antes, con los mismos
+  criterios; lo único nuevo es que el número ya calculado ahora se
+  guarda en vez de descartarse.
+
+**Fase 3 (dentro del alcance ya establecido de este proceso)**:
+- `src/policy/hard_rules.py::check_unresolved_side_mapping` -- ya NO es
+  una constante `triggered=True`. Ahora recibe `record` y dispara
+  únicamente cuando `side_selection_confidence` es `None` o está por
+  debajo de `EVENT_NAME_MATCH_MIN_CONFIDENCE` (Fase 1,
+  `config/settings.py` -- mismo umbral que `_select_market` ya usa,
+  ninguno nuevo inventado). `evaluate_hard_hold_rules()` actualizado
+  para pasarle `record`.
+
+### Contratos afectados
+
+| Contrato | Cambio | Tipo |
+|---|---|---|
+| `DataQuality` (Fase 1, `src/models/schemas.py`) | Campo nuevo `side_selection_confidence: Optional[float] = None` | Aditivo, retrocompatible |
+| `KalshiEventMatch` (Fase 1, dataclass interno de `market_matcher.py`, no un contrato Pydantic público) | Campo nuevo `market_selection_confidence: Optional[float] = None` | Aditivo, retrocompatible |
+| `HardRuleResult` (Fase 3, Paso 3.0) | Sin cambios de schema -- solo cambia la LÓGICA que produce el `rule_id="unresolved_side_mapping"` | N/A (comportamiento, no contrato) |
+
+Ningún contrato perdió campos, cambió tipos, ni rompió `extra="forbid"`.
+
+### Documentación actualizada
+
+`PLAN_MASTER_FASE3.md` §8, `POLICY_ENGINE_SPEC.md` §2.2,
+`FASE3_AUDIT_REPORT.md` §7/§13/§15, `MODEL_PIPELINE_SPEC.md` §2,
+`IMPLEMENTATION_ROADMAP_FASE3.md` -- todos marcan D-2 como resuelta,
+conservando el texto original tachado/anotado (no reescrito
+retroactivamente, mismo criterio de todo este proyecto) con un puntero
+a esta sección.
+
+### Auditoría final de este cambio
+
+- **Tests nuevos**: 4 en `tests/unit/test_market_matcher.py` (Fase 1,
+  extendido) + 4 en `tests/unit/test_hard_hold_rules.py` (Fase 3,
+  reemplazando 2 tests que protegían la constante `True` -- incluido un
+  test que confirma el mismo umbral que `_select_market` ya usa).
+- **Regresión de Fase 1/2**: los 7 tests originales de
+  `test_market_matcher.py` pasan SIN modificación. Todos los demás
+  archivos de Fase 1/2 que construyen `DataQuality(...)` (≈15 archivos)
+  siguen pasando sin tocar una sola línea -- el campo nuevo tiene
+  default `None`.
+- **Regresión de Fase 3**: `test_policy_decision.py`/`test_policy_fail_safe.py`
+  (Paso 3.4.5, escenario "catálogo completo activo") confirmados sin
+  cambios -- sus fixtures no fijan `side_selection_confidence`
+  explícitamente, así que siguen recibiendo `None` por defecto y
+  `unresolved_side_mapping` sigue disparando exactamente igual que
+  antes en esos escenarios "sin evidencia".
+- **Suite completa**: `pytest -q` → **899 passed, 0 failed** (895 tras
+  el cierre del roadmap + 8 nuevos, 4 de Fase 1 + 4 de Fase 3, neto 0
+  por el reemplazo en `test_hard_hold_rules.py`).
+- **`data/models/`**: únicamente `.gitkeep`.
+- **`v2.0-baseline`**: sin mover.
+
+### Impacto arquitectónico (resumen)
+
+D-2 pasa de "decisión pendiente, bloqueo incondicional" a "resuelta,
+bloqueo condicionado a evidencia real por registro". `unresolved_side_mapping`
+ya no es un techo estructural absoluto sobre `ENTER` -- ahora se
+comporta como el resto del catálogo Hard Hold, activo por registro según
+datos reales. **Esto NO habilita `ENTER` real por sí solo**: D-3
+(fórmula de costos reales, `net_ev_status` siempre `UNKNOWN`) sigue
+bloqueando `ev_neto_strength` como mínimo crítico del Soft Score,
+independientemente de D-2. D-1 (histórico real) sigue bloqueando toda
+evaluación con significancia estadística real. La conclusión
+CONDITIONAL GO de `FASE3_AUDIT_REPORT.md` §15 se mantiene: 2 decisiones
+pendientes en vez de 3, ninguna resuelta por asunción.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

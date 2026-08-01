@@ -51,17 +51,21 @@ BLOCK, ninguna regla HOLD necesita excluirse del evaluador (todas son
 evaluables directamente desde datos, sin depender de una excepción de
 control de flujo).
 
-`unresolved_side_mapping` es la más importante de las 6: dispara
-`triggered=True` SIEMPRE, sin condición, mientras la Ambigüedad #2 de
-Fase 2 (mapeo participante<->YES de un contrato Kalshi concreto) no esté
-resuelta -- DECISIÓN PENDIENTE D-2 (`PLAN_MASTER_FASE3.md` §5 Hallazgo
-#2, §8). No es un placeholder temporal de esta implementación: es el
-comportamiento correcto y exigido explícitamente por
-`POLICY_ENGINE_SPEC.md` §2.2 ("unresolved_side_mapping... nunca se
-resuelve automáticamente"). Si una refactor futura logra que deje de
-dispararse sin que D-2 se haya resuelto explícitamente, eso es una
-regresión, nunca una mejora -- reforzado con un test dedicado que cita
-esta misma decisión.
+`unresolved_side_mapping` -- RESUELTO (D-2, ver CONTINUITY.md). Hasta la
+resolución de D-2, disparaba `triggered=True` SIEMPRE, sin condición,
+como placeholder deliberado mientras la Ambigüedad #2 de Fase 2 (mapeo
+participante<->YES de un contrato Kalshi concreto) permanecía sin
+evidencia real. Se encontró que Fase 1 (`src/matching/market_matcher.py`,
+commit baseline, anterior a Fase 2) ya calcula esa evidencia
+(`_select_market`, similitud entre `participant_a` y `yes_sub_title` del
+mercado de Kalshi seleccionado) pero la descartaba tras solo emitir una
+advertencia de texto cuando era baja. Se expuso como
+`DataQuality.side_selection_confidence` (campo aditivo nuevo en un
+contrato de Fase 1, autorizado explícitamente) y esta regla ahora la
+consume: dispara únicamente cuando la confianza es `None` o está por
+debajo de `EVENT_NAME_MATCH_MIN_CONFIDENCE` (mismo umbral que Fase 1 ya
+usa, no uno nuevo). Ya no es una constante -- es una regla real,
+condicionada a evidencia, tal como el resto del catálogo.
 
 Decisión de alcance diferida (aprobada explícitamente antes de
 implementar este bloque, ver auditoría previa a este commit):
@@ -405,18 +409,29 @@ def check_recoverable_missing_information(record: NormalizedRecord, now: datetim
     )
 
 
-def check_unresolved_side_mapping(now: datetime) -> HardRuleResult:
-    """SIEMPRE triggered=True mientras la Ambigüedad #2 de Fase 2
-    (mapeo participante<->YES de un contrato Kalshi concreto) no esté
-    resuelta -- DECISIÓN PENDIENTE D-2 (PLAN_MASTER_FASE3.md §5 Hallazgo
-    #2, §8). No es condicional a ningún dato de entrada: ver el
-    docstring del módulo para la advertencia completa contra
-    "arreglar" esto por accidente."""
+def check_unresolved_side_mapping(record: NormalizedRecord, now: datetime) -> HardRuleResult:
+    """RESUELTO -- D-2 (Ambigüedad #2 de Fase 2, mapeo participante<->YES
+    de un contrato Kalshi concreto), ver CONTINUITY.md. Ya NO es una
+    constante: dispara únicamente cuando
+    `DataQuality.side_selection_confidence` es `None` (sin mercado
+    seleccionado, o `participant_a` ausente al seleccionar -- Fase 1,
+    `src/matching/market_matcher.py::_select_market`) o está por debajo
+    de `EVENT_NAME_MATCH_MIN_CONFIDENCE` -- el mismo umbral que Fase 1 ya
+    usa para decidir si la selección de lado es confiable, reutilizado
+    aquí en vez de inventar uno nuevo. Cuando la confianza es alta, la
+    regla NO dispara -- el mapeo participante<->YES ya está resuelto
+    para ese registro concreto, con evidencia real, no una suposición."""
+    confidence = record.data_quality.side_selection_confidence
+    triggered = confidence is None or confidence < EVENT_NAME_MATCH_MIN_CONFIDENCE
+    detail = (
+        f"side_selection_confidence={confidence} (mínimo={EVENT_NAME_MATCH_MIN_CONFIDENCE}) -- "
+        f"{'mapeo participante<->YES sin evidencia suficiente' if triggered else 'mapeo participante<->YES resuelto con evidencia'}"
+    )
     return HardRuleResult(
         rule_id="unresolved_side_mapping",
         category=HardRuleCategory.HOLD,
-        triggered=True,
-        detail="Ambigüedad #2 (mapeo participante<->YES de Kalshi) sin resolver -- DECISIÓN PENDIENTE D-2",
+        triggered=triggered,
+        detail=detail,
         evaluated_at=now,
     )
 
@@ -441,5 +456,5 @@ def evaluate_hard_hold_rules(
         check_temporarily_stale_data(analysis_health, now, stale_data_threshold_seconds),
         check_temporarily_insufficient_liquidity(record, now, minimum_operable_liquidity),
         check_recoverable_missing_information(record, now),
-        check_unresolved_side_mapping(now),
+        check_unresolved_side_mapping(record, now),
     ]

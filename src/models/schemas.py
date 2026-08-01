@@ -141,6 +141,17 @@ class DataQuality(StrictModel):
     match_warnings: List[str] = Field(default_factory=list)
     needs_review: bool = False
 
+    side_selection_confidence: Optional[float] = None
+    """[0,1] o None. Distinto de `match_confidence` (que mide si el EVENTO
+    de Kalshi es el correcto): esto mide si el LADO YES del `market_id`
+    seleccionado corresponde realmente a `participant_a`
+    (`src/matching/market_matcher.py::_select_market`, similitud de nombre
+    contra `yes_sub_title`). None cuando no se pudo puntuar (sin mercado
+    seleccionado, o `participant_a` ausente en el momento de seleccionar).
+    Añadido en Fase 3, Paso de resolución de D-2 (ver CONTINUITY.md) --
+    campo aditivo, retrocompatible, no cambia el comportamiento de ningún
+    consumidor existente de DataQuality."""
+
     validation_errors: List[str] = Field(default_factory=list)
 
 

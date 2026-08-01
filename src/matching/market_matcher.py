@@ -5,6 +5,15 @@ mercado (ticker) cuyo lado YES corresponde a `participant_a`.
 
 Reutiliza `event_matcher` para la decisión de "es el mismo evento" —
 market matching no vuelve a implementar su propia heurística de nombres.
+
+Extensión aditiva (Fase 3, resolución de D-2 -- ver CONTINUITY.md): la
+confianza de esa selección de lado YES (antes calculada y descartada,
+solo usada para decidir si emitir una advertencia de texto) ahora se
+expone también como número en `KalshiEventMatch.market_selection_confidence`
+y se persiste en `NormalizedRecord.data_quality.side_selection_confidence`
+vía `apply_kalshi_match`. Ningún comportamiento de selección/matching
+existente cambia -- mismo mercado se sigue seleccionando exactamente
+igual que antes.
 """
 from __future__ import annotations
 
@@ -57,6 +66,12 @@ class KalshiEventMatch:
     match_result: MatchResult
     selected_market: Optional[Dict[str, Any]] = None
     market_selection_warning: Optional[str] = None
+    market_selection_confidence: Optional[float] = None
+    """Similitud [0,1] entre participant_a y el yes_sub_title del mercado
+    seleccionado (mismo best_score que ya calculaba _select_market, ahora
+    expuesto en vez de descartado -- ver DataQuality.side_selection_confidence,
+    resolución de D-2). None si no se pudo puntuar (sin mercados, o
+    participant_a ausente)."""
 
 
 def _kalshi_event_participants(kalshi_event: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -126,7 +141,7 @@ def find_best_kalshi_event(
         return KalshiEventMatch(kalshi_event=None, match_result=_no_candidates_result())
 
     if best.kalshi_event is not None:
-        best.selected_market, best.market_selection_warning = _select_market(
+        best.selected_market, best.market_selection_warning, best.market_selection_confidence = _select_market(
             best.kalshi_event, source_participant_a
         )
 
@@ -141,12 +156,20 @@ def _no_candidates_result() -> MatchResult:
 
 def _select_market(
     kalshi_event: Dict[str, Any], participant_a: Optional[str]
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[float]]:
+    """Devuelve (mercado_seleccionado, advertencia_o_None, confianza_o_None).
+    `confianza` es la similitud [0,1] entre `participant_a` y el
+    `yes_sub_title` del mercado elegido -- None en los dos casos en que no
+    hay una puntuación real que reportar (sin mercados; o participant_a
+    ausente, caso en que se toma markets[0] a ciegas, sin comparar nada).
+    Resolución de D-2 (ver CONTINUITY.md): antes este score se calculaba y
+    se descartaba, ahora se expone vía DataQuality.side_selection_confidence
+    (apply_kalshi_match)."""
     markets = kalshi_event.get("markets") or []
     if not markets:
-        return None, "el evento de Kalshi no tiene mercados anidados"
+        return None, "el evento de Kalshi no tiene mercados anidados", None
     if not participant_a:
-        return markets[0], "participant_a ausente; se tomó el primer mercado por defecto"
+        return markets[0], "participant_a ausente; se tomó el primer mercado por defecto", None
 
     best_market = None
     best_score = -1.0
@@ -159,7 +182,7 @@ def _select_market(
     warning = None
     if best_score < 0.72:
         warning = f"selección de mercado por lado YES incierta (similitud {best_score:.2f})"
-    return best_market, warning
+    return best_market, warning, best_score
 
 
 def apply_kalshi_match(record: Any, match: KalshiEventMatch, missing: List[str]) -> None:
@@ -208,6 +231,7 @@ def apply_kalshi_match(record: Any, match: KalshiEventMatch, missing: List[str])
     record.market_close_time = market_norm.market_close_time
     record.expected_settlement_time = market_norm.expected_settlement_time
     record.actual_settlement_time = market_norm.actual_settlement_time
+    record.data_quality.side_selection_confidence = match.market_selection_confidence
     missing.extend(market_norm.missing_fields)
     if match.market_selection_warning:
         record.data_quality.match_warnings.append(match.market_selection_warning)

@@ -28,7 +28,7 @@ aprobación → implementación).
 | `EvaluationRecord`/framework de 5 dimensiones (estructura + tests con fixtures) | **REQUIRED FOR PHASE 3** |
 | Entrenar un calibrador real (Platt/isotonic) | **RECOMMENDED LATER** — depende de D-1 |
 | Historical backtesting real, Shadow mode real, Paper tracking real | **RECOMMENDED LATER** — depende de D-1/GATE-0 |
-| Resolver Market Adapter real (participante↔YES) | **RECOMMENDED LATER** — depende de D-2, diseño de integración específico con Kalshi |
+| ~~Resolver Market Adapter real (participante↔YES)~~ | **RESUELTO** post-cierre del roadmap (D-2, ver `CONTINUITY.md` §0.17) — el mapeo ya existía desde Fase 1; se expuso su confianza (`DataQuality.side_selection_confidence`) |
 | `exchange_fee`/spread/slippage reales en `PayoffEstimate` | **RECOMMENDED LATER** — depende de D-3, evidencia real de la API |
 | Recalibrar `HEURISTIC_V1` / umbrales `PolicyManifest` con evidencia real | **RECOMMENDED LATER** — depende de D-1 |
 | Migrar `models/registry.py` a ser exclusivamente genérico (eliminar la función MLB-específica) | **REJECTED AS PREMATURE** — sin beneficio hasta que exista un segundo consumidor real de `load_latest_artifact` |
@@ -193,6 +193,6 @@ F3-9 (independiente, sin dependencias)
 
 | Riesgo | Mitigación |
 |---|---|
-| Que "GATE-0 pendiente" se ignore en la práctica y se declare Fase 3 lista para producción sin histórico real | Cada `PolicyManifest` sin `promoted_at` bloquea `ENTER` real por diseño (`unresolved_side_mapping` + `ev_neto_strength` como mínimos críticos, ver `POLICY_ENGINE_SPEC.md` §2.2/§3.1) — el sistema es estructuralmente incapaz de producir un ENTER real hasta D-2/D-3 |
+| Que "GATE-0 pendiente" se ignore en la práctica y se declare Fase 3 lista para producción sin histórico real | Cada `PolicyManifest` sin `promoted_at` bloquea `ENTER` real por diseño (`ev_neto_strength` como mínimo crítico, ver `POLICY_ENGINE_SPEC.md` §3.1) — el sistema es estructuralmente incapaz de producir un ENTER real hasta D-3 (D-2 resuelto post-cierre, ver `CONTINUITY.md` §0.17; `unresolved_side_mapping` ya no bloquea de forma incondicional, solo por registro con evidencia insuficiente) |
 | Crecimiento sin límite de `opportunity_evaluations` (append-only) | Misma deuda ya aceptada conscientemente para `event_snapshots`/`feature_snapshots` en Fase 2 (`FASE2_CIERRE_FINAL.md` §5) — se documenta, no se resuelve aquí |
 | Que el Policy Engine se pruebe solo con fixtures "fáciles" que nunca disparan Hard Rules | Fixtures obligatorios por cada `rule_id` del catálogo cerrado (`POLICY_ENGINE_SPEC.md` §2), uno por uno, como parte del criterio de aceptación de F3-4 |
