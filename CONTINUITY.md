@@ -64,6 +64,12 @@ mantenimiento) reactivados y confirmados en ejecución permanente (ver
 resueltas, D-3 reencuadrada y documentada como dependencia externa.**
 **Actualizado de nuevo: 2026-08-01 — CIERRE FORMAL DE FASE 3, aprobado
 por el usuario (ver §0.20 y [`FASE3_CIERRE_FINAL.md`](FASE3_CIERRE_FINAL.md)).**
+**Actualizado de nuevo: 2026-08-01 — Auditoría de Fase 4 y
+[`FASE4_EXECUTION_PLAN.md`](FASE4_EXECUTION_PLAN.md) (borrador, Revisión
+2 con Coverage Gate + auditoría de calidad de labels). Aprobados D-4A,
+D-4B y el alcance de §4/§5; implementado el Paso 4.0A (backfill puntual
+de `event_results`, D-4A resuelta) — ver §0.21. Sin avanzar a Paso 4.0B
+ni 4.1, a la espera de aprobación explícita.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -1546,6 +1552,112 @@ heurísticas → solo entonces, lógica de clasificación ENTER/WATCH/PASS.
 Ningún trabajo de Fase 4 está autorizado todavía — requiere su propia
 auditoría contractual/arquitectónica antes de un plan de ejecución,
 siguiendo el mismo proceso institucional usado en Fase 2 y Fase 3.
+
+## 0.21 Fase 4 — Paso 4.0A: Resolución de D-4A, backfill puntual de `event_results` (2026-08-01)
+
+### Contexto y autorización
+
+Tras la Revisión 2 de `FASE4_EXECUTION_PLAN.md` (D-4 separada en D-4A/D-4B,
+Coverage Gate y auditoría de calidad de labels incorporados al roadmap —
+ver el propio documento y su historial de commits), el usuario aprobó
+explícitamente D-4A, D-4B y el alcance de §4/§5, y autorizó comenzar
+**exclusivamente** con el Paso 4.0A, con instrucción explícita de no
+avanzar a 4.0B ni a 4.1 sin nueva aprobación tras presentar este informe.
+
+### Alcance ejecutado (exactamente el declarado en el plan, §6 Paso 4.0A)
+
+Backfill puntual, manual, de `event_results` para todo lo ya capturado
+desde el 2026-07-25. **Cero cambios de código** — se ejecutaron
+`scripts/sync_mlb_results.py`/`scripts/sync_tennis_results.py` tal como
+existen desde Fase 2, sin modificar ninguna línea. Único diseño
+aplicado: calcular `--lookback-days` suficiente para cubrir el rango real
+observado (`2026-08-01` menos `2026-07-25` = 7 días atrás → `--lookback-days 8`,
+inclusive de hoy) y confirmar, antes de ejecutar, que la captura de tenis
+en producción usa siempre `--tour atp` (default de `run_e2e.py`, sin
+`--tour` en el `.plist` del LaunchAgent) — verificado contra el prefijo
+real `espn_tennis_atp_*` en `event_snapshots`, así que no se sincronizó
+WTA (nunca se capturó).
+
+Comandos ejecutados (uno por deporte, ambos vía `.venv`, ninguno con
+efectos fuera de `event_results`):
+
+```
+python scripts/sync_mlb_results.py --lookback-days 8
+python scripts/sync_tennis_results.py --tour atp --lookback-days 8
+```
+
+### Evidencia verificada (antes/después, medida directamente en `data/engine.db`, no solo el resumen impreso por los scripts)
+
+| Métrica | Antes | Después |
+|---|---|---|
+| `event_results` (total) | 0 | **295** |
+| `event_results` MLB | 0 | 97 |
+| `event_results` TENNIS (ATP) | 0 | 198 |
+
+Resumen impreso por los scripts: MLB — 97 nuevos, 2 ya registrados
+(colisión dentro de la misma corrida, no histórico previo — la tabla
+estaba en 0 antes de ejecutar), 15 aún no decididos, 0 postergados/
+cancelados, 0 ambiguos. Tenis (ATP) — 198 nuevos, 879 ya registrados
+(alto solapamiento esperado: el scoreboard de ESPN devuelve partidos ya
+vistos en consultas de días adyacentes dentro de la misma corrida — el
+propio chequeo de idempotencia de `sync_tennis_event_results` es lo que
+produce este número, no un error), 278 aún no decididos, 0 ambiguos.
+
+Verificaciones independientes, no basadas en el resumen de los scripts:
+
+- **Sin duplicados reales**: `SELECT event_id, COUNT(*) FROM event_results
+  GROUP BY event_id HAVING COUNT(*) > 1` → conjunto vacío. Cero filas en
+  conflicto.
+- **Distribución de resultados sin sesgo evidente**: MLB
+  46×`PARTICIPANT_A_WON`/51×`PARTICIPANT_B_WON`; Tenis (ATP)
+  114×`PARTICIPANT_A_WON`/84×`PARTICIPANT_B_WON` — sin ceros ni
+  concentración sospechosa en un solo valor.
+- **Sin fuga temporal** (muestra verificada directamente, no solo
+  confiando en la lógica ya probada de `mlb_baseline.py`/
+  `tennis_baseline.py`): para pares `feature_snapshots`↔`event_results`
+  del mismo `event_id`, `computed_at < recorded_at` en el 100% de la
+  muestra inspeccionada.
+- **`source`** puebla correctamente `mlb_results_sync`/`tennis_results_sync`
+  en el 100% de las filas nuevas — trazabilidad de origen intacta.
+- **`git status`/`git diff --stat`**: árbol de trabajo limpio tras la
+  ejecución — `data/engine.db` está en `.gitignore`, así que esta
+  operación no produce ningún cambio en archivos versionados por sí
+  misma.
+- **Suite completa re-ejecutada**: **927 passed, 0 failed** — sin
+  regresión, esperado dado que no se tocó ningún archivo de `src/`.
+
+`event_snapshots`/`feature_snapshots` siguieron creciendo en paralelo
+durante esta ventana (el LaunchAgent horario nunca se detuvo): 815→1179 /
+722→1086 respectivamente, sin relación con este paso — se registra aquí
+solo para que los números de la auditoría original de
+`FASE4_EXECUTION_PLAN.md` §1.4 no se lean como desactualizados sin
+explicación.
+
+### Auditoría final
+
+- Ningún archivo de `src/`, `scripts/`, ni ningún contrato tocado —
+  confirmado por `git status`/`git diff --stat` vacíos.
+- `event_results.count() > 0` (criterio de aceptación del Paso 4.0A,
+  `FASE4_EXECUTION_PLAN.md` §6) — **cumplido**, 295 filas, ambos
+  deportes representados.
+- D-4A queda **resuelta**. D-4B, GATE-0, Coverage Gate y la auditoría de
+  calidad de labels **siguen sin resolver/sin ejecutar** — este paso no
+  los toca, por diseño explícito del alcance aprobado.
+- Ningún umbral de entrenamiento (300 MLB / 50 Elo MLB / 30 tenis,
+  `FASE4_EXECUTION_PLAN.md` §2) se evalúa todavía contra estos números —
+  eso es explícitamente el Paso 4.2, no este paso. 97 resultados MLB
+  siguen por debajo de los tres umbrales aplicables; 198 de tenis ya
+  superan el umbral de 30, pero sin Coverage Gate ni auditoría de
+  calidad de labels ejecutados, esa cifra no autoriza avanzar a
+  entrenamiento — se deja constancia para el próximo paso, no se actúa
+  sobre ella aquí.
+
+### Estado para continuar
+
+**Paso 4.0A cerrado y verificado.** Por instrucción explícita del
+usuario, **no se avanza a Paso 4.0B ni a Paso 4.1** sin nueva
+aprobación — este informe se presenta primero, a la espera de esa
+aprobación.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
