@@ -97,6 +97,17 @@ producción) y un falso positivo en `GATE-0[mlb_elo]` del Paso 4.2.
 Orquestador confirmado usando `p_model_yes` real por primera vez
 (verificado por SQL); `ENTER` sigue sin aparecer (D-3). Sin avanzar a
 ningún paso posterior, a la espera de aprobación explícita.**
+**Actualizado de nuevo: 2026-08-01 — Diseñada e implementada la
+calibración real (Platt scaling) del modelo de tenis — ver §0.27.
+Resultado real (`GroupKFold` out-of-fold, 120 muestras/24 eventos):
+calibrar EMPEORA el modelo (`ece` 0.137 vs. 0.068 crudo) — criterio de
+aceptación no cumplido, el cableado de producción se revirtió antes de
+que el LaunchAgent horario lo recogiera. Infraestructura lista pero
+inactiva. Corregido de paso un hueco real (`build_signal_inputs` nunca
+consumía `CalibrationOutput`) y un hueco de carga (`load_latest_tennis_artifact`
+no leía 9 campos ya persistidos desde el Paso 4.3). D-3/MLB siguen
+bloqueados por factores externos, sin fecha. Suite en 1002. Sin avanzar
+a la Fase 5, a la espera de aprobación explícita del informe.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2402,6 +2413,200 @@ ajustarla y con qué umbral mínimo — ninguno definido hoy en ningún
 documento aprobado. MLB (clasificador y Elo) siguen sin alcanzar sus
 umbrales — este paso no adelantó ningún trabajo de MLB sin datos reales
 suficientes.
+
+## 0.27 Calibración real (Platt) del modelo de tenis — resultado negativo, no desplegada (2026-08-01)
+
+### Contexto y autorización
+
+El usuario pidió retomar la Fase 4 (que en realidad seguía abierta —
+ver contradicción resuelta abajo) en vez de avanzar directo a la Fase
+5 (servicio HTTP) que había pedido inicialmente. Investigado antes de
+proponer nada (Regla 1): `e7f74d5` (cierre real del Paso 4.3) dice
+literalmente "awaiting approval to proceed to any further step — do
+not auto-advance", y no existe `FASE4_CIERRE_FINAL.md`. Contradicción
+reportada explícitamente al usuario (Regla 2) contra su afirmación de
+que la Fase 4 ya estaba "completada, auditada y aprobada". El usuario
+eligió resolver los pendientes antes de la Fase 5. Investigados los 3
+puntos abiertos contra datos reales: D-3 (fees Kalshi) sigue en 429 al
+reintentar (tercera vez); MLB sigue sin alcanzar sus umbrales
+(`mlb_classifier` 87/300, `mlb_elo` 41/50, verificado vía
+`check_training_gates.py`); calibración real era el único punto
+accionable. El usuario aprobó diseñar E implementar la calibración en
+un solo mensaje ("primero un diseño formal... recomienda el método...
+Implementa, prueba, audita y presenta evidencia verificable"),
+delegando explícitamente la elección de método (Platt vs. isotónica) y
+pre-autorizando avanzar de diseño a implementación sin una ronda de
+aprobación intermedia — a diferencia de `ORCHESTRATOR_SPEC.md` (Paso
+4.1). Mantener D-3/MLB como deuda documentada, sin fecha. **No avanzar
+a la Fase 5 hasta que el usuario apruebe este informe.**
+
+### Diseño (`CALIBRATION_SPEC.md`, commit `21b5391`)
+
+Investigación real encontró un hueco previamente no detectado:
+`build_signal_inputs` (el compositor de `SignalInputs`, input directo
+del Policy Engine) nunca consultaba `CalibrationOutput` — usaba
+siempre `model_output.p_model_yes` (el crudo), contradiciendo el
+propio invariante ya declarado en `CONTRACTS_FASE3.md` §2 ("en cuanto
+exista `calibration_version`, el consumidor debe usar
+`p_model_calibrated`"). `decision_pipeline.py` además hardcodeaba
+`calibrator=None`. Ambos corregidos como parte de este paso.
+
+Método recomendado: **Platt scaling**, no isotónica — justificado por
+el tamaño de muestra real disponible para calibrar (120 muestras/24
+eventos, la propia validación ya usada para evaluar el modelo base),
+muy por debajo del régimen donde isotónica (no paramétrica) es
+confiable según literatura estándar (Niculescu-Mizil & Caruana, 2005).
+`CONTRACTS_FASE3.md` §2 ya preveía `"PLATT_V1"`/`"ISOTONIC_V1"` como
+valores válidos — nombres no inventados.
+
+Estrategia de ajuste: usa la validación ya verificada libre de fuga
+respecto al entrenamiento del modelo base (conteos recomputados hoy
+coinciden exactamente con el `metadata.json` del artefacto:
+train=480/96 eventos, validation=120/24 eventos). Evaluación honesta
+vía `GroupKFold` (n_splits=5, agrupado por `event_id`, mismo default
+que usa `sklearn` internamente) sobre la misma validación — sin
+encoger más el dataset con un tercer split. Calibrador final
+desplegable se ajusta sobre las 120 muestras completas. Criterio de
+aceptación explícito (§6): el cableado de producción solo se activa si
+`calibrated_ece_oof <= raw_ece` — si la evidencia real dice lo
+contrario, detenerse y reportar, nunca desplegar en contra de ella.
+
+### Hallazgo adicional durante la implementación — `load_latest_tennis_artifact` nunca cargaba 9 campos ya persistidos
+
+`_save_tennis_artifact_metadata` (Paso 4.3) escribe `n_train_events`/
+`n_validation_events`/`precision`/`recall`/`f1`/`ece`/
+`reliability_diagram`/`calibration_version`/`calibration_method`/
+`artifact_sha256` en el `metadata.json`, pero `load_latest_tennis_artifact`
+nunca los volvía a leer (quedaban en sus defaults `0`/`None`/`""` al
+cargar el artefacto) — hueco real, detectado porque el propio test de
+este paso (`artifact.raw_ece == base_artifact.ece`) falló al
+comparar contra un artefacto CARGADO, no el objeto en memoria recién
+entrenado. Corregido.
+
+### Implementado
+
+- **`src/calibration/platt_calibrator.py`** (nuevo) — `PlattCalibrator`
+  satisface el `Calibrator` Protocol existente (`calibration_layer.py`,
+  sin tocar); `fit_platt_calibrator` ajusta `LogisticRegression` de 1
+  feature sobre `p_raw` (Platt scaling clásico).
+- **`src/calibration/tennis_calibrator_training.py`** (nuevo) —
+  `TennisCalibratorArtifact` (persistencia independiente, prefijo
+  `tennis_calibrator_platt_v1_*`, emparejada 1:1 a `base_model_version`
+  — nunca aplica un calibrador desalineado), `train_tennis_calibrator`
+  (verifica la validación libre de fuga antes de ajustar, GroupKFold
+  OOF, nunca fabrica un calibrador si faltan eventos/clases),
+  `load_latest_tennis_calibrator`.
+- **`scripts/train_tennis_calibrator.py`** (nuevo) — mismo patrón que
+  `train_tennis_model.py`, imprime el criterio de aceptación evaluado.
+- **`build_signal_inputs`** (`signal_builder.py`) — parámetro opcional
+  `calibration_output`; usa `p_model_calibrated` cuando existe (para
+  `signal_inputs.p_model`, edge, EV bruto/neto) vía
+  `dataclasses.replace` sobre una copia de `model_output`, preserva el
+  comportamiento exacto anterior cuando es `None`.
+- **`SportAdapter`** — campo aditivo `load_calibrator_fn` (opcional,
+  default `None`). **`decision_pipeline._build_record_context`** lo
+  invoca con el `model_version` real cuando existe.
+- **`validation_event_ids`** — campo aditivo en `TennisTrainedArtifact`/
+  `MlbTrainedArtifact` (MLB por consistencia, sin reentrenar nada),
+  persiste los `event_id` exactos del split de validación para que una
+  futura calibración/reentrenamiento no dependa de recomputar el split
+  contra una base de datos que puede haber crecido. `load_latest_tennis_artifact`/
+  `load_latest_mlb_artifact` corregidos para cargarlo (y, en el caso de
+  tenis, los 9 campos del hallazgo anterior).
+
+### Pruebas
+
+- `tests/unit/test_platt_calibrator.py` (4 tests, nuevo): contrato del
+  Protocol, salida siempre en `[0,1]`, monotonía, determinismo.
+- `tests/unit/test_tennis_calibrator_training.py` (6 tests, nuevo):
+  sin modelo base → `MODEL_NOT_TRAINED` honesto; ajuste real contra un
+  modelo base real entrenado en el mismo test; emparejamiento exacto
+  por `base_model_version` en `load_latest_tennis_calibrator`;
+  `INSUFFICIENT_HISTORY` honesto cuando la validación tiene menos
+  eventos que `cv_folds`; usa `validation_event_ids` persistido cuando
+  existe.
+- `tests/unit/test_signal_builder.py` (+4 tests): probabilidad
+  calibrada sustituye a la cruda (edge/EV distintos); sin
+  `calibration_output` el resultado es idéntico al de antes (regresión
+  cero); `p_model_calibrated=None` preserva el crudo;
+  `MODEL_NOT_TRAINED` sigue siendo `None`.
+- `tests/unit/test_decision_pipeline.py` (+2 tests): `load_calibrator_fn`
+  invocado con el `model_version` real y aplicado end-to-end (verificado
+  en la `OpportunityEvaluation` persistida); sin `load_calibrator_fn`
+  (MLB hoy), comportamiento idéntico al anterior. Corregido además un
+  test ya existente (`test_failure_in_one_side_does_not_block_the_other_side`)
+  cuyo doble de `build_signal_inputs` tenía una firma de 5 argumentos —
+  actualizado a 6 (el nuevo parámetro opcional), sin cambiar su
+  intención.
+- Suite completa: 986 (cierre de §0.26) + 16 = **1002 passed, 0
+  failed** (`tests/unit` + `tests/integration`).
+
+### Evidencia verificable (entrenamiento real ejecutado contra `data/engine.db` de producción)
+
+`python scripts/train_tennis_calibrator.py`:
+- `calibrator_version=tennis_calibrator_platt_v1_20260801T202949Z`,
+  `base_model_version=tennis_baseline_logreg_v1_20260801T184245Z`
+  (coincide exactamente con el modelo base real del Paso 4.3),
+  120 muestras / 24 eventos, `cv_folds=5`.
+- **Resultado real, out-of-fold (GroupKFold), misma validación en
+  ambos lados de la comparación**:
+  - `raw_ece=0.068` vs. `calibrated_ece_oof=0.137` (**empeora**).
+  - `raw_brier=0.103` vs. `calibrated_brier_oof=0.118` (**empeora**).
+- **Criterio de aceptación de `CALIBRATION_SPEC.md` §6: NO CUMPLIDO.**
+  Con el volumen actual (120 muestras), Platt scaling añade varianza
+  de estimación sin corregir una miscalibración real — el modelo crudo
+  ya estaba razonablemente calibrado (`ece=0.068`, dato ya conocido
+  desde el Paso 4.3), consistente con la propia justificación del
+  diseño (§1: Platt necesita "decenas a cientos" de muestras, y 120
+  está en el extremo bajo de ese rango).
+- Artefacto persistido en `data/models/` como evidencia (`.joblib` +
+  `.metadata.json`, gitignored, mismo tratamiento que el modelo base) —
+  **no se descarta**, es evidencia real de un resultado honesto.
+- Acción tomada, verificada por el propio código (no solo declarada):
+  se revirtió el cableado de `scripts/run_e2e.py`
+  (`SPORT_ADAPTERS[Sport.TENNIS]` vuelve a construirse sin
+  `load_calibrator_fn`) **antes** de que la próxima corrida horaria del
+  LaunchAgent pudiera recogerlo automáticamente. Confirmado en vivo:
+  `SPORT_ADAPTERS[Sport.MLB].load_calibrator_fn is None` y
+  `SPORT_ADAPTERS[Sport.TENNIS].load_calibrator_fn is None`, ambos
+  idénticos al estado previo a este paso.
+- `git status`/`git diff --stat` limpios salvo los archivos declarados
+  en cada uno de los 3 commits de este paso — `data/models/*.joblib`/
+  `*.metadata.json` gitignored, no aparecen en ningún diff.
+
+### Auditoría final
+
+- Ningún cambio de comportamiento fuera de lo declarado en
+  producción: la infraestructura de calibración existe y está
+  probada, pero **no se activó** — verificado en vivo, no solo
+  argumentado.
+- Criterio de aceptación de `CALIBRATION_SPEC.md` §12 (implícito en
+  §6): **cumplido en el sentido correcto** — el diseño exigía
+  detenerse si la evidencia contradice el despliegue, y eso es
+  exactamente lo que ocurrió. No es un paso fallido: es un paso que
+  produjo una respuesta honesta ("calibrar no ayuda hoy") en vez de
+  una fabricada.
+- Hueco real corregido en código ya cerrado de Fase 3/4
+  (`build_signal_inputs` no consumía `CalibrationOutput`,
+  `load_latest_tennis_artifact` no cargaba 9 campos ya persistidos) —
+  ambos señalados explícitamente, ninguno oculto en el diff.
+- D-3 y MLB permanecen exactamente como estaban (deuda documentada,
+  sin fecha, bloqueados por factores externos) — ningún intento nuevo
+  de resolverlos más allá de la verificación de estado de hoy.
+- 3 commits: `21b5391` (diseño), `cc55986` (implementación + tests),
+  `8a41685` (entrenamiento real + reversión del cableado tras evidencia
+  negativa).
+
+### Estado para continuar
+
+**Este paso está cerrado y verificado. Por instrucción explícita del
+usuario, no se avanza a la Fase 5 hasta que apruebe este informe.**
+Calibración real de tenis queda como infraestructura lista pero
+inactiva — reconsiderar solo si el volumen de validación de tenis
+crece sustancialmente (sin umbral numérico fijado, evitando inventar
+uno sin evidencia). D-3 (fees Kalshi) y entrenamiento de MLB
+permanecen bloqueados por factores externos, sin fecha, exactamente
+como en el cierre del Paso 4.3.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
