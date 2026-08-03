@@ -280,10 +280,9 @@ Backend local (este repo, FastAPI, Fase 5 ya corriendo)
 Respuesta AnalyzeResponse → extensión → UI inyectada en la pestaña de Robinhood
 ```
 
-**Siguiente paso real** (requiere una decisión de alcance explícita del
-usuario antes de escribir código, igual que en cada paso anterior):
-decidir el contrato del nuevo endpoint (`POST /map/robinhood` o
-equivalente) — qué payload exacto envía la extensión (¿un `symbol` por
-lado, o el `event_state` completo?), y si la extensión vive en este
-mismo repositorio o en uno aparte. Ninguna de las dos cosas está
-autorizada todavía por este paso.
+**Actualización (2026-08-03, ver `CONTINUITY.md` §0.30): el endpoint ya
+está implementado.** `POST /map/robinhood` (`{ symbol, game_start? }` →
+`{ kalshi_ticker, strategy, candidate, sport, sport_key }`) expone
+literalmente este módulo vía HTTP — ver `API_USAGE.md` para el uso real.
+Sigue pendiente, sin autorizar: la extensión de Chrome en sí (dónde vive
+el código, este repositorio vs. uno aparte).

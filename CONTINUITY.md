@@ -121,6 +121,14 @@ negativos por capturar `now`/`analysis_timestamp` demasiado temprano).
 Hallazgo de latencia real (tenis >5min con SofaScore activado)
 reportado y resuelto con aprobación explícita del usuario
 (`enrich_sofascore=False` solo en la vía en vivo). Suite en 1024.**
+**Actualizado de nuevo: 2026-08-03 — Mapeador Robinhood → Kalshi
+(`src/api/robinhood_mapper.py`, módulo interno, sin endpoint HTTP en
+ese paso) — ver §0.29. (Esta línea se añadió retroactivamente en el
+Paso 0.30 -- se omitió en el commit original de §0.29, un gap real de
+la Regla 5, dejado constatado en vez de ocultado.)**
+**Actualizado de nuevo: 2026-08-03 — Implementado `POST /map/robinhood`
+(`src/api/main.py`/`schemas.py`) — expone el mapeador vía HTTP sin
+duplicar su lógica, ver §0.30. Suite en 1057.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2879,6 +2887,119 @@ autorizar en este paso: contrato del endpoint que expondría este
 mapeador (`POST /map/robinhood` o equivalente — qué payload exacto
 envía la extensión) y dónde vive el código de la extensión (este
 repositorio vs. uno aparte) — ver `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5.
+
+**Nota de auditoría (encontrada en el Paso 0.30, no corregida
+retroactivamente):** esta sección afirma "Suite completa: 1025 passed,
+0 failed". Verificado en el Paso 0.30 que la suite real en este mismo
+commit (`6162ebb`, confirmado con `git stash`) es **1049 passed**, no
+1025 — `/analyze` (Paso 0.28) cerró en 1024, este paso documentó "25
+tests" nuevos (1024+25=1049, consistente), pero el número final escrito
+aquí arriba fue un error de transcripción. Se deja constancia en vez de
+reescribir el historial de un paso ya cerrado.
+
+## 0.30 Fase 5 — endpoint HTTP `POST /map/robinhood` (2026-08-03)
+
+### Contexto y autorización
+
+Continuación directa del Paso 0.29: el usuario pidió auditar la
+arquitectura y proponer el contrato de `POST /map/robinhood` **antes**
+de escribir código ("No implementes todavía"). Propuesta presentada en
+el chat (auditoría de capas existentes, contrato Request/Response,
+tabla de errores HTTP, boceto del endpoint, estrategia de pruebas, un
+punto abierto real — dónde viven los dos Pydantic models nuevos).
+Usuario aprobó con 9 decisiones explícitas: opción A (extender
+`schemas.py`, no crear `robinhood_schemas.py`), endpoint sin lógica de
+mapeo propia, reutilización literal de
+`map_robinhood_symbol_to_kalshi_ticker()`, traducción de `MappingError`
+igual que `/analyze` con `ResolverError`, separación de
+responsabilidades (dos llamadas HTTP independientes, `/analyze` sin
+tocar), contrato HTTP tal como se propuso, observabilidad explícita
+(symbol/candidato/estrategia/ticker en el log), cero duplicación de
+lógica del mapeador, suite completa, auditoría final, y solo entonces
+commit.
+
+### Implementado
+
+- `src/api/schemas.py`: `RobinhoodMapRequest` (`symbol: str` obligatorio,
+  `game_start: Optional[datetime]`) y `RobinhoodMapResponse`
+  (`kalshi_ticker`/`strategy`/`candidate`/`sport`/`sport_key`, todos
+  lectura literal de `MappingResult` — cero campos calculados). Docstring
+  del módulo ampliado ("Contratos HTTP de la API" en vez de "de
+  `/analyze`").
+- `src/api/main.py`: nuevo `POST /map/robinhood` — llama a
+  `map_robinhood_symbol_to_kalshi_ticker(request.symbol,
+  robinhood_start_time=request.game_start)`, traduce `MappingError` →
+  `HTTPException(status_code, detail)` (mismo patrón exacto que
+  `ResolverError` en `analyze()`), `except Exception` genérico → 502
+  (mismo principio "nunca un 200 fabricado"). Descripción de la app
+  (`FastAPI(description=...)`) corregida — ya no dice "Robinhood no está
+  integrado en el proyecto" sin matiz, ahora aclara que Robinhood sigue
+  sin ser fuente de datos del motor, solo el símbolo se traduce.
+- `src/api/robinhood_mapper.py`: **cero cambios** (verificado con `git
+  diff --stat -- src/api/robinhood_mapper.py`, sin salida) — cumple el
+  requisito explícito de no duplicar ni modificar su lógica.
+
+### Observabilidad (decisión #5 del usuario)
+
+El mapeador ya registra, en cada intento por estrategia (éxito o
+fallo): `symbol` original, `candidato` construido, `estrategia`
+(`exact`/`substring`/`event_matcher`) y `ticker` Kalshi finalmente
+seleccionado (`src/api/robinhood_mapper.py`, sin cambios en este paso —
+ver Paso 0.29). Investigado antes de escribir código nuevo (Regla 1):
+añadir ese mismo logging en `src/api/main.py` habría sido una
+duplicación literal de responsabilidad, violando explícitamente la
+decisión #6 del usuario ("no dupliques ninguna lógica del mapper"). El
+endpoint HTTP solo añade su propio `logger.exception` para el caso de
+excepción verdaderamente inesperada (no `MappingError`) — mismo patrón
+ya usado por `analyze()`.
+
+### Pruebas
+
+`tests/unit/test_api_main.py` extendido (mismo archivo, mismo patrón
+que los tests de `/analyze` — `map_robinhood_symbol_to_kalshi_ticker`
+monkeypatcheado, las 3 estrategias no se vuelven a probar aquí, ya
+cubiertas en `test_robinhood_mapper.py`): happy path (200 + forma de
+respuesta), `game_start` opcional (ausente y presente, verifica
+forwarding correcto a `robinhood_start_time`), traducción
+`MappingError`→código HTTP parametrizada (400/404/409/502), excepción
+inesperada→502, `symbol` ausente→422 (validación automática de
+Pydantic). **8 tests nuevos.**
+
+### Auditoría final
+
+- **Sin regresiones**: suite completa `.venv/bin/python -m pytest
+  tests/ -q` → **1057 passed, 0 failed** (baseline real 1049, verificado
+  con `git stash` contra el mismo commit `6162ebb` antes de estos
+  cambios — no el "1025" incorrecto documentado en el Paso 0.29, ver
+  nota de auditoría arriba). 1049 + 8 tests nuevos = 1057, exacto.
+- **Separación de capas**: `git diff --stat` de todo el paso —
+  `src/api/main.py`, `src/api/schemas.py`,
+  `tests/unit/test_api_main.py` modificados; `src/api/robinhood_mapper.py`
+  **sin cambios**. `main.py` no contiene ninguna de las 3 estrategias de
+  matching — solo un `try/except` que traduce `MappingError`, idéntico
+  en forma al ya existente para `ResolverError`.
+  `/analyze`/`analysis_service.py`/`event_resolver.py` sin tocar.
+- **Consistencia arquitectónica**: `POST /map/robinhood` sigue
+  literalmente el mismo esqueleto que `GET /analyze/{ticker}` (capa de
+  transporte pura, excepción tipada → `HTTPException`, Pydantic para
+  request/response). Las dos rutas son independientes -- el mapeo nunca
+  invoca `analyze_ticker`/`run_decision_pipeline`.
+- **Documentación actualizada**: `API_USAGE.md` (nueva sección `POST
+  /map/robinhood` completa — request/response/errores/observabilidad/
+  pruebas, más corrección de la nota "Robinhood no está integrado"),
+  `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5 (addendum: el endpoint ya existe,
+  referencia a `API_USAGE.md`), este documento.
+
+### Estado para continuar
+
+**`POST /map/robinhood` implementado, probado (1057 tests) y
+documentado.** Flujo completo Robinhood→Kalshi→análisis ya disponible
+vía dos llamadas HTTP independientes (`POST /map/robinhood` →
+`GET /analyze/{kalshi_ticker}`). Pendiente, sin autorizar: la extensión
+de Chrome en sí (dónde vive su código) — ver
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5. D-3 (fees Kalshi) y entrenamiento
+MLB siguen como deuda técnica documentada, sin fecha, sin cambios en
+este paso.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
