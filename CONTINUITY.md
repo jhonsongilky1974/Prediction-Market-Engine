@@ -2780,6 +2780,106 @@ Principio 21), Robinhood, `P_consensus_no_vig` real. D-3 y
 entrenamiento de MLB permanecen como deuda técnica documentada, sin
 fecha (§ `FASE4_CIERRE_FINAL.md`).
 
+## 0.29 Mapeador Robinhood → Kalshi — investigación + módulo interno (2026-08-03)
+
+### Contexto y autorización
+
+El usuario pidió el siguiente paso natural tras Fase 5: que una futura
+extensión de Chrome pueda traducir el evento que el usuario ve en
+Robinhood al ticker de Kalshi, para alimentar `/analyze`. Investigación
+previa (Regla 1) confirmó dos veces, con evidencia distinta: **la
+extensión de Chrome no existe en este repositorio, ni existió nunca**
+(búsqueda por archivo/carpeta y `git log --all --full-history` en todas
+las ramas, cero resultados) y **Robinhood no tenía ningún rastro de
+integración real** (§0.28, `HTTP_SERVICE_SPEC.md`).
+
+Dos preguntas de arquitectura genuinamente del usuario se dejaron
+pendientes vía `AskUserQuestion` (formato de entrada del lado Robinhood;
+dónde vive el código de la extensión) — ambas descartadas sin responder
+en su momento. En vez de asumir, el usuario decidió resolver la primera
+inspeccionando él mismo Robinhood en DevTools. Un intento de capturar
+esa evidencia como archivo HAR exportado falló repetidamente (el export
+nunca se guardó físicamente en disco pese a varios reintentos guiados
+paso a paso, incluyendo verificación de `chrome://downloads` y ajuste de
+la ubicación de descarga de Chrome) — documentado en el historial de la
+sesión, no oculto. El usuario cambió de estrategia: inspección en vivo
+directa contra la sesión real de Robinhood del usuario (ya autenticada)
+usando la herramienta `claude-in-chrome` (Chrome real del usuario, sin
+que Claude manejara credenciales en ningún momento) — método que sí
+produjo evidencia verificable.
+
+### Evidencia real obtenida (dos deportes, en vivo, 2026-08-03)
+
+Tres endpoints de `api.robinhood.com` identificados y documentados con
+payloads reales en `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §1:
+`prediction-markets/v1/event_state` (estructura del evento),
+`marketdata/event/contract/quotes/v1` (precios en vivo por contrato,
+incluye el campo clave `symbol`), `marketdata/event/contract/fundamentals/v1`
+(volumen/open interest, sin utilidad para el mapeo).
+
+**Hallazgo que cambió el diseño** (reportado al usuario antes de escribir
+código, con evidencia, no una suposición): el campo `symbol` de
+`quotes/v1` es, para tenis, **idéntico byte a byte** al ticker real de
+Kalshi (`KXWTAMATCH-26AUG02PEGEAL-PEG`); para MLB, el mismo formato pero
+**sin el prefijo `KX`** y sin el segmento de hora que Kalshi a veces
+inserta para desambiguar doubleheaders (`MLBGAME-26AUG03WSHPHI-WSH` vs.
+un ticker real ya documentado en §0.28 con hora,
+`KXMLBGAME-26AUG011507STLTOR-STL`). Ningún endpoint de Robinhood expone
+nombres completos de equipos/jugadores — solo abreviaturas de 3 letras.
+
+### Decisión de arquitectura (resuelta explícitamente por el usuario)
+
+Ante el hallazgo, el usuario decidió la estrategia de resolución en tres
+niveles, en este orden estricto: **EXACT** (candidato = symbol con `KX`
+al frente si falta) → si falla, **SUBSTRING** (determinista, sin
+matching difuso, tolera el segmento de hora opcional de Kalshi) → si
+también falla, **EVENT_MATCHER** (`market_matcher.find_best_kalshi_event`,
+Fase 1, sin modificar, último recurso) — con el requisito explícito de
+que cada estrategia usada quede registrada en el log para auditabilidad
+completa.
+
+### Implementado
+
+`src/api/robinhood_mapper.py` (módulo Python interno — **sin endpoint
+HTTP todavía**, decisión deliberada de alcance mínimo: exponerlo vía
+HTTP y construir la extensión requieren decisiones de contrato/alcance
+que el usuario no había resuelto en este paso, ver
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5): `map_robinhood_symbol_to_kalshi_ticker()`
+implementa las tres estrategias sobre `KalshiConnector.get_all_events_for_sport`
+(Fase 1, sin endpoints nuevos de Kalshi) y `find_best_kalshi_event`
+(Fase 1, sin modificar) — cero lógica de matching nueva más allá de la
+construcción/verificación del candidato. `MappingError` honesto
+(400/404/409/502) si ninguna estrategia produce un match confidente —
+nunca se fabrica un ticker. Cada intento (éxito o fallo, por estrategia)
+se registra vía `logging`.
+
+### Pruebas
+
+`tests/unit/test_robinhood_mapper.py` (25 tests, sin red real —
+`KalshiConnector` sustituido por un stub): helpers puros, las tres
+estrategias por separado (incluyendo el caso ambiguo de substring →
+409, y la limitación documentada de que event_matcher rinde peor contra
+códigos de 3 letras que contra nombres completos), fallo total (404),
+fallo de Kalshi (502), serie no soportada (400 sin llamar a Kalshi).
+Suite completa: **1025 passed, 0 failed** — sin regresiones.
+
+### Auditoría de alcance
+
+`git diff --stat` de todo el paso: únicamente `src/api/robinhood_mapper.py`
+(nuevo), `tests/unit/test_robinhood_mapper.py` (nuevo),
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` (nuevo) y esta actualización de
+`CONTINUITY.md` — ningún archivo de Fase 1-5 modificado.
+
+### Estado para continuar
+
+**Mapeador Robinhood → Kalshi implementado como módulo interno,
+verificado con evidencia real, sin endpoint HTTP ni extensión de
+navegador todavía.** Siguiente decisión pendiente, explícitamente sin
+autorizar en este paso: contrato del endpoint que expondría este
+mapeador (`POST /map/robinhood` o equivalente — qué payload exacto
+envía la extensión) y dónde vive el código de la extensión (este
+repositorio vs. uno aparte) — ver `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
