@@ -3001,6 +3001,172 @@ de Chrome en sí (dónde vive su código) — ver
 MLB siguen como deuda técnica documentada, sin fecha, sin cambios en
 este paso.
 
+## 0.31 Fix: `/analyze` devolvía 404 para un ticker recién resuelto por `/map/robinhood` (2026-08-03)
+
+### Contexto y autorización
+
+El usuario reportó, con evidencia real de su extensión de Chrome ya
+funcionando (§0.30 validado end-to-end del lado Robinhood→mapeo): el
+mapeador resolvía el ticker Kalshi correctamente (200), pero
+`GET /analyze/{kalshi_ticker}` con ESE MISMO ticker devolvía 404 --
+instrucción explícita de investigar la causa raíz real, sin bypasses ni
+soluciones temporales, corregir en la arquitectura correcta, probar,
+levantar el servidor y validar el flujo completo de nuevo.
+
+### Investigación (Regla 1 -- reproducido contra APIs reales, no simulado)
+
+Reproducido en vivo con un ticker MLB real (Washington @ Philadelphia,
+2026-08-03): `resolve_ticker("KXMLBGAME-26AUG031840WSHPHI-WSH")` ->
+404 "el motor no encontró un match confidente". Investigación por capas:
+
+1. `run_mlb_pipeline` (fecha derivada del ticket) sí encontraba el
+   candidato Kalshi correcto por NOMBRE (`Washington Nationals` ~
+   `Washington`), pero `match_event` lo rechazaba: "diferencia temporal
+   180min excede tolerancia de 90min" -- `MatchMethod.NEEDS_REVIEW`,
+   `market_id` nunca se adjuntaba.
+2. Cross-validación de las 3 fuentes de tiempo disponibles para ESE
+   mismo partido: MLB Stats API `start_time`=`2026-08-03T22:40:00Z`;
+   texto `rules_primary` del propio mercado de Kalshi ("originally
+   scheduled for Aug 3, 2026 at **6:40 PM EDT**" = 22:40 UTC, coincide
+   exacto); campo `occurrence_datetime` del mismo mercado =
+   `2026-08-04T01:40:00Z` -- **+180min, no coincide con ninguna de las
+   otras dos fuentes, ambas de acuerdo entre sí**.
+3. Verificado en los 8/8 partidos MLB reales abiertos ese día: la
+   misma diferencia de **exactamente** 180min en el 100% de los casos
+   (no ruido/varianza real de partido a partido) -- y
+   `occurrence_datetime` idéntico byte a byte a `expected_expiration_time`
+   en cada uno.
+4. Consultada la documentación oficial de Kalshi
+   (`docs.kalshi.com/api-reference/market/get-market.md`, vía WebFetch,
+   Regla 3 -- nunca se fabrica una interpretación de un campo externo sin
+   verificar la fuente primaria): `occurrence_datetime` = "The recorded
+   datetime when the underlying event occurred, **if available**";
+   `expected_expiration_time` = "Time when this market is expected to
+   expire". Ningún campo estructurado de `GET /events`/`GET /markets/{ticker}`
+   documenta la hora de inicio programada.
+
+**Causa raíz confirmada, no especulada**: `occurrence_datetime` de un
+mercado de Kalshi que TODAVÍA no ocurrió (cualquier mercado abierto que
+`/analyze` fuera a analizar en vivo, el 100% de los casos reales) no
+está poblado con la hora de inicio -- Kalshi lo deja igual a
+`expected_expiration_time` (una liquidación esperada, `inicio real +
+duración típica asumida`) como placeholder hasta que el evento ocurra
+de verdad. `src/matching/market_matcher.py::_kalshi_event_start_time`
+(Fase 1, usado por `find_best_kalshi_event` en AMBOS pipelines,
+MLB y tenis) y `src/api/event_resolver.py::_date_from_market` (Fase 5)
+asumían -- sin haberlo verificado nunca contra la documentación real --
+que `occurrence_datetime` era la hora de inicio. Bug preexistente a
+Fase 5 y a este paso, no introducido por el mapeador Robinhood -- solo
+salió a la luz ahora porque es la primera vez que se prueba
+`/analyze` con un ticker recién resuelto en vivo por una fuente externa.
+**Afectaba (afectaría) al 100% de los tickers MLB reales, no solo a los
+resueltos vía Robinhood** -- cualquier llamada directa a `/analyze` con
+un ticker MLB real habría fallado igual.
+
+Doble impacto del mismo campo mal interpretado: (a) `_kalshi_event_start_time`
+usaba ese valor para el chequeo de tolerancia temporal del matcher
+(bloqueaba la confirmación pese a nombre exacto); (b)
+`_date_from_market` lo usaba para decidir QUÉ DÍA consultarle a MLB
+Stats API -- con el offset cruzando medianoche UTC, pedía el día
+siguiente, donde el partido correcto ni siquiera aparecía como
+candidato.
+
+### Solución implementada (arquitectura correcta, no un bypass)
+
+**No se ensanchó la tolerancia de 90min** (habría sido el bypass más
+obvio y el que el usuario pidió explícitamente evitar) -- eso solo
+habría enmascarado el problema y arriesgado fusionar partidos
+genuinamente distintos (doubleheaders). En su lugar: el propio *ticker*
+de Kalshi embebe la hora local real del partido (mismo formato ya
+investigado y documentado para el mapeador Robinhood,
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md`) -- verificado exacto contra
+MLB Stats API en los 8/8 casos reales. Nueva fuente PRIMARIA de verdad,
+con fallback al comportamiento anterior cuando el ticker no trae
+segmento de hora (tenis, hoy):
+
+- `src/matching/market_matcher.py`: nuevas `_start_time_from_ticker`
+  (fecha+hora -> `datetime` UTC, vía `zoneinfo("America/New_York")` --
+  resuelve EDT/EST automáticamente según la fecha real, no un offset
+  fijo hardcodeado) y `local_date_from_kalshi_ticker` (pública, solo
+  fecha, no requiere segmento de hora). `_kalshi_event_start_time`
+  ahora intenta el ticker primero, cae a `occurrence_datetime` solo si
+  el ticker no tiene hora parseable -- mismo comportamiento exacto que
+  antes para esos casos (tenis).
+- `src/api/event_resolver.py::_date_from_market`: mismo patrón,
+  reutiliza `local_date_from_kalshi_ticker` en vez de duplicar el
+  parseo -- prioriza el ticker, cae a `occurrence_datetime` sin
+  cambios cuando no aplica.
+- Meses en inglés mapeados explícitamente (`_TICKER_MONTH_ABBR`), no
+  `strptime("%b")` (dependiente del locale del sistema).
+
+### Pruebas (regresión, sin tests existentes modificados)
+
+19 tests nuevos, todos verificados contra los valores reales
+encontrados en la investigación (mismo ticker/partido/offset real, no
+inventados): `tests/unit/test_market_matcher.py` (16 -- `_start_time_from_ticker`/
+`local_date_from_kalshi_ticker` unitarios, `_kalshi_event_start_time`
+prefiere ticker sobre `occurrence_datetime` engañoso,
+`find_best_kalshi_event` end-to-end confirma `EXACT_NAME_TIME` en el
+caso real que antes daba `NEEDS_REVIEW`); `tests/unit/test_event_resolver.py`
+(3 -- `_date_from_market` prefiere ticker, MLB y tenis;
+`resolve_ticker` end-to-end pide la fecha correcta, no la de
+`occurrence_datetime`). Suite completa: **1076 passed, 0 failed**
+(1057 + 19, sin regresiones -- ningún test preexistente modificado).
+
+### Validación real (servidor levantado, flujo completo repetido)
+
+Encontrado durante la validación: un proceso `uvicorn` **obsoleto** (del
+Python del sistema, no de `.venv`) seguía escuchando en el puerto 8000
+desde una sesión anterior -- las primeras pruebas post-fix seguían
+dando 404 porque golpeaban ESE proceso viejo, no el código corregido.
+Detenido y reemplazado por uno nuevo desde `.venv` antes de repetir la
+validación (documentado, no silenciado). Con el servidor correcto:
+
+```
+POST /map/robinhood {"symbol":"MLBGAME-26AUG03WSHPHI-WSH"}
+-> 200 {"kalshi_ticker":"KXMLBGAME-26AUG031840WSHPHI-WSH","strategy":"substring",...}
+
+GET /analyze/KXMLBGAME-26AUG031840WSHPHI-WSH
+-> 200 {"event_id":"mlb_823431","participant_a":"Washington Nationals",
+        "participant_b":"Philadelphia Phillies","p_market":0.42,
+        "recommendation":"WATCH", ...}
+```
+
+Flujo completo Robinhood símbolo -> ticker Kalshi -> análisis real,
+confirmado con datos en vivo, extremo a extremo.
+
+### Auditoría final
+
+- Sin regresiones: 1076/1076 tests, ningún test preexistente tocado.
+- `git diff --stat`: `src/matching/market_matcher.py`,
+  `src/api/event_resolver.py` (fix), `tests/unit/test_market_matcher.py`,
+  `tests/unit/test_event_resolver.py` (regresión), este documento --
+  ningún otro archivo de Fase 1-5 tocado. `robinhood_mapper.py`,
+  `analysis_service.py`, `main.py` sin cambios (el bug y el fix viven
+  enteramente en la capa de matching/resolución, no en el mapeador ni
+  en el endpoint HTTP -- consistente con el reporte del usuario de que
+  el mapeador ya funcionaba bien).
+- Separación de capas intacta: el fix vive en Fase 1 (`market_matcher.py`,
+  compartido por MLB y tenis) y Fase 5 (`event_resolver.py`) -- ninguna
+  lógica de mapeo Robinhood se tocó ni se duplicó.
+
+### Estado para continuar
+
+**Flujo Robinhood -> `/map/robinhood` -> `/analyze` validado
+extremo a extremo con datos reales, en vivo.** Deuda relacionada,
+NO resuelta en este paso (fuera del reporte original del usuario,
+requiere su propia decisión): el mismo problema de fondo
+(`occurrence_datetime` no confiable pre-evento) probablemente afecta
+también a tenis (ATP/WTA) -- verificado que ~94-97% de los mercados
+de tenis abiertos hoy también tienen `occurrence_datetime` ==
+`expected_expiration_time`, pero los tickers de tenis reales
+observados no embeben segmento de hora (a diferencia de MLB hoy), por
+lo que el fallback de este paso no lo corrige -- sigue exactamente
+igual que antes. D-3 (fees Kalshi) y entrenamiento MLB siguen como
+deuda técnica documentada, sin fecha, sin cambios en este paso.
+Servidor de prueba (`uvicorn`, PID reportado al usuario en el chat)
+queda corriendo para que el usuario siga probando la extensión.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de

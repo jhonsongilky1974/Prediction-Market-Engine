@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import KALSHI_SPORT_SERIES
 from src.connectors.kalshi import KalshiConnector
+from src.matching.market_matcher import local_date_from_kalshi_ticker
 from src.models.schemas import NormalizedRecord, Sport
 from src.pipelines.mlb_pipeline import run_mlb_pipeline
 from src.pipelines.tennis_pipeline import run_tennis_pipeline
@@ -100,6 +101,20 @@ def _find_market(ticker: str, kalshi_events: List[Dict[str, Any]]) -> Tuple[Dict
 
 
 def _date_from_market(market: Dict[str, Any], sport: Sport) -> str:
+    """Fuente primaria: el segmento de fecha embebido en el propio
+    `ticker` (`local_date_from_kalshi_ticker`, `src/matching/market_matcher.py`)
+    -- ver su docstring / la de `_start_time_from_ticker` para la causa
+    raíz real de por qué `occurrence_datetime` NO es la fecha del
+    partido mientras este no ha ocurrido todavía (queda igual a
+    `expected_expiration_time`, una liquidación esperada, no un inicio
+    real -- verificado contra la API real de Kalshi). Fallback a
+    `occurrence_datetime` únicamente cuando el ticker no trae segmento
+    de fecha parseable (mismo comportamiento que antes de ese fix)."""
+    ymd = local_date_from_kalshi_ticker(market.get("ticker"))
+    if ymd is not None:
+        year, month, day = ymd
+        return f"{year:04d}-{month:02d}-{day:02d}" if sport == Sport.MLB else f"{year:04d}{month:02d}{day:02d}"
+
     raw = market.get("occurrence_datetime")
     if not raw:
         raise ResolverError(502, "el mercado de Kalshi encontrado no trae occurrence_datetime -- no se puede derivar la fecha del evento real.")
