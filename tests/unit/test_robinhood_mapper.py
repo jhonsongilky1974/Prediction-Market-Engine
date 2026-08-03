@@ -213,6 +213,37 @@ def test_event_matcher_fallback_used_when_exact_and_substring_fail():
     assert result.kalshi_ticker == "KXMLBGAME-26AUG05NYYBOS-NYY"
 
 
+def test_event_matcher_uses_tennis_tolerance_not_generic_mlb_default():
+    """Regresión real encontrada en auditoría (ver CONTINUITY.md): la
+    llamada a find_best_kalshi_event en esta estrategia omitía
+    tolerance_minutes -- caía al default genérico de la función (90min,
+    el valor de MLB), nunca el de tenis (240min,
+    EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT, ya usado correctamente
+    en tennis_pipeline.py). Un desfase de 150min entre
+    robinhood_start_time y occurrence_datetime -- legítimo en tenis
+    ("orden de salida a pista", ver config/settings.py) -- solo se
+    resuelve con la tolerancia correcta; con el bug (90min) esto habría
+    dado NEEDS_REVIEW y terminado en 404."""
+    event = {
+        "event_ticker": "KXWTAMATCH-26AUG02PEGEAL",
+        "title": "Pegula vs Eala",
+        "markets": [
+            {"ticker": "KXWTAMATCH-26AUG02PEGEAL-PEG", "yes_sub_title": "Pegula", "occurrence_datetime": "2026-08-02T18:00:00Z"},
+            {"ticker": "KXWTAMATCH-26AUG02PEGEAL-EAL", "yes_sub_title": "Eala", "occurrence_datetime": "2026-08-02T18:00:00Z"},
+        ],
+    }
+    stub = _StubKalshiConnector(_ok([event]))
+    # symbol con fecha DISTINTA (03 en vez de 02) -> exact y substring
+    # fallan, solo event_matcher puede resolverlo.
+    result = map_robinhood_symbol_to_kalshi_ticker(
+        "WTAMATCH-26AUG03PEGEAL-PEG",
+        robinhood_start_time=datetime(2026, 8, 2, 20, 30, tzinfo=timezone.utc),  # +150min vs occurrence_datetime
+        kalshi_connector=stub,
+    )
+    assert result.strategy == "event_matcher"
+    assert result.kalshi_ticker == "KXWTAMATCH-26AUG02PEGEAL-PEG"
+
+
 def test_all_strategies_fail_raises_404():
     stub = _StubKalshiConnector(_ok([_WTA_EVENT]))
     with pytest.raises(MappingError) as exc_info:

@@ -53,7 +53,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from config.settings import EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT, KALSHI_SPORT_SERIES
 from src.connectors.kalshi import KalshiConnector
+from src.matching.market_matcher import _TICKER_DATE_SEGMENT_LENGTH as _DATE_SEGMENT_LENGTH
 from src.matching.market_matcher import find_best_kalshi_event
 from src.models.schemas import Sport
 from src.storage.repository import Repository
@@ -65,11 +67,17 @@ _SERIES_TO_SPORT_KEY: Dict[str, str] = {
     "KXATPMATCH": "ATP",
     "KXWTAMATCH": "WTA",
 }
+assert set(_SERIES_TO_SPORT_KEY) == set(KALSHI_SPORT_SERIES.values()), (
+    "_SERIES_TO_SPORT_KEY (este módulo) debe cubrir exactamente las mismas series que "
+    "KALSHI_SPORT_SERIES (config/settings.py) y _SERIES_TO_SPORT (src/api/event_resolver.py) -- "
+    "las tres son fuentes independientes del mismo mapeo serie->deporte; una serie nueva en Kalshi "
+    "requiere actualizar las tres o el mapeador Robinhood queda silenciosamente desincronizado."
+)
 
-_DATE_SEGMENT_LENGTH = 7
-"""Longitud fija del segmento de fecha embebido en el `symbol` de
-Robinhood y en el ticker de Kalshi, forma `YYMMMDD` (ej. `26AUG03`) --
-verificado en los dos ejemplos reales de la evidencia (MLB y WTA)."""
+# `_DATE_SEGMENT_LENGTH` reutiliza literalmente la constante de
+# `market_matcher.py` (auditoría: ver CONTINUITY.md) -- antes había dos
+# definiciones independientes del mismo valor (`YYMMMDD`, 7 caracteres)
+# en dos módulos, sin ninguna garantía de que se mantuvieran sincronizadas.
 
 
 class MappingError(Exception):
@@ -246,7 +254,18 @@ def map_robinhood_symbol_to_kalshi_ticker(
     # Estrategia 3: EVENT_MATCHER (último recurso)
     opponent = _derive_opponent_code(teams_part, side) if teams_part else None
     if opponent:
-        match = find_best_kalshi_event(side, opponent, robinhood_start_time, kalshi_events)
+        # Regresión real encontrada en auditoría (ver CONTINUITY.md): esta
+        # llamada omitía `tolerance_minutes`, cayendo en el default
+        # genérico de `find_best_kalshi_event` (90min, el valor de MLB) --
+        # para tenis debía ser 240min (`EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT`,
+        # ya usado correctamente en `tennis_pipeline.py`). Sin este fix,
+        # esta estrategia (último recurso) podía rechazar por tiempo un
+        # partido de tenis genuino con hasta 240min de desfase legítimo
+        # (horario "por orden de salida a pista", ver config/settings.py).
+        match = find_best_kalshi_event(
+            side, opponent, robinhood_start_time, kalshi_events,
+            tolerance_minutes=EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT[sport.value],
+        )
         selected_ticker = (match.selected_market or {}).get("ticker") if match.selected_market else None
         if match.match_result.is_confident and selected_ticker:
             logger.info(
