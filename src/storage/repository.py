@@ -8,7 +8,9 @@ reproducibilidad y debug.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,8 @@ from typing import Any, Dict, Iterator, Optional
 
 from config.settings import DATA_RAW_DIR, DB_PATH
 from src.models.schemas import NormalizedRecord
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS raw_captures (
@@ -135,6 +139,8 @@ class Repository:
     # Registros normalizados
     # ---------------------------------------------------------------
     def save_normalized_record(self, record: NormalizedRecord) -> None:
+        save_started = time.monotonic()
+        logger.info("-> save_normalized_record event_id=%r", record.event_id)
         payload = record.model_dump_json()
         with self._connect() as conn:
             conn.execute(
@@ -150,6 +156,10 @@ class Repository:
                     payload,
                 ),
             )
+        logger.info(
+            "<- save_normalized_record OK event_id=%r elapsed_ms=%.1f",
+            record.event_id, (time.monotonic() - save_started) * 1000,
+        )
 
     def get_normalized_records(self, sport: Optional[str] = None) -> list[Dict[str, Any]]:
         query = "SELECT payload_json FROM normalized_records"

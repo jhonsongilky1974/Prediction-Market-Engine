@@ -96,6 +96,32 @@ def test_date_from_market_missing_occurrence_raises_502():
     assert exc_info.value.status_code == 502
 
 
+# --- Regresión real (2026-08-03, ver CONTINUITY.md §0.31): `occurrence_datetime`
+# de un mercado de Kalshi que todavía no ocurrió es un valor de LIQUIDACIÓN
+# esperada (~inicio real + 3h para MLB), no el inicio real -- derivar la
+# FECHA a consultar en MLB Stats API a partir de ese campo llevaba a pedir
+# el día SIGUIENTE (2026-08-04 en vez del 2026-08-03 real), donde el
+# ticket jamás aparecía entre los registros normalizados de ese día ->
+# 404 pese a que el mapeador Robinhood ya había resuelto el ticker
+# correcto contra Kalshi en vivo. Ver también tests/unit/test_market_matcher.py.
+
+
+def test_date_from_market_prefers_ticker_over_misleading_occurrence_datetime():
+    market = {
+        "ticker": "KXMLBGAME-26AUG031840WSHPHI-WSH",
+        "occurrence_datetime": "2026-08-04T01:40:00Z",  # +180min, valor de liquidación, no de inicio
+    }
+    assert _date_from_market(market, Sport.MLB) == "2026-08-03"
+
+
+def test_date_from_market_tennis_format_prefers_ticker_over_misleading_occurrence_datetime():
+    market = {
+        "ticker": "KXWTAMATCH-26AUG032140PEGEAL-PEG",
+        "occurrence_datetime": "2026-08-04T01:40:00Z",
+    }
+    assert _date_from_market(market, Sport.TENNIS) == "20260803"
+
+
 # ---------------------------------------------------------------------
 # resolve_ticker -- glue completo, KalshiConnector.get_all_events_for_sport
 # monkeypatcheado a nivel de clase, run_mlb_pipeline/run_tennis_pipeline
@@ -182,6 +208,44 @@ def test_resolve_ticker_kalshi_down_raises_502(monkeypatch):
         resolve_ticker("KXMLBGAME-26AUG01LAADET-LAA")
     assert exc_info.value.status_code == 502
     assert "kalshi 429" in exc_info.value.detail
+
+
+def test_resolve_ticker_uses_ticker_date_not_misleading_occurrence_datetime(monkeypatch):
+    """Regresión end-to-end del bug real corregido (ver CONTINUITY.md
+    §0.31): un `occurrence_datetime` "adelantado" (liquidación esperada,
+    no inicio real) hacía que `resolve_ticker` le pidiera a MLB Stats API
+    el día equivocado -- el ticker jamás aparecía entre los registros
+    normalizados de ESE día -> 404, pese a que Kalshi sí tenía el ticker
+    abierto y el mapeador Robinhood ya lo había resuelto correctamente."""
+    misleading_event = {
+        "event_ticker": "KXMLBGAME-26AUG031840WSHPHI",
+        "title": "Washington vs Philadelphia",
+        "markets": [
+            {
+                "ticker": "KXMLBGAME-26AUG031840WSHPHI-WSH",
+                "yes_sub_title": "Washington",
+                "occurrence_datetime": "2026-08-04T01:40:00Z",  # +180min, valor de liquidación
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        KalshiConnector,
+        "get_all_events_for_sport",
+        lambda self, sport_key, status="open", max_pages=10: _ok({"events": [misleading_event]}),
+    )
+    matched_record = _record("KXMLBGAME-26AUG031840WSHPHI-WSH")
+    calls = {}
+
+    def fake_run_mlb_pipeline(date, repository=None, history_repository=None):
+        calls["date"] = date
+        return _FakeMlbPipelineResult([matched_record])
+
+    monkeypatch.setattr(resolver_module, "run_mlb_pipeline", fake_run_mlb_pipeline)
+
+    resolved = resolve_ticker("KXMLBGAME-26AUG031840WSHPHI-WSH")
+
+    assert calls["date"] == "2026-08-03"  # fecha real embebida en el ticker, no 2026-08-04 (occurrence_datetime)
+    assert resolved.record is matched_record
 
 
 def test_resolve_ticker_no_confident_match_raises_404(monkeypatch):

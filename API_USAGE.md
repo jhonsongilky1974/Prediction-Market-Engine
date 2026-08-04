@@ -1,8 +1,9 @@
-# Servicio HTTP local — `/analyze` (Fase 5)
+# Servicio HTTP local — `/analyze` y `/map/robinhood` (Fase 5)
 
 Expone el motor de análisis (Fase 1-4) vía HTTP. Ver `HTTP_SERVICE_SPEC.md`
-para el diseño completo y `CONTINUITY.md` (§0.28) para el informe de
-implementación y la evidencia real.
+para el diseño de `/analyze` (`CONTINUITY.md` §0.28) y
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` para el diseño de `/map/robinhood`
+(`CONTINUITY.md` §0.30).
 
 ## Arrancar el servidor
 
@@ -86,7 +87,73 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8000/analyze/KXNFLGAME-BOGUS
 # HTTP 400
 ```
 
-## Campos de la respuesta
+## Endpoint — `POST /map/robinhood`
+
+Resuelve **únicamente** un `symbol` de Robinhood Prediction Markets al
+ticker de MERCADO Kalshi correspondiente, verificado en vivo contra los
+mercados actualmente abiertos — no invoca el motor de análisis. Es un
+paso independiente y previo a `/analyze`: el flujo real de la extensión
+es `POST /map/robinhood` → toma `kalshi_ticker` de la respuesta →
+`GET /analyze/{kalshi_ticker}`.
+
+Reutiliza literalmente `map_robinhood_symbol_to_kalshi_ticker()`
+(`src/api/robinhood_mapper.py`, ver `ROBINHOOD_KALSHI_MAPPER_SPEC.md`)
+— tres estrategias en orden (exact → substring → event_matcher), nunca
+fabrica un ticker sin verificar contra Kalshi en vivo.
+
+### Request
+
+```json
+{
+  "symbol": "MLBGAME-26AUG03WSHPHI-WSH",
+  "game_start": "2026-08-03T19:00:00Z"
+}
+```
+
+`symbol` es obligatorio (campo real de
+`.../marketdata/event/contract/quotes/v1/`). `game_start` es opcional
+— solo lo usa la estrategia 3 (event_matcher) como señal adicional de
+proximidad temporal; su ausencia no bloquea las estrategias 1/2.
+
+### Ejemplo
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/map/robinhood \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "KXWTAMATCH-26AUG02PEGEAL-PEG"}'
+```
+
+```json
+{
+  "kalshi_ticker": "KXWTAMATCH-26AUG02PEGEAL-PEG",
+  "strategy": "exact",
+  "candidate": "KXWTAMATCH-26AUG02PEGEAL-PEG",
+  "sport": "TENNIS",
+  "sport_key": "WTA"
+}
+```
+
+### Errores (siempre honestos, nunca un 200 fabricado)
+
+| Código | Cuándo |
+|---|---|
+| `400` | `symbol` con forma inesperada (no 3 segmentos separados por `-`, o algún segmento vacío), o prefijo de serie no soportado (solo `KXMLBGAME`/`KXATPMATCH`/`KXWTAMATCH`) — se rechaza antes de consultar Kalshi. |
+| `404` | Ninguna de las 3 estrategias (exact/substring/event_matcher) encontró un match confidente contra los mercados Kalshi actualmente abiertos. |
+| `409` | La estrategia substring encontró más de un ticker Kalshi candidato (ambiguo) — nunca se elige uno arbitrariamente. |
+| `422` | `symbol` ausente o de tipo incorrecto en el body (validación automática de FastAPI/Pydantic). |
+| `502` | Fallo real al consultar `KalshiConnector.get_all_events_for_sport`. |
+
+### Observabilidad
+
+Cada intento de mapeo (éxito o fallo, por cada una de las 3 estrategias)
+queda registrado por `src.api.robinhood_mapper` con `symbol` original,
+`candidato` construido, `estrategia` usada, y `ticker` Kalshi
+finalmente seleccionado — el endpoint HTTP no repite este logging (evita
+duplicar la observabilidad ya presente en el mapeador); solo añade su
+propio `logger.exception` para fallos verdaderamente inesperados (no
+`MappingError`), igual que `/analyze`.
+
+## Campos de la respuesta (`/analyze`)
 
 | Campo | Significado |
 |---|---|
@@ -104,10 +171,13 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8000/analyze/KXNFLGAME-BOGUS
 
 ## Notas importantes (leer antes de usar en cualquier flujo real)
 
-- **Solo Kalshi.** Robinhood no está integrado en el proyecto -- ningún
-  conector existe (`MarketData.robinhood_price_observed` es un campo
-  vestigial de Fase 1, nunca poblado). Un ticker que no pertenezca a
-  las series de Kalshi soportadas devuelve `400`.
+- **`/analyze` solo entiende tickers de Kalshi.** Robinhood no es una
+  fuente de datos del motor -- ningún conector existe
+  (`MarketData.robinhood_price_observed` es un campo vestigial de Fase
+  1, nunca poblado). Un ticker que no pertenezca a las series de Kalshi
+  soportadas devuelve `400`. `POST /map/robinhood` (ver más abajo) solo
+  traduce el `symbol` de Robinhood al ticker Kalshi correspondiente --
+  no analiza nada por sí mismo.
 - **`P_consensus_no_vig` no es utilizable con datos reales hoy** -- la
   capa que resuelve qué participante de The Odds API corresponde al
   lado YES de un ticker de Kalshi nunca se construyó (diferida
@@ -138,6 +208,13 @@ curl -s -w "\nHTTP %{http_code}\n" http://127.0.0.1:8000/analyze/KXNFLGAME-BOGUS
 
 ```bash
 source .venv/bin/activate
-python -m pytest tests/unit/test_event_resolver.py tests/unit/test_analysis_service.py tests/unit/test_api_main.py -v
+python -m pytest tests/unit/test_event_resolver.py tests/unit/test_analysis_service.py tests/unit/test_robinhood_mapper.py tests/unit/test_api_main.py -v
 python -m pytest tests/integration/test_analyze_real.py -m integration -v   # APIs reales, tmp_path, nunca data/engine.db
 ```
+
+`/map/robinhood` no tiene test de integración con API real -- Robinhood
+no es un conector de este repositorio (no hay forma automatizada de
+obtener un `symbol` real en tiempo de test); la evidencia real que
+motivó el diseño se verificó manualmente vía DevTools, documentada en
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §1. Mismo criterio ya aplicado al
+mapeador (`test_robinhood_mapper.py`), extendido ahora al endpoint.

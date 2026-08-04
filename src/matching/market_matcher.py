@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from config.settings import EVENT_NAME_MATCH_MIN_CONFIDENCE, EVENT_TIME_MATCH_TOLERANCE_MINUTES
 from src.matching.event_matcher import MatchResult, match_event, name_similarity
@@ -28,6 +29,145 @@ from src.normalization.market_normalizer import normalize_kalshi_market
 from src.quality.validators import validate_schema_sanity
 
 logger = logging.getLogger(__name__)
+
+_TICKER_DATE_SEGMENT_LENGTH = 7
+"""Longitud fija del segmento de fecha embebido en el ticker de Kalshi,
+forma `YYMMMDD` (ej. `26AUG03`) -- mismo formato ya documentado y usado
+en `src/api/robinhood_mapper.py`."""
+
+_TICKER_TIME_SEGMENT_LENGTH = 4
+"""Longitud del segmento de hora `HHMM` opcional que Kalshi inserta entre
+la fecha y los equipos/jugadores para desambiguar partidos del mismo día
+entre los mismos participantes (doubleheaders) -- ver
+`src/api/robinhood_mapper.py` para la evidencia real que documentó este
+formato."""
+
+_TICKER_MONTH_ABBR = {
+    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+}
+"""Mapa explícito (no `datetime.strptime("%b")`, dependiente del locale
+del sistema) -- el segmento de fecha del ticker siempre usa abreviaturas
+de mes en inglés, ej. "AUG", independientemente del locale de la
+máquina que ejecuta el motor."""
+
+_TICKER_TIMEZONE = ZoneInfo("America/New_York")
+"""Hora local embebida en los tickers de Kalshi (MLB/tenis) -- verificado
+contra evidencia real (ver `_start_time_from_ticker`): la hora "1840" del
+ticker `KXMLBGAME-26AUG031840WSHPHI-WSH` coincide, convertida desde
+`America/New_York`, con el `start_time` real de MLB Stats API
+(2026-08-03T22:40:00Z) para las 8 partidos MLB abiertos verificados en
+vivo el 2026-08-03. `zoneinfo` resuelve el offset EDT/EST correcto según
+la fecha real -- la temporada de MLB (marzo-noviembre) cae casi en su
+totalidad dentro del horario de verano de EE.UU."""
+
+
+def _parse_ticker_date_segment(date_segment: str) -> Optional[Tuple[int, int, int]]:
+    """`(year, month, day)` -- ej. `"26AUG03"` -> `(2026, 8, 3)`. `None` si
+    `date_segment` no tiene la forma `YYMMMDD` esperada o no es una fecha
+    real (ej. día 32). Extraído como función propia (compartida por
+    `_start_time_from_ticker` y `local_date_from_kalshi_ticker`) para no
+    duplicar el parseo del segmento de fecha en dos sitios."""
+    if len(date_segment) != _TICKER_DATE_SEGMENT_LENGTH:
+        return None
+    month = _TICKER_MONTH_ABBR.get(date_segment[2:5].upper())
+    if month is None:
+        return None
+    try:
+        year = 2000 + int(date_segment[0:2])
+        day = int(date_segment[5:7])
+        datetime(year, month, day)  # valida que sea un día real del mes/año
+    except ValueError:
+        return None
+    return year, month, day
+
+
+def local_date_from_kalshi_ticker(ticker: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    """`(year, month, day)` de la fecha LOCAL (huso horario embebido en el
+    propio ticker -- ver `_start_time_from_ticker`) del partido
+    representado por `ticker`, ej. `"KXMLBGAME-26AUG031840WSHPHI-WSH"` ->
+    `(2026, 8, 3)`. A diferencia del resto de funciones de este módulo,
+    es pública: `src/api/event_resolver.py` la necesita para decidir qué
+    día consultarle a MLB Stats API/ESPN -- ver `_start_time_from_ticker`
+    para la causa raíz real de por qué `occurrence_datetime` no sirve
+    para esto (mismo problema, mismo fix: el ticker es la fuente
+    confiable, `occurrence_datetime` un valor de liquidación esperada,
+    no de inicio real). `None` si el ticker no trae el segmento de fecha
+    esperado."""
+    if not ticker:
+        return None
+    parts = ticker.split("-")
+    if len(parts) != 3:
+        return None
+    _, middle, _side = parts
+    if len(middle) < _TICKER_DATE_SEGMENT_LENGTH:
+        return None
+    return _parse_ticker_date_segment(middle[:_TICKER_DATE_SEGMENT_LENGTH])
+
+
+def _start_time_from_ticker(ticker: Optional[str]) -> Optional[datetime]:
+    """Deriva el start_time real del partido a partir del segmento de
+    fecha+hora embebido en el propio ticker de mercado de Kalshi (ej.
+    `KXMLBGAME-26AUG031840WSHPHI-WSH` -> 2026-08-03 18:40 hora del este
+    de EE.UU. -> 2026-08-03T22:40:00Z).
+
+    **Por qué existe esta función** (causa raíz real, verificada, no
+    especulada): el campo `occurrence_datetime` de un mercado de Kalshi
+    documenta oficialmente "The recorded datetime when the underlying
+    event occurred, if available" (docs.kalshi.com/api-reference/market/
+    get-market.md) -- es decir, se puebla DESPUÉS de que el evento ya
+    ocurrió. Verificado contra la API real de Kalshi en vivo (2026-08-03):
+    para TODO mercado MLB/ATP/WTA todavía abierto (el partido no ha
+    ocurrido), `occurrence_datetime` es literalmente idéntico a
+    `expected_expiration_time` ("Time when this market is expected to
+    expire") -- un valor provisional de LIQUIDACIÓN esperada, no de
+    INICIO real. Para MLB esto se tradujo en una diferencia constante de
+    180 minutos (duración típica asumida de un partido) frente al
+    `start_time` real de MLB Stats API, en el 100% (8/8) de los partidos
+    abiertos verificados -- suficiente para exceder
+    `EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["MLB"]` (90min) siempre,
+    bloqueando la confirmación del match pese a que el nombre del
+    candidato correcto ya se había identificado.
+
+    Ningún campo estructurado de la API de Kalshi (evento o mercado)
+    documenta la hora de inicio programada (verificado contra el schema
+    real de `GET /events`/`GET /markets/{ticker}`) -- el propio ticker
+    (verificado, no asumido: coincide exacto con `start_time` de MLB
+    Stats API en los 8/8 casos reales probados) es la fuente estructurada
+    más confiable disponible.
+
+    Devuelve `None` si el ticker no trae forma esperada o no incluye el
+    segmento de hora (ej. tickers de tenis reales observados hoy -- ver
+    `CONTINUITY.md` -- que no lo embeben) -- el llamador cae de vuelta a
+    `occurrence_datetime`, mismo comportamiento que antes de este fix.
+    """
+    if not ticker:
+        return None
+    parts = ticker.split("-")
+    if len(parts) != 3:
+        return None
+    _, middle, _side = parts
+    if len(middle) < _TICKER_DATE_SEGMENT_LENGTH + _TICKER_TIME_SEGMENT_LENGTH:
+        return None
+
+    date_segment = middle[:_TICKER_DATE_SEGMENT_LENGTH]
+    time_segment = middle[
+        _TICKER_DATE_SEGMENT_LENGTH : _TICKER_DATE_SEGMENT_LENGTH + _TICKER_TIME_SEGMENT_LENGTH
+    ]
+    if not time_segment.isdigit():
+        return None
+
+    ymd = _parse_ticker_date_segment(date_segment)
+    if ymd is None:
+        return None
+    year, month, day = ymd
+    try:
+        hour, minute = int(time_segment[0:2]), int(time_segment[2:4])
+        naive_local = datetime(year, month, day, hour, minute)
+    except ValueError:
+        return None
+
+    return naive_local.replace(tzinfo=_TICKER_TIMEZONE).astimezone(timezone.utc)
 
 # Claves top-level que el payload de un mercado de Kalshi debe traer según
 # el schema real observado (ver src/connectors/kalshi.py). Sirve para
@@ -90,9 +230,20 @@ def _kalshi_event_participants(kalshi_event: Dict[str, Any]) -> Tuple[Optional[s
 
 
 def _kalshi_event_start_time(kalshi_event: Dict[str, Any]) -> Optional[datetime]:
+    """Fuente primaria: el segmento de hora embebido en el propio ticker
+    (`_start_time_from_ticker`) -- ver su docstring para la causa raíz
+    real de por qué `occurrence_datetime` no es confiable como start_time
+    mientras el evento no ha ocurrido todavía. Fallback a
+    `occurrence_datetime` únicamente cuando el ticker no trae segmento de
+    hora parseable (mismo comportamiento que antes de ese fix)."""
     markets = kalshi_event.get("markets") or []
     if not markets:
         return None
+
+    from_ticker = _start_time_from_ticker(markets[0].get("ticker"))
+    if from_ticker is not None:
+        return from_ticker
+
     raw = markets[0].get("occurrence_datetime")
     if not raw:
         return None

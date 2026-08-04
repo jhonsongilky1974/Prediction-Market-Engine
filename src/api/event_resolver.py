@@ -9,17 +9,23 @@ el pedido.
 """
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import KALSHI_SPORT_SERIES
 from src.connectors.kalshi import KalshiConnector
+from src.matching.market_matcher import local_date_from_kalshi_ticker
 from src.models.schemas import NormalizedRecord, Sport
+from src.observability.step_timer import log_step
 from src.pipelines.mlb_pipeline import run_mlb_pipeline
 from src.pipelines.tennis_pipeline import run_tennis_pipeline
 from src.storage.history_repository import HistoryRepository
 from src.storage.repository import Repository
+
+logger = logging.getLogger(__name__)
 
 _SERIES_TO_SPORT: Dict[str, Tuple[Sport, Optional[str]]] = {
     "KXMLBGAME": (Sport.MLB, None),
@@ -100,6 +106,20 @@ def _find_market(ticker: str, kalshi_events: List[Dict[str, Any]]) -> Tuple[Dict
 
 
 def _date_from_market(market: Dict[str, Any], sport: Sport) -> str:
+    """Fuente primaria: el segmento de fecha embebido en el propio
+    `ticker` (`local_date_from_kalshi_ticker`, `src/matching/market_matcher.py`)
+    -- ver su docstring / la de `_start_time_from_ticker` para la causa
+    raíz real de por qué `occurrence_datetime` NO es la fecha del
+    partido mientras este no ha ocurrido todavía (queda igual a
+    `expected_expiration_time`, una liquidación esperada, no un inicio
+    real -- verificado contra la API real de Kalshi). Fallback a
+    `occurrence_datetime` únicamente cuando el ticker no trae segmento
+    de fecha parseable (mismo comportamiento que antes de ese fix)."""
+    ymd = local_date_from_kalshi_ticker(market.get("ticker"))
+    if ymd is not None:
+        year, month, day = ymd
+        return f"{year:04d}-{month:02d}-{day:02d}" if sport == Sport.MLB else f"{year:04d}{month:02d}{day:02d}"
+
     raw = market.get("occurrence_datetime")
     if not raw:
         raise ResolverError(502, "el mercado de Kalshi encontrado no trae occurrence_datetime -- no se puede derivar la fecha del evento real.")
@@ -117,30 +137,46 @@ def resolve_ticker(
     history_repository: Optional[HistoryRepository] = None,
     kalshi_connector: Optional[KalshiConnector] = None,
 ) -> ResolvedEvent:
+    logger.info("-> resolve_ticker ticker=%r", ticker)
+    resolve_started = time.monotonic()
     sport, tour, sport_key = _sport_and_tour_for_ticker(ticker)
 
     kalshi = kalshi_connector or KalshiConnector(repository=repository)
-    events_result = kalshi.get_all_events_for_sport(sport_key, status="open")
+    with log_step(logger, "resolve_ticker.kalshi_get_all_events_for_sport", sport_key=sport_key):
+        events_result = kalshi.get_all_events_for_sport(sport_key, status="open")
     if not events_result.ok:
         raise ResolverError(502, f"fallo al obtener eventos de Kalshi para {sport_key}: {events_result.error}")
 
     kalshi_events = KalshiConnector.extract_events(events_result.data)
-    kalshi_event, market = _find_market(ticker, kalshi_events)
-    date = _date_from_market(market, sport)
+    logger.info("resolve_ticker: kalshi_events count=%d", len(kalshi_events))
+
+    with log_step(logger, "resolve_ticker._find_market", ticker=ticker, candidates=len(kalshi_events)):
+        kalshi_event, market = _find_market(ticker, kalshi_events)
+
+    with log_step(logger, "resolve_ticker._date_from_market", ticker=ticker):
+        date = _date_from_market(market, sport)
 
     if sport == Sport.MLB:
-        pipeline_result = run_mlb_pipeline(date, repository=repository, history_repository=history_repository)
+        with log_step(logger, "resolve_ticker.run_mlb_pipeline", date=date):
+            pipeline_result = run_mlb_pipeline(date, repository=repository, history_repository=history_repository)
         enrichment_mode = "full"
     else:
-        pipeline_result = run_tennis_pipeline(
-            tour, date, repository=repository, history_repository=history_repository, enrich_sofascore=False
-        )
+        with log_step(logger, "resolve_ticker.run_tennis_pipeline", tour=tour, date=date):
+            pipeline_result = run_tennis_pipeline(
+                tour, date, repository=repository, history_repository=history_repository, enrich_sofascore=False
+            )
         enrichment_mode = "reduced"
+    logger.info("resolve_ticker: pipeline_result records=%d", len(pipeline_result.records))
 
     for index, record in enumerate(pipeline_result.records):
         if record.market_id == ticker:
             feature_inputs = pipeline_result.feature_inputs_list[index] if pipeline_result.feature_inputs_list else None
             feature_cutoff = pipeline_result.feature_cutoffs[index] if pipeline_result.feature_cutoffs else None
+            logger.info(
+                "<- resolve_ticker OK ticker=%r elapsed_ms=%.1f",
+                ticker,
+                (time.monotonic() - resolve_started) * 1000,
+            )
             return ResolvedEvent(
                 record=record,
                 feature_inputs=feature_inputs,

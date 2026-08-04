@@ -10,6 +10,7 @@ solo lectura.
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,6 +19,7 @@ from scripts.run_e2e import CONFIG_POLICY_DIR, SPORT_ADAPTERS
 from src.api.event_resolver import ResolverError, resolve_ticker
 from src.api.schemas import AnalyzeResponse, Freshness, InfluentialVariable, UncertaintyBreakdown
 from src.models.schemas import Sport
+from src.observability.step_timer import log_step
 from src.opportunity.opportunity_repository import OpportunityRepository
 from src.opportunity.schemas import compute_opportunity_id, compute_selection_id
 from src.orchestration.decision_pipeline import run_decision_pipeline
@@ -26,6 +28,8 @@ from src.policy.manifest import load_policy_manifest
 from src.signals.signal_schema import Side
 from src.storage.history_repository import HistoryRepository
 from src.storage.repository import Repository
+
+logger = logging.getLogger(__name__)
 
 _POLICY_MANIFEST_FILENAME = {
     Sport.MLB: "mlb_v1.json",
@@ -50,12 +54,14 @@ def analyze_ticker(
     los tests inyectan instancias sobre `tmp_path`, nunca tocan
     producción."""
     started_at_monotonic = time.monotonic()
+    logger.info("-> analyze_ticker ticker=%r", ticker)
 
     repo = repository or Repository()
     hist_repo = history_repository or HistoryRepository()
     opp_repo = OpportunityRepository(db_path=repo.db_path)
 
-    resolved = resolve_ticker(ticker, repository=repo, history_repository=hist_repo)
+    with log_step(logger, "analyze_ticker.resolve_ticker", ticker=ticker):
+        resolved = resolve_ticker(ticker, repository=repo, history_repository=hist_repo)
 
     # `now` para el orquestador se captura AQUÍ, DESPUÉS del fetch en vivo
     # (`resolve_ticker`, que puede tardar decenas de segundos) -- nunca al
@@ -68,25 +74,31 @@ def analyze_ticker(
     # validador de `AnalysisHealth`, correctamente).
     decision_now = datetime.now(timezone.utc)
 
-    manifest = load_policy_manifest(CONFIG_POLICY_DIR / _POLICY_MANIFEST_FILENAME[resolved.sport])
-    summary = run_decision_pipeline(
-        records=[resolved.record],
-        feature_inputs_list=[resolved.feature_inputs],
-        feature_cutoffs=[resolved.feature_cutoff],
-        sport=resolved.sport,
-        adapter=SPORT_ADAPTERS[resolved.sport],
-        history_repository=hist_repo,
-        opportunity_repository=opp_repo,
-        policy_manifest=manifest,
-        now=decision_now,
-    )
+    with log_step(logger, "analyze_ticker.load_policy_manifest", sport=resolved.sport.value):
+        manifest = load_policy_manifest(CONFIG_POLICY_DIR / _POLICY_MANIFEST_FILENAME[resolved.sport])
+
+    with log_step(
+        logger, "analyze_ticker.run_decision_pipeline", sport=resolved.sport.value, event_id=resolved.record.event_id
+    ):
+        summary = run_decision_pipeline(
+            records=[resolved.record],
+            feature_inputs_list=[resolved.feature_inputs],
+            feature_cutoffs=[resolved.feature_cutoff],
+            sport=resolved.sport,
+            adapter=SPORT_ADAPTERS[resolved.sport],
+            history_repository=hist_repo,
+            opportunity_repository=opp_repo,
+            policy_manifest=manifest,
+            now=decision_now,
+        )
     if summary.skipped_errors:
         _event_id, _side, error_repr = summary.skipped_errors[0]
         raise ResolverError(502, f"el orquestador no pudo evaluar este evento: {error_repr}")
 
     selection_id = compute_selection_id(resolved.record.market_id, Side.YES)
     opportunity_id = compute_opportunity_id(resolved.record.event_id, selection_id)
-    evaluation = opp_repo.get_latest_evaluation(opportunity_id)
+    with log_step(logger, "analyze_ticker.get_latest_evaluation", opportunity_id=opportunity_id):
+        evaluation = opp_repo.get_latest_evaluation(opportunity_id)
     if evaluation is None:
         raise ResolverError(502, "el orquestador no persistió ninguna evaluación para este ticker -- inesperado, sin errores reportados.")
 
@@ -99,7 +111,7 @@ def analyze_ticker(
         key=lambda item: (item.strength is None, -(item.strength or 0.0)),
     )
 
-    return AnalyzeResponse(
+    response = AnalyzeResponse(
         ticker=ticker,
         event_id=resolved.record.event_id,
         sport=resolved.sport.value,
@@ -139,6 +151,10 @@ def analyze_ticker(
         enrichment_mode=resolved.enrichment_mode,
         processing_time_ms=(time.monotonic() - started_at_monotonic) * 1000,
     )
+    logger.info(
+        "<- analyze_ticker OK ticker=%r elapsed_ms=%.1f", ticker, (time.monotonic() - started_at_monotonic) * 1000
+    )
+    return response
 
 
 def _build_freshness(market_capture_ts: datetime) -> Freshness:

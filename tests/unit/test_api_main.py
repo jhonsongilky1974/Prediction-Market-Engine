@@ -1,16 +1,21 @@
 """Tests de `src.api.main` (Fase 5) -- capa de transporte HTTP. Ver
-`HTTP_SERVICE_SPEC.md` §1. `analyze_ticker` (ya probado en
-`test_analysis_service.py`) se monkeypatchea -- este archivo prueba
-únicamente que los códigos HTTP/formas de respuesta son correctos."""
+`HTTP_SERVICE_SPEC.md` §1 y `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5.
+`analyze_ticker`/`map_robinhood_symbol_to_kalshi_ticker` (ya probados en
+`test_analysis_service.py`/`test_robinhood_mapper.py`) se monkeypatchean
+-- este archivo prueba únicamente que los códigos HTTP/formas de
+respuesta son correctos."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 import src.api.main as main_module
 from src.api.event_resolver import ResolverError
+from src.api.robinhood_mapper import MappingError, MappingResult
 from src.api.schemas import AnalyzeResponse, Freshness, UncertaintyBreakdown
+from src.models.schemas import Sport
 
 client = TestClient(main_module.app)
 
@@ -88,3 +93,83 @@ def test_analyze_unexpected_exception_returns_502_not_a_fabricated_200(monkeypat
 
     assert response.status_code == 502
     assert "fallo real de conector" in response.json()["detail"]
+
+
+def _sample_mapping_result() -> MappingResult:
+    return MappingResult(
+        kalshi_ticker="KXMLBGAME-26AUG03WSHPHI-WSH",
+        strategy="exact",
+        candidate="KXMLBGAME-26AUG03WSHPHI-WSH",
+        sport=Sport.MLB,
+        sport_key="MLB",
+    )
+
+
+def test_map_robinhood_happy_path(monkeypatch):
+    calls = []
+
+    def fake_map(symbol, robinhood_start_time=None, repository=None, kalshi_connector=None):
+        calls.append((symbol, robinhood_start_time))
+        return _sample_mapping_result()
+
+    monkeypatch.setattr(main_module, "map_robinhood_symbol_to_kalshi_ticker", fake_map)
+
+    response = client.post("/map/robinhood", json={"symbol": "MLBGAME-26AUG03WSHPHI-WSH"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kalshi_ticker"] == "KXMLBGAME-26AUG03WSHPHI-WSH"
+    assert body["strategy"] == "exact"
+    assert body["candidate"] == "KXMLBGAME-26AUG03WSHPHI-WSH"
+    assert body["sport"] == "MLB"
+    assert body["sport_key"] == "MLB"
+    assert calls == [("MLBGAME-26AUG03WSHPHI-WSH", None)]
+
+
+def test_map_robinhood_forwards_optional_game_start(monkeypatch):
+    calls = []
+
+    def fake_map(symbol, robinhood_start_time=None, repository=None, kalshi_connector=None):
+        calls.append((symbol, robinhood_start_time))
+        return _sample_mapping_result()
+
+    monkeypatch.setattr(main_module, "map_robinhood_symbol_to_kalshi_ticker", fake_map)
+
+    response = client.post(
+        "/map/robinhood",
+        json={"symbol": "MLBGAME-26AUG03WSHPHI-WSH", "game_start": "2026-08-03T19:00:00Z"},
+    )
+
+    assert response.status_code == 200
+    assert calls[0][1] == datetime(2026, 8, 3, 19, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("status_code", [400, 404, 409, 502])
+def test_map_robinhood_mapping_error_translates_to_matching_status_code(monkeypatch, status_code):
+    def raise_mapping_error(symbol, robinhood_start_time=None, repository=None, kalshi_connector=None):
+        raise MappingError(status_code, f"error real de mapeo para {symbol!r}")
+
+    monkeypatch.setattr(main_module, "map_robinhood_symbol_to_kalshi_ticker", raise_mapping_error)
+
+    response = client.post("/map/robinhood", json={"symbol": "MLBGAME-BAD"})
+
+    assert response.status_code == status_code
+    assert "error real de mapeo" in response.json()["detail"]
+
+
+def test_map_robinhood_unexpected_exception_returns_502_not_a_fabricated_200(monkeypatch):
+    def raise_unexpected(symbol, robinhood_start_time=None, repository=None, kalshi_connector=None):
+        raise RuntimeError("fallo real de conector")
+
+    monkeypatch.setattr(main_module, "map_robinhood_symbol_to_kalshi_ticker", raise_unexpected)
+
+    response = client.post("/map/robinhood", json={"symbol": "MLBGAME-26AUG03WSHPHI-WSH"})
+
+    assert response.status_code == 502
+    assert "fallo real de conector" in response.json()["detail"]
+
+
+def test_map_robinhood_missing_symbol_returns_422():
+    response = client.post("/map/robinhood", json={})
+
+    assert response.status_code == 422

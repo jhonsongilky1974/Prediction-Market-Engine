@@ -121,6 +121,28 @@ negativos por capturar `now`/`analysis_timestamp` demasiado temprano).
 Hallazgo de latencia real (tenis >5min con SofaScore activado)
 reportado y resuelto con aprobación explícita del usuario
 (`enrich_sofascore=False` solo en la vía en vivo). Suite en 1024.**
+**Actualizado de nuevo: 2026-08-03 — Mapeador Robinhood → Kalshi
+(`src/api/robinhood_mapper.py`, módulo interno, sin endpoint HTTP en
+ese paso) — ver §0.29. (Esta línea se añadió retroactivamente en el
+Paso 0.30 -- se omitió en el commit original de §0.29, un gap real de
+la Regla 5, dejado constatado en vez de ocultado.)**
+**Actualizado de nuevo: 2026-08-03 — Implementado `POST /map/robinhood`
+(`src/api/main.py`/`schemas.py`) — expone el mapeador vía HTTP sin
+duplicar su lógica, ver §0.30. Suite en 1057.**
+**Actualizado de nuevo: 2026-08-03 — Fix de causa raíz: `/analyze`
+devolvía 404 tras un mapeo Robinhood exitoso (`occurrence_datetime` de
+Kalshi no es start_time pre-evento) — ver §0.31. Suite en 1076.**
+**Actualizado de nuevo: 2026-08-03 — Auditoría completa del flujo
+Robinhood→Kalshi→`/analyze`: 3 fixes reales de bajo riesgo (tolerancia
+de tenis en el mapeador, consistencia de mapas serie→deporte,
+constante duplicada) + hallazgo mayor de tenis documentado sin
+corregir (evidencia insuficiente, requiere sesión dedicada) — ver
+§0.32. Suite en 1077.**
+**Actualizado de nuevo: 2026-08-03 — Revisión arquitectónica final
+(sin cambios de código) y CIERRE FORMAL DE FASE 5 — ver §0.33 y
+`FASE5_CIERRE_FINAL.md`. Riesgo nuevo documentado (R1: el fix de
+§0.31 no contempla partidos pospuestos, sin evidencia de impacto
+real). Veredicto: flujo MLB listo para la siguiente fase, tenis no.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -2779,6 +2801,713 @@ endpoint adicional, ninguna ejecución de trades (`src/risk/`,
 Principio 21), Robinhood, `P_consensus_no_vig` real. D-3 y
 entrenamiento de MLB permanecen como deuda técnica documentada, sin
 fecha (§ `FASE4_CIERRE_FINAL.md`).
+
+## 0.29 Mapeador Robinhood → Kalshi — investigación + módulo interno (2026-08-03)
+
+### Contexto y autorización
+
+El usuario pidió el siguiente paso natural tras Fase 5: que una futura
+extensión de Chrome pueda traducir el evento que el usuario ve en
+Robinhood al ticker de Kalshi, para alimentar `/analyze`. Investigación
+previa (Regla 1) confirmó dos veces, con evidencia distinta: **la
+extensión de Chrome no existe en este repositorio, ni existió nunca**
+(búsqueda por archivo/carpeta y `git log --all --full-history` en todas
+las ramas, cero resultados) y **Robinhood no tenía ningún rastro de
+integración real** (§0.28, `HTTP_SERVICE_SPEC.md`).
+
+Dos preguntas de arquitectura genuinamente del usuario se dejaron
+pendientes vía `AskUserQuestion` (formato de entrada del lado Robinhood;
+dónde vive el código de la extensión) — ambas descartadas sin responder
+en su momento. En vez de asumir, el usuario decidió resolver la primera
+inspeccionando él mismo Robinhood en DevTools. Un intento de capturar
+esa evidencia como archivo HAR exportado falló repetidamente (el export
+nunca se guardó físicamente en disco pese a varios reintentos guiados
+paso a paso, incluyendo verificación de `chrome://downloads` y ajuste de
+la ubicación de descarga de Chrome) — documentado en el historial de la
+sesión, no oculto. El usuario cambió de estrategia: inspección en vivo
+directa contra la sesión real de Robinhood del usuario (ya autenticada)
+usando la herramienta `claude-in-chrome` (Chrome real del usuario, sin
+que Claude manejara credenciales en ningún momento) — método que sí
+produjo evidencia verificable.
+
+### Evidencia real obtenida (dos deportes, en vivo, 2026-08-03)
+
+Tres endpoints de `api.robinhood.com` identificados y documentados con
+payloads reales en `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §1:
+`prediction-markets/v1/event_state` (estructura del evento),
+`marketdata/event/contract/quotes/v1` (precios en vivo por contrato,
+incluye el campo clave `symbol`), `marketdata/event/contract/fundamentals/v1`
+(volumen/open interest, sin utilidad para el mapeo).
+
+**Hallazgo que cambió el diseño** (reportado al usuario antes de escribir
+código, con evidencia, no una suposición): el campo `symbol` de
+`quotes/v1` es, para tenis, **idéntico byte a byte** al ticker real de
+Kalshi (`KXWTAMATCH-26AUG02PEGEAL-PEG`); para MLB, el mismo formato pero
+**sin el prefijo `KX`** y sin el segmento de hora que Kalshi a veces
+inserta para desambiguar doubleheaders (`MLBGAME-26AUG03WSHPHI-WSH` vs.
+un ticker real ya documentado en §0.28 con hora,
+`KXMLBGAME-26AUG011507STLTOR-STL`). Ningún endpoint de Robinhood expone
+nombres completos de equipos/jugadores — solo abreviaturas de 3 letras.
+
+### Decisión de arquitectura (resuelta explícitamente por el usuario)
+
+Ante el hallazgo, el usuario decidió la estrategia de resolución en tres
+niveles, en este orden estricto: **EXACT** (candidato = symbol con `KX`
+al frente si falta) → si falla, **SUBSTRING** (determinista, sin
+matching difuso, tolera el segmento de hora opcional de Kalshi) → si
+también falla, **EVENT_MATCHER** (`market_matcher.find_best_kalshi_event`,
+Fase 1, sin modificar, último recurso) — con el requisito explícito de
+que cada estrategia usada quede registrada en el log para auditabilidad
+completa.
+
+### Implementado
+
+`src/api/robinhood_mapper.py` (módulo Python interno — **sin endpoint
+HTTP todavía**, decisión deliberada de alcance mínimo: exponerlo vía
+HTTP y construir la extensión requieren decisiones de contrato/alcance
+que el usuario no había resuelto en este paso, ver
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5): `map_robinhood_symbol_to_kalshi_ticker()`
+implementa las tres estrategias sobre `KalshiConnector.get_all_events_for_sport`
+(Fase 1, sin endpoints nuevos de Kalshi) y `find_best_kalshi_event`
+(Fase 1, sin modificar) — cero lógica de matching nueva más allá de la
+construcción/verificación del candidato. `MappingError` honesto
+(400/404/409/502) si ninguna estrategia produce un match confidente —
+nunca se fabrica un ticker. Cada intento (éxito o fallo, por estrategia)
+se registra vía `logging`.
+
+### Pruebas
+
+`tests/unit/test_robinhood_mapper.py` (25 tests, sin red real —
+`KalshiConnector` sustituido por un stub): helpers puros, las tres
+estrategias por separado (incluyendo el caso ambiguo de substring →
+409, y la limitación documentada de que event_matcher rinde peor contra
+códigos de 3 letras que contra nombres completos), fallo total (404),
+fallo de Kalshi (502), serie no soportada (400 sin llamar a Kalshi).
+Suite completa: **1025 passed, 0 failed** — sin regresiones.
+
+### Auditoría de alcance
+
+`git diff --stat` de todo el paso: únicamente `src/api/robinhood_mapper.py`
+(nuevo), `tests/unit/test_robinhood_mapper.py` (nuevo),
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` (nuevo) y esta actualización de
+`CONTINUITY.md` — ningún archivo de Fase 1-5 modificado.
+
+### Estado para continuar
+
+**Mapeador Robinhood → Kalshi implementado como módulo interno,
+verificado con evidencia real, sin endpoint HTTP ni extensión de
+navegador todavía.** Siguiente decisión pendiente, explícitamente sin
+autorizar en este paso: contrato del endpoint que expondría este
+mapeador (`POST /map/robinhood` o equivalente — qué payload exacto
+envía la extensión) y dónde vive el código de la extensión (este
+repositorio vs. uno aparte) — ver `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5.
+
+**Nota de auditoría (encontrada en el Paso 0.30, no corregida
+retroactivamente):** esta sección afirma "Suite completa: 1025 passed,
+0 failed". Verificado en el Paso 0.30 que la suite real en este mismo
+commit (`6162ebb`, confirmado con `git stash`) es **1049 passed**, no
+1025 — `/analyze` (Paso 0.28) cerró en 1024, este paso documentó "25
+tests" nuevos (1024+25=1049, consistente), pero el número final escrito
+aquí arriba fue un error de transcripción. Se deja constancia en vez de
+reescribir el historial de un paso ya cerrado.
+
+## 0.30 Fase 5 — endpoint HTTP `POST /map/robinhood` (2026-08-03)
+
+### Contexto y autorización
+
+Continuación directa del Paso 0.29: el usuario pidió auditar la
+arquitectura y proponer el contrato de `POST /map/robinhood` **antes**
+de escribir código ("No implementes todavía"). Propuesta presentada en
+el chat (auditoría de capas existentes, contrato Request/Response,
+tabla de errores HTTP, boceto del endpoint, estrategia de pruebas, un
+punto abierto real — dónde viven los dos Pydantic models nuevos).
+Usuario aprobó con 9 decisiones explícitas: opción A (extender
+`schemas.py`, no crear `robinhood_schemas.py`), endpoint sin lógica de
+mapeo propia, reutilización literal de
+`map_robinhood_symbol_to_kalshi_ticker()`, traducción de `MappingError`
+igual que `/analyze` con `ResolverError`, separación de
+responsabilidades (dos llamadas HTTP independientes, `/analyze` sin
+tocar), contrato HTTP tal como se propuso, observabilidad explícita
+(symbol/candidato/estrategia/ticker en el log), cero duplicación de
+lógica del mapeador, suite completa, auditoría final, y solo entonces
+commit.
+
+### Implementado
+
+- `src/api/schemas.py`: `RobinhoodMapRequest` (`symbol: str` obligatorio,
+  `game_start: Optional[datetime]`) y `RobinhoodMapResponse`
+  (`kalshi_ticker`/`strategy`/`candidate`/`sport`/`sport_key`, todos
+  lectura literal de `MappingResult` — cero campos calculados). Docstring
+  del módulo ampliado ("Contratos HTTP de la API" en vez de "de
+  `/analyze`").
+- `src/api/main.py`: nuevo `POST /map/robinhood` — llama a
+  `map_robinhood_symbol_to_kalshi_ticker(request.symbol,
+  robinhood_start_time=request.game_start)`, traduce `MappingError` →
+  `HTTPException(status_code, detail)` (mismo patrón exacto que
+  `ResolverError` en `analyze()`), `except Exception` genérico → 502
+  (mismo principio "nunca un 200 fabricado"). Descripción de la app
+  (`FastAPI(description=...)`) corregida — ya no dice "Robinhood no está
+  integrado en el proyecto" sin matiz, ahora aclara que Robinhood sigue
+  sin ser fuente de datos del motor, solo el símbolo se traduce.
+- `src/api/robinhood_mapper.py`: **cero cambios** (verificado con `git
+  diff --stat -- src/api/robinhood_mapper.py`, sin salida) — cumple el
+  requisito explícito de no duplicar ni modificar su lógica.
+
+### Observabilidad (decisión #5 del usuario)
+
+El mapeador ya registra, en cada intento por estrategia (éxito o
+fallo): `symbol` original, `candidato` construido, `estrategia`
+(`exact`/`substring`/`event_matcher`) y `ticker` Kalshi finalmente
+seleccionado (`src/api/robinhood_mapper.py`, sin cambios en este paso —
+ver Paso 0.29). Investigado antes de escribir código nuevo (Regla 1):
+añadir ese mismo logging en `src/api/main.py` habría sido una
+duplicación literal de responsabilidad, violando explícitamente la
+decisión #6 del usuario ("no dupliques ninguna lógica del mapper"). El
+endpoint HTTP solo añade su propio `logger.exception` para el caso de
+excepción verdaderamente inesperada (no `MappingError`) — mismo patrón
+ya usado por `analyze()`.
+
+### Pruebas
+
+`tests/unit/test_api_main.py` extendido (mismo archivo, mismo patrón
+que los tests de `/analyze` — `map_robinhood_symbol_to_kalshi_ticker`
+monkeypatcheado, las 3 estrategias no se vuelven a probar aquí, ya
+cubiertas en `test_robinhood_mapper.py`): happy path (200 + forma de
+respuesta), `game_start` opcional (ausente y presente, verifica
+forwarding correcto a `robinhood_start_time`), traducción
+`MappingError`→código HTTP parametrizada (400/404/409/502), excepción
+inesperada→502, `symbol` ausente→422 (validación automática de
+Pydantic). **8 tests nuevos.**
+
+### Auditoría final
+
+- **Sin regresiones**: suite completa `.venv/bin/python -m pytest
+  tests/ -q` → **1057 passed, 0 failed** (baseline real 1049, verificado
+  con `git stash` contra el mismo commit `6162ebb` antes de estos
+  cambios — no el "1025" incorrecto documentado en el Paso 0.29, ver
+  nota de auditoría arriba). 1049 + 8 tests nuevos = 1057, exacto.
+- **Separación de capas**: `git diff --stat` de todo el paso —
+  `src/api/main.py`, `src/api/schemas.py`,
+  `tests/unit/test_api_main.py` modificados; `src/api/robinhood_mapper.py`
+  **sin cambios**. `main.py` no contiene ninguna de las 3 estrategias de
+  matching — solo un `try/except` que traduce `MappingError`, idéntico
+  en forma al ya existente para `ResolverError`.
+  `/analyze`/`analysis_service.py`/`event_resolver.py` sin tocar.
+- **Consistencia arquitectónica**: `POST /map/robinhood` sigue
+  literalmente el mismo esqueleto que `GET /analyze/{ticker}` (capa de
+  transporte pura, excepción tipada → `HTTPException`, Pydantic para
+  request/response). Las dos rutas son independientes -- el mapeo nunca
+  invoca `analyze_ticker`/`run_decision_pipeline`.
+- **Documentación actualizada**: `API_USAGE.md` (nueva sección `POST
+  /map/robinhood` completa — request/response/errores/observabilidad/
+  pruebas, más corrección de la nota "Robinhood no está integrado"),
+  `ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5 (addendum: el endpoint ya existe,
+  referencia a `API_USAGE.md`), este documento.
+
+### Estado para continuar
+
+**`POST /map/robinhood` implementado, probado (1057 tests) y
+documentado.** Flujo completo Robinhood→Kalshi→análisis ya disponible
+vía dos llamadas HTTP independientes (`POST /map/robinhood` →
+`GET /analyze/{kalshi_ticker}`). Pendiente, sin autorizar: la extensión
+de Chrome en sí (dónde vive su código) — ver
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5. D-3 (fees Kalshi) y entrenamiento
+MLB siguen como deuda técnica documentada, sin fecha, sin cambios en
+este paso.
+
+## 0.31 Fix: `/analyze` devolvía 404 para un ticker recién resuelto por `/map/robinhood` (2026-08-03)
+
+### Contexto y autorización
+
+El usuario reportó, con evidencia real de su extensión de Chrome ya
+funcionando (§0.30 validado end-to-end del lado Robinhood→mapeo): el
+mapeador resolvía el ticker Kalshi correctamente (200), pero
+`GET /analyze/{kalshi_ticker}` con ESE MISMO ticker devolvía 404 --
+instrucción explícita de investigar la causa raíz real, sin bypasses ni
+soluciones temporales, corregir en la arquitectura correcta, probar,
+levantar el servidor y validar el flujo completo de nuevo.
+
+### Investigación (Regla 1 -- reproducido contra APIs reales, no simulado)
+
+Reproducido en vivo con un ticker MLB real (Washington @ Philadelphia,
+2026-08-03): `resolve_ticker("KXMLBGAME-26AUG031840WSHPHI-WSH")` ->
+404 "el motor no encontró un match confidente". Investigación por capas:
+
+1. `run_mlb_pipeline` (fecha derivada del ticket) sí encontraba el
+   candidato Kalshi correcto por NOMBRE (`Washington Nationals` ~
+   `Washington`), pero `match_event` lo rechazaba: "diferencia temporal
+   180min excede tolerancia de 90min" -- `MatchMethod.NEEDS_REVIEW`,
+   `market_id` nunca se adjuntaba.
+2. Cross-validación de las 3 fuentes de tiempo disponibles para ESE
+   mismo partido: MLB Stats API `start_time`=`2026-08-03T22:40:00Z`;
+   texto `rules_primary` del propio mercado de Kalshi ("originally
+   scheduled for Aug 3, 2026 at **6:40 PM EDT**" = 22:40 UTC, coincide
+   exacto); campo `occurrence_datetime` del mismo mercado =
+   `2026-08-04T01:40:00Z` -- **+180min, no coincide con ninguna de las
+   otras dos fuentes, ambas de acuerdo entre sí**.
+3. Verificado en los 8/8 partidos MLB reales abiertos ese día: la
+   misma diferencia de **exactamente** 180min en el 100% de los casos
+   (no ruido/varianza real de partido a partido) -- y
+   `occurrence_datetime` idéntico byte a byte a `expected_expiration_time`
+   en cada uno.
+4. Consultada la documentación oficial de Kalshi
+   (`docs.kalshi.com/api-reference/market/get-market.md`, vía WebFetch,
+   Regla 3 -- nunca se fabrica una interpretación de un campo externo sin
+   verificar la fuente primaria): `occurrence_datetime` = "The recorded
+   datetime when the underlying event occurred, **if available**";
+   `expected_expiration_time` = "Time when this market is expected to
+   expire". Ningún campo estructurado de `GET /events`/`GET /markets/{ticker}`
+   documenta la hora de inicio programada.
+
+**Causa raíz confirmada, no especulada**: `occurrence_datetime` de un
+mercado de Kalshi que TODAVÍA no ocurrió (cualquier mercado abierto que
+`/analyze` fuera a analizar en vivo, el 100% de los casos reales) no
+está poblado con la hora de inicio -- Kalshi lo deja igual a
+`expected_expiration_time` (una liquidación esperada, `inicio real +
+duración típica asumida`) como placeholder hasta que el evento ocurra
+de verdad. `src/matching/market_matcher.py::_kalshi_event_start_time`
+(Fase 1, usado por `find_best_kalshi_event` en AMBOS pipelines,
+MLB y tenis) y `src/api/event_resolver.py::_date_from_market` (Fase 5)
+asumían -- sin haberlo verificado nunca contra la documentación real --
+que `occurrence_datetime` era la hora de inicio. Bug preexistente a
+Fase 5 y a este paso, no introducido por el mapeador Robinhood -- solo
+salió a la luz ahora porque es la primera vez que se prueba
+`/analyze` con un ticker recién resuelto en vivo por una fuente externa.
+**Afectaba (afectaría) al 100% de los tickers MLB reales, no solo a los
+resueltos vía Robinhood** -- cualquier llamada directa a `/analyze` con
+un ticker MLB real habría fallado igual.
+
+Doble impacto del mismo campo mal interpretado: (a) `_kalshi_event_start_time`
+usaba ese valor para el chequeo de tolerancia temporal del matcher
+(bloqueaba la confirmación pese a nombre exacto); (b)
+`_date_from_market` lo usaba para decidir QUÉ DÍA consultarle a MLB
+Stats API -- con el offset cruzando medianoche UTC, pedía el día
+siguiente, donde el partido correcto ni siquiera aparecía como
+candidato.
+
+### Solución implementada (arquitectura correcta, no un bypass)
+
+**No se ensanchó la tolerancia de 90min** (habría sido el bypass más
+obvio y el que el usuario pidió explícitamente evitar) -- eso solo
+habría enmascarado el problema y arriesgado fusionar partidos
+genuinamente distintos (doubleheaders). En su lugar: el propio *ticker*
+de Kalshi embebe la hora local real del partido (mismo formato ya
+investigado y documentado para el mapeador Robinhood,
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md`) -- verificado exacto contra
+MLB Stats API en los 8/8 casos reales. Nueva fuente PRIMARIA de verdad,
+con fallback al comportamiento anterior cuando el ticker no trae
+segmento de hora (tenis, hoy):
+
+- `src/matching/market_matcher.py`: nuevas `_start_time_from_ticker`
+  (fecha+hora -> `datetime` UTC, vía `zoneinfo("America/New_York")` --
+  resuelve EDT/EST automáticamente según la fecha real, no un offset
+  fijo hardcodeado) y `local_date_from_kalshi_ticker` (pública, solo
+  fecha, no requiere segmento de hora). `_kalshi_event_start_time`
+  ahora intenta el ticker primero, cae a `occurrence_datetime` solo si
+  el ticker no tiene hora parseable -- mismo comportamiento exacto que
+  antes para esos casos (tenis).
+- `src/api/event_resolver.py::_date_from_market`: mismo patrón,
+  reutiliza `local_date_from_kalshi_ticker` en vez de duplicar el
+  parseo -- prioriza el ticker, cae a `occurrence_datetime` sin
+  cambios cuando no aplica.
+- Meses en inglés mapeados explícitamente (`_TICKER_MONTH_ABBR`), no
+  `strptime("%b")` (dependiente del locale del sistema).
+
+### Pruebas (regresión, sin tests existentes modificados)
+
+19 tests nuevos, todos verificados contra los valores reales
+encontrados en la investigación (mismo ticker/partido/offset real, no
+inventados): `tests/unit/test_market_matcher.py` (16 -- `_start_time_from_ticker`/
+`local_date_from_kalshi_ticker` unitarios, `_kalshi_event_start_time`
+prefiere ticker sobre `occurrence_datetime` engañoso,
+`find_best_kalshi_event` end-to-end confirma `EXACT_NAME_TIME` en el
+caso real que antes daba `NEEDS_REVIEW`); `tests/unit/test_event_resolver.py`
+(3 -- `_date_from_market` prefiere ticker, MLB y tenis;
+`resolve_ticker` end-to-end pide la fecha correcta, no la de
+`occurrence_datetime`). Suite completa: **1076 passed, 0 failed**
+(1057 + 19, sin regresiones -- ningún test preexistente modificado).
+
+### Validación real (servidor levantado, flujo completo repetido)
+
+Encontrado durante la validación: un proceso `uvicorn` **obsoleto** (del
+Python del sistema, no de `.venv`) seguía escuchando en el puerto 8000
+desde una sesión anterior -- las primeras pruebas post-fix seguían
+dando 404 porque golpeaban ESE proceso viejo, no el código corregido.
+Detenido y reemplazado por uno nuevo desde `.venv` antes de repetir la
+validación (documentado, no silenciado). Con el servidor correcto:
+
+```
+POST /map/robinhood {"symbol":"MLBGAME-26AUG03WSHPHI-WSH"}
+-> 200 {"kalshi_ticker":"KXMLBGAME-26AUG031840WSHPHI-WSH","strategy":"substring",...}
+
+GET /analyze/KXMLBGAME-26AUG031840WSHPHI-WSH
+-> 200 {"event_id":"mlb_823431","participant_a":"Washington Nationals",
+        "participant_b":"Philadelphia Phillies","p_market":0.42,
+        "recommendation":"WATCH", ...}
+```
+
+Flujo completo Robinhood símbolo -> ticker Kalshi -> análisis real,
+confirmado con datos en vivo, extremo a extremo.
+
+### Auditoría final
+
+- Sin regresiones: 1076/1076 tests, ningún test preexistente tocado.
+- `git diff --stat`: `src/matching/market_matcher.py`,
+  `src/api/event_resolver.py` (fix), `tests/unit/test_market_matcher.py`,
+  `tests/unit/test_event_resolver.py` (regresión), este documento --
+  ningún otro archivo de Fase 1-5 tocado. `robinhood_mapper.py`,
+  `analysis_service.py`, `main.py` sin cambios (el bug y el fix viven
+  enteramente en la capa de matching/resolución, no en el mapeador ni
+  en el endpoint HTTP -- consistente con el reporte del usuario de que
+  el mapeador ya funcionaba bien).
+- Separación de capas intacta: el fix vive en Fase 1 (`market_matcher.py`,
+  compartido por MLB y tenis) y Fase 5 (`event_resolver.py`) -- ninguna
+  lógica de mapeo Robinhood se tocó ni se duplicó.
+
+### Estado para continuar
+
+**Flujo Robinhood -> `/map/robinhood` -> `/analyze` validado
+extremo a extremo con datos reales, en vivo.** Deuda relacionada,
+NO resuelta en este paso (fuera del reporte original del usuario,
+requiere su propia decisión): el mismo problema de fondo
+(`occurrence_datetime` no confiable pre-evento) probablemente afecta
+también a tenis (ATP/WTA) -- verificado que ~94-97% de los mercados
+de tenis abiertos hoy también tienen `occurrence_datetime` ==
+`expected_expiration_time`, pero los tickers de tenis reales
+observados no embeben segmento de hora (a diferencia de MLB hoy), por
+lo que el fallback de este paso no lo corrige -- sigue exactamente
+igual que antes. D-3 (fees Kalshi) y entrenamiento MLB siguen como
+deuda técnica documentada, sin fecha, sin cambios en este paso.
+Servidor de prueba (`uvicorn`, PID reportado al usuario en el chat)
+queda corriendo para que el usuario siga probando la extensión.
+
+## 0.32 Auditoría completa del flujo extremo a extremo (Robinhood → mapeador → Kalshi → `/analyze`) (2026-08-03)
+
+### Contexto y autorización
+
+El usuario, con el bug de §0.31 ya resuelto/documentado/committeado,
+pidió una auditoría completa del flujo: puntos frágiles, dependencias
+implícitas, duplicación de lógica, deuda técnica, condiciones de
+carrera, oportunidades de simplificación, fallos latentes con otros
+deportes/formatos, y manejo de errores (ticker no encontrado, mercado
+cerrado, timeout, red, respuesta incompleta, cambios de formato de
+Robinhood). Instrucción explícita: corregir solo lo que tenga causa
+raíz clara y evidencia real (mismo criterio que §0.31), sin bypasses;
+documentar el resto como deuda técnica priorizada; no tocar tenis sin
+evidencia equivalente a la de MLB.
+
+### Metodología
+
+Lectura completa de las 7 capas del flujo (`robinhood_mapper.py` →
+`event_resolver.py` → `market_matcher.py`/`event_matcher.py` →
+`mlb_pipeline.py`/`tennis_pipeline.py` → `kalshi.py`/`base_client.py` →
+`main.py`/`schemas.py`), más verificación en vivo contra las APIs
+reales (Kalshi, MLB Stats API, ESPN Tennis) donde una duda no se podía
+resolver solo leyendo código -- mismo principio de la Regla 1 aplicado
+sistemáticamente, no solo al bug puntual de §0.31.
+
+### Hallazgos -- corregidos en este paso (evidencia real, riesgo bajo)
+
+**H1. `robinhood_mapper.py` (estrategia 3, event_matcher) usaba la
+tolerancia temporal GENÉRICA de MLB (90min) para CUALQUIER deporte,
+incluido tenis.** La llamada a `find_best_kalshi_event` en esa
+estrategia omitía `tolerance_minutes` -- a diferencia de
+`mlb_pipeline.py`/`tennis_pipeline.py`, que sí pasan explícitamente
+`EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT[sport]`. Real, no
+hipotético: un desfase de 150min entre `robinhood_start_time` y
+`occurrence_datetime` -- perfectamente normal en tenis ("orden de
+salida a pista", el propio comentario de `config/settings.py` lo
+documenta) -- habría dado `NEEDS_REVIEW` y terminado en 404 pese a
+nombre exacto, exactamente la misma clase de síntoma que §0.31, en la
+ÚLTIMA estrategia de mapeo Robinhood. Fix: pasar
+`EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT[sport.value]` (constante
+YA existente y ya usada correctamente en ambos pipelines -- no se
+introduce ningún valor nuevo, solo se corrige un sitio que no la
+usaba). 1 test de regresión nuevo (desfase de 150min, falla con 90min,
+resuelve con 240min).
+
+**H2. Tres mapas independientes "serie Kalshi -> deporte", solo uno
+con verificación de consistencia.** `KALSHI_SPORT_SERIES`
+(`config/settings.py`), `_SERIES_TO_SPORT` (`event_resolver.py`, con
+`assert` contra el anterior) y `_SERIES_TO_SPORT_KEY`
+(`robinhood_mapper.py`, SIN ningún `assert`) codifican el mismo
+conocimiento tres veces. Si Kalshi añade una serie nueva y se
+actualizan los dos primeros pero se olvida el mapeador Robinhood (o
+viceversa), nada lo detecta -- desincronización silenciosa (produciría
+un 400 honesto para esa serie vía Robinhood, no un dato incorrecto,
+pero sigue siendo deuda real). Fix: `assert set(_SERIES_TO_SPORT_KEY)
+== set(KALSHI_SPORT_SERIES.values())` en `robinhood_mapper.py`, mismo
+patrón ya usado en `event_resolver.py`. Verificado en vivo: pasa hoy
+(las tres series coinciden).
+
+**H3. Constante `_DATE_SEGMENT_LENGTH = 7` duplicada literalmente**
+entre `robinhood_mapper.py` y la `_TICKER_DATE_SEGMENT_LENGTH` que
+introdujo el fix de §0.31 en `market_matcher.py` -- mismo valor, mismo
+significado (`YYMMMDD`), dos definiciones independientes. Fix:
+`robinhood_mapper.py` ahora importa la constante de `market_matcher.py`
+en vez de redefinirla.
+
+Suite completa tras H1-H3: **1077 passed, 0 failed** (1076 + 1, sin
+regresiones -- ningún test existente modificado). Validado de nuevo el
+flujo real completo con servidor levantado (`POST /map/robinhood` ->
+`GET /analyze/{ticker}`, mismo ticker WSH-PHI de §0.31): 200/200 sin
+cambios de comportamiento para MLB.
+
+### Hallazgo mayor -- NO corregido, deuda técnica de alta prioridad (evidencia real, sin fix seguro todavía)
+
+**H4. Tenis (ATP al menos) tiene un problema de matching de la MISMA
+FAMILIA que el de §0.31, confirmado con datos reales en vivo, pero SIN
+una vía de corrección tan limpia como la de MLB.** Corrida real de
+`run_tennis_pipeline("atp", <fecha real>)` contra la API en vivo:
+**0 de 310 registros con `market_id` confidente** (todos
+`NEEDS_REVIEW`). Investigado más a fondo para no quedarse en el número
+crudo (muchos de esos 310 son partidos `TBD` sin rival todavía, o
+partidos de ESPN sin mercado Kalshi correspondiente -- eso es
+esperado, no un bug): filtrando por **similitud de nombre perfecta
+(1.0)** contra un evento real de Kalshi, quedan **31 casos** de
+partido genuino con nombre exacto pero rechazado por tiempo -- ej.
+`Zheng vs Kecmanovic` (nombre exacto, evento Kalshi real
+`KXATPMATCH-26AUG02ZHEKEC` existente): ESPN da inicio real
+`2026-08-03T22:00:00Z`, pero `occurrence_datetime` del mercado Kalshi
+= `2026-08-02T18:00:00Z` (**-1680min**, más de un día antes, no
+minutos). A diferencia de MLB: (a) `occurrence_datetime` y
+`expected_expiration_time` de este mercado **NO son idénticos**
+(`2026-08-02T18:00` vs `2026-08-03T21:05` -- distintos, contradice la
+hipótesis simple de "siempre placeholder de liquidación" verificada
+para MLB); (b) el ticker de este mercado (`KXATPMATCH-26AUG02ZHEKEC-ZHE`)
+**no embebe segmento de hora** -- verificado que los tickers de tenis
+reales observados hoy nunca lo traen (a diferencia de MLB, 44/44 con
+hora), así que el fix de §0.31 no tiene nada de qué tirar para tenis;
+(c) no existe (verificado contra la documentación oficial de Kalshi,
+mismo WebFetch de §0.31) ningún campo estructurado de "hora de inicio
+programada", y el texto libre `rules_primary` de tenis NO menciona
+hora ("... after a ball has been played", sin fecha/hora) -- a
+diferencia de MLB, donde sí la traía literal.
+
+**Hipótesis de trabajo, NO verificada, NO implementada** (por eso
+queda como deuda, no como fix): el `occurrence_datetime` de un mercado
+de tenis podría representar el inicio de la SESIÓN/orden de salida a
+pista del día, no el partido individual -- consistente con que el
+tenis no tiene horarios fijos por partido (razón por la que
+`EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["TENNIS"]` ya es 240min,
+el cuádruple de MLB). Verificar esto requeriría evidencia equivalente
+a la de MLB (múltiples partidos reales cruzados contra una fuente de
+verdad estructurada) que esta auditoría no pudo reunir en el tiempo
+disponible -- **instrucción explícita del usuario: no implementar
+ningún cambio de tenis sin esa evidencia**. También relevante:
+`GATE-0`/entrenamiento de tenis (Fase 4, §0.26) SÍ logró un
+`p_market` real al menos una vez (Nakashima/Fritz, 2026-08-01,
+§0.28) -- el problema no es "tenis nunca matchea", es intermitente/
+dependiente del contexto, coherente con que la causa no es un offset
+constante como en MLB.
+
+**Recomendación**: próxima sesión dedicada, con su propio Design
+Proposal (mismo patrón institucional que D-3), reuniendo evidencia
+real de varios partidos de tenis con hora conocida por una fuente
+independiente (ESPN ya sirve como esa fuente) antes de proponer
+ninguna corrección.
+
+### Otros hallazgos -- documentados, sin corregir (fuera de alcance de "no nueva funcionalidad" o riesgo/beneficio desfavorable)
+
+**H5. Doble fetch de Kalshi por cada request de `/analyze`.**
+`resolve_ticker()` llama a `get_all_events_for_sport` UNA VEZ para
+localizar el mercado/fecha: pero `run_mlb_pipeline`/`run_tennis_pipeline`
+(llamados justo después) hacen su PROPIO fetch independiente de Kalshi
+para el matching de evento -- dos llamadas HTTP reales a Kalshi por
+cada `/analyze`, con un desfase de segundos-a-minutos entre ambas
+capturas (el pipeline intermedio hace fetches reales a MLB Stats
+API/ESPN que tardan). No es incorrecto hoy (ambas piden `status="open"`,
+`_find_market` usa la primera captura solo para decidir fecha/existencia)
+pero es: (a) ineficiente (2x llamadas a una API externa por request);
+(b) un riesgo de consistencia latente -- si el estado "abierto" de
+Kalshi cambia entre ambas capturas, el resto del pipeline usa una
+snapshot distinta a la que `resolve_ticker` validó. **No corregido**:
+arreglarlo bien requeriría que `run_mlb_pipeline`/`run_tennis_pipeline`
+aceptaran los `kalshi_events` ya obtenidos en vez de re-buscarlos --
+cambio de firma en código de Fase 1 compartido con el LaunchAgent
+horario de producción, fuera del alcance de "no implementar
+funcionalidad nueva" de este paso y con radio de impacto mayor al de
+un fix puntual. Recomendado como oportunidad de simplificación
+priorizada para una fase futura.
+
+**H6. Condición de carrera inherente al diseño de dos llamadas HTTP
+independientes (aprobado explícitamente, §0.30).** Entre `POST
+/map/robinhood` y el `GET /analyze/{ticker}` subsiguiente (dos
+requests HTTP separados desde la extensión, sin estado compartido)
+puede pasar tiempo arbitrario -- si el mercado cierra/liquida en ese
+intervalo, `/analyze` responde honestamente 404 ("puede haber cerrado,
+liquidado, o no existir"). No es un bug: es la consecuencia esperada
+de la arquitectura ya aprobada (cada llamada re-consulta Kalshi en
+vivo, nunca hay caché/estado compartido entre ambos endpoints).
+Documentado como riesgo aceptado, no como defecto.
+
+**H7. Caso límite de zona horaria (DST) en `_start_time_from_ticker`
+(§0.31).** `naive_local.replace(tzinfo=America/New_York)` sobre una
+hora local ambigua (retroceso de horario, la 1am ocurre dos veces) o
+inexistente (adelanto, la 2:30am no existe) resolvería silenciosamente
+a un offset -- potencialmente 1h de error. Ventana real: ~2 días al
+año, de madrugada (2-3am hora local), horario en el que MLB
+prácticamente nunca programa partidos. Sin evidencia de que haya
+ocurrido nunca. Documentado, no corregido -- no se fabrica una
+protección para un caso sin evidencia de impacto real (mismo criterio
+"no fabricar" que bloqueó D-3).
+
+**H8. Acoplamiento total del mapeador al formato NO documentado y NO
+versionado del `symbol` de Robinhood.** `_parse_symbol` exige
+literalmente 3 segmentos separados por `-`; un cambio de formato del
+lado de Robinhood (fuera de nuestro control, sin documentación
+pública, sin versión de API) rompería con un 400 honesto (no un dato
+incorrecto) pero sin ninguna alerta automática -- solo se notaría
+cuando un usuario reportara fallos. Riesgo operacional inherente a
+depender de una API no oficial, no un defecto de este código.
+Documentado como gap de observabilidad/monitoreo, no de lógica.
+
+### Fortalezas confirmadas por esta auditoría
+
+- **Manejo de errores de red/timeout ya robusto en la capa compartida**
+  (`base_client.py`, Fase 1): timeout corto, reintentos limitados con
+  backoff exponencial + jitter, nunca lanza excepción al pipeline
+  (`FetchResult.ok=False` siempre) -- se propaga honesto como 502 en
+  las 3 capas (mapeador, resolver, endpoint), sin bypass en ningún
+  punto verificado.
+- **Ningún candidato Kalshi malformado tumba el lote completo** --
+  `find_best_kalshi_event` ya tenía `try/except` puntual por candidato
+  (verificado, no nuevo).
+- **Cero tickers/datos fabricados en ningún punto del flujo**,
+  verificado leyendo las 7 capas: cada fallo de match/red/formato
+  termina en una excepción tipada con detalle honesto, nunca en un
+  200 con datos inventados.
+- **Separación de capas intacta** tras H1-H3: el mapeador sigue sin
+  duplicar lógica de matching (la reutiliza), el endpoint HTTP sigue
+  sin lógica de negocio.
+
+### Auditoría final de esta etapa
+
+- Sin regresiones: 1077/1077, ningún test preexistente modificado.
+- `git diff --stat` (pendiente de commit): `src/api/robinhood_mapper.py`
+  (H1+H2+H3), `tests/unit/test_robinhood_mapper.py` (regresión H1),
+  este documento -- ningún otro archivo tocado. Tenis (occurrence_datetime,
+  H4) explícitamente NO tocado, por instrucción directa del usuario.
+- Validado en vivo de nuevo, servidor real, mismo ticker MLB de §0.31:
+  200/200 sin cambios de comportamiento.
+
+### Estado para continuar
+
+**Flujo Robinhood -> Kalshi -> `/analyze` auditado de punta a punta.**
+Tres correcciones reales aplicadas (H1-H3, bajo riesgo, evidencia
+sólida). Un hallazgo mayor documentado pero explícitamente NO corregido
+(H4, tenis -- requiere su propia sesión de evidencia antes de proponer
+fix). Cuatro puntos de deuda/riesgo documentados sin cambios de código
+(H5-H8, priorizados en el informe de auditoría entregado al usuario en
+el chat). **Veredicto de esta auditoría: el flujo MLB (incluida la vía
+Robinhood) está listo para la siguiente fase; tenis NO** -- cualquier
+trabajo futuro que dependa de análisis de tenis en vivo debe tratar
+H4 como bloqueante, no como deuda de fondo.
+
+## 0.33 Revisión arquitectónica final (perspectiva de arquitecto, sin cambios de código) -- cierre de Fase 5 (2026-08-03)
+
+### Contexto y autorización
+
+El usuario pidió, antes de cerrar la fase formalmente, una última
+revisión puramente arquitectónica del flujo completo -- explícitamente
+sin implementar nada, sin escribir código, sin commits en ese momento.
+Alcance: riesgos importantes remanentes, supuestos sin evidencia
+suficiente, cuellos de botella al crecer, problemas de mantenibilidad,
+y una recomendación imprescindible (o no) antes de la siguiente fase.
+Entregada como análisis en el chat; se registra aquí para que quede en
+el historial permanente del proyecto, no solo en la conversación.
+
+### R1 -- Hallazgo nuevo de esta revisión (no cubierto en §0.31/§0.32): el propio fix de §0.31 no contempla partidos pospuestos/reprogramados
+
+El texto `rules_secondary` de un mercado Kalshi real (evidencia ya
+capturada en §0.31) dice literalmente: *"If this game is postponed or
+delayed, the market will remain open and close after the rescheduled
+game has finished (within two days)."* Kalshi documenta que esto
+ocurre. El fix de §0.31 hizo que el ticker (string estático, fijado en
+el momento en que Kalshi creó el mercado) sea la fuente PRIMARIA de
+fecha/hora del partido. Si el partido se pospone, el ticker
+probablemente no cambia, mientras que el estado real del partido sí.
+Antes del fix, un partido pospuesto fallaba igual que uno normal (mal,
+pero de forma pareja, siempre honesto). Con el fix: probablemente
+sigue fallando honesto (buen caso), pero en el peor caso, si existe
+por coincidencia otro partido real en el slot temporal original,
+podría producir un match a un evento equivocado en vez de un 404
+honesto. Sin evidencia de que haya ocurrido -- tampoco de que no
+pueda. No implementado ningún cambio (instrucción explícita del
+usuario en este paso): queda como riesgo documentado, candidato a
+verificación con evidencia real (un partido pospuesto real) antes de
+confiar en el fix para ese caso específico.
+
+### Riesgos importantes remanentes (además de R1)
+
+- **R2 (= H4, §0.32)**: tenis con evidencia real de fallo (0/310
+  confidentes en corrida real), causa raíz no verificada lo suficiente
+  para corregir.
+- **R3**: cada `/analyze` escribe en `data/engine.db` de producción
+  (SQLite, escritor único) -- el LaunchAgent horario y un request en
+  vivo de la extensión pueden coincidir en el tiempo; contención de
+  locks real, no hipotética, sin monitoreo hoy.
+- **R4**: sin ningún control de concurrencia/rate-limiting en el
+  servidor local -- nada impide que la extensión (retries, varias
+  pestañas) dispare varios `/analyze` simultáneos, cada uno
+  re-consultando las 3 APIs externas por su cuenta.
+
+### Supuestos sin evidencia suficiente
+
+Formato de ticker de Kalshi estable en el tiempo (nunca verificado
+contra documentación oficial del formato en sí, solo evidencia
+empírica de un día); `EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["TENNIS"]=240`
+nunca calibrado estadísticamente (y la propia investigación de H4
+encontró desfases de miles de minutos, no cientos -- sugiere que el
+problema real de tenis no es "240 insuficiente" sino que
+`occurrence_datetime` mide algo distinto al inicio del partido);
+formato del `symbol` de Robinhood estable (API no oficial, sin
+contrato); todo mercado es binario YES/NO de 2 lados (nunca probado
+contra un mercado de más de 2 resultados).
+
+### Cuellos de botella al crecer
+
+Costo por análisis fijo y alto, no baja con volumen (cada `/analyze`
+re-ejecuta el pipeline completo del DÍA, no solo del ticket pedido);
+cero caché entre requests; doble fetch de Kalshi por request (H5)
+duplica la carga hacia una API externa innecesariamente.
+
+### Problemas de mantenibilidad
+
+Conocimiento real sobre semántica de campos de Kalshi vive como
+comentarios extensos en código, no en un documento de referencia
+centralizado -- ya causó una regresión real una vez (§0.31); tres
+mapas independientes "serie Kalshi -> deporte" (con `assert` de
+consistencia ahora, pero siguen siendo tres lugares a tocar); ningún
+mecanismo proactivo de detección de cambios de schema en las 3 APIs
+externas no oficiales que consume el sistema (solo defensas
+reactivas).
+
+### Recomendación imprescindible
+
+**No tratar tenis como producción-ready en la siguiente fase** -- es
+el único hallazgo con evidencia real de fallo, no un riesgo teórico.
+Segunda prioridad, no bloqueante: verificar R1 (un caso real de
+partido pospuesto) antes de confiar sin reservas en el fix de MLB
+fuera de los escenarios ya probados.
+
+### Veredicto formal
+
+**La arquitectura del flujo MLB (incluida la vía Robinhood) es
+suficientemente sólida para continuar** -- todo fallo posible
+identificado en dos auditorías termina en un error honesto y tipado,
+nunca un dato fabricado; separación de capas limpia; manejo de
+red/timeout robusto por diseño desde Fase 1; el único hallazgo con
+evidencia real de fallo (tenis) está delimitado, no contamina el resto
+del sistema. **No es sólida de forma incondicional**: R1/R3/R4 son
+reales aunque no urgentes a la escala actual (un usuario, uso local) y
+deben revisarse antes de exponer el sistema más allá de ese contexto o
+escalar volumen.
+
+### Estado para continuar
+
+Sin cambios de código en este paso (instrucción explícita). Cierre
+formal de Fase 5 -- ver `FASE5_CIERRE_FINAL.md`.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 

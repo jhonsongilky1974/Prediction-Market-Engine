@@ -3,7 +3,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.connectors.kalshi import KalshiConnector
-from src.matching.market_matcher import apply_kalshi_match, find_best_kalshi_event
+from src.matching.market_matcher import (
+    _kalshi_event_start_time,
+    _start_time_from_ticker,
+    apply_kalshi_match,
+    find_best_kalshi_event,
+    local_date_from_kalshi_ticker,
+)
 from src.models.schemas import MatchMethod, NormalizedRecord, Sport
 
 
@@ -156,6 +162,129 @@ def test_market_selection_confidence_none_when_participant_a_missing(kalshi_atp_
     result = find_best_kalshi_event(None, "Kyrian Jacquet", start, events, tolerance_minutes=240)
     if result.selected_market is not None:
         assert result.market_selection_confidence is None
+
+
+# --- Regresión real (2026-08-03, ver CONTINUITY.md §0.31): `occurrence_datetime`
+# de un mercado de Kalshi que TODAVÍA no ocurrió es un valor de LIQUIDACIÓN
+# esperada (idéntico a `expected_expiration_time`, documentado así por Kalshi:
+# "The recorded datetime when the underlying event occurred, IF AVAILABLE"),
+# no el inicio real del partido. Verificado en vivo contra los 8 partidos MLB
+# abiertos el 2026-08-03: los 8 tenían `occurrence_datetime` exactamente
+# +180min (duración típica asumida de un partido) respecto al `start_time`
+# real de MLB Stats API -- suficiente para exceder siempre
+# EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["MLB"] (90min) y bloquear la
+# confirmación del match pese a que el nombre coincidía exacto. Esto rompía
+# /analyze para CUALQUIER ticker MLB recién resuelto (por el mapeador
+# Robinhood o de cualquier otra forma) -- no solo para el flujo de Robinhood.
+
+
+def test_start_time_from_ticker_matches_real_mlb_start_time():
+    """`26AUG031840` -> 2026-08-03 18:40 hora del este de EE.UU. (EDT,
+    UTC-4) -> 2026-08-03T22:40:00Z -- verificado idéntico al `start_time`
+    real de MLB Stats API para este mismo partido (Washington @
+    Philadelphia, 2026-08-03)."""
+    assert _start_time_from_ticker("KXMLBGAME-26AUG031840WSHPHI-WSH") == datetime(
+        2026, 8, 3, 22, 40, tzinfo=timezone.utc
+    )
+
+
+def test_start_time_from_ticker_crosses_midnight_utc_correctly():
+    """`26AUG032140` (21:40 ET) -> 2026-08-04T01:40:00Z -- el mismo caso
+    real que motivó este fix: el ticker "dice" 03AUG pero el partido
+    cruza a las 01:40 UTC del día siguiente en horario UTC."""
+    assert _start_time_from_ticker("KXMLBGAME-26AUG032140SDAZ-SD") == datetime(
+        2026, 8, 4, 1, 40, tzinfo=timezone.utc
+    )
+
+
+def test_start_time_from_ticker_none_without_time_segment():
+    """Tickers reales de tenis (KXATPMATCH/KXWTAMATCH) no embeben hora --
+    el llamador debe caer de vuelta a `occurrence_datetime`, comportamiento
+    sin cambios respecto a antes de este fix."""
+    assert _start_time_from_ticker("KXATPMATCH-26AUG01ATMDRA-ATM") is None
+
+
+@pytest.mark.parametrize("ticker", [None, "", "not-a-real-ticker", "KXMLBGAME-26AUG03-WSH-EXTRA"])
+def test_start_time_from_ticker_none_for_malformed_input(ticker):
+    assert _start_time_from_ticker(ticker) is None
+
+
+def test_local_date_from_kalshi_ticker():
+    assert local_date_from_kalshi_ticker("KXMLBGAME-26AUG031840WSHPHI-WSH") == (2026, 8, 3)
+
+
+def test_local_date_from_kalshi_ticker_works_without_time_segment():
+    """La fecha no depende del segmento de hora (opcional) -- solo del
+    segmento de fecha, siempre presente."""
+    assert local_date_from_kalshi_ticker("KXATPMATCH-26AUG01ATMDRA-ATM") == (2026, 8, 1)
+
+
+@pytest.mark.parametrize("ticker", [None, "", "garbage", "KXMLBGAME-13FOO03WSHPHI-WSH"])
+def test_local_date_from_kalshi_ticker_none_for_malformed_input(ticker):
+    assert local_date_from_kalshi_ticker(ticker) is None
+
+
+def test_kalshi_event_start_time_prefers_ticker_over_misleading_occurrence_datetime():
+    """Caso real reproducido: `occurrence_datetime` "adelantado" +180min
+    (valor de liquidación esperada) -- `_kalshi_event_start_time` debe
+    devolver la hora derivada del ticker, no la de `occurrence_datetime`."""
+    event = {
+        "title": "Washington vs Philadelphia",
+        "markets": [
+            {
+                "ticker": "KXMLBGAME-26AUG031840WSHPHI-WSH",
+                "yes_sub_title": "Washington",
+                "occurrence_datetime": "2026-08-04T01:40:00Z",
+            }
+        ],
+    }
+    assert _kalshi_event_start_time(event) == datetime(2026, 8, 3, 22, 40, tzinfo=timezone.utc)
+
+
+def test_kalshi_event_start_time_falls_back_to_occurrence_datetime_without_ticker_time():
+    """Sin segmento de hora en el ticker (ej. tenis), el comportamiento
+    sigue siendo exactamente el de antes de este fix: se usa
+    `occurrence_datetime` tal cual."""
+    event = {
+        "title": "Player A vs Player B",
+        "markets": [
+            {
+                "ticker": "KXATPMATCH-26AUG01AAABBB-AAA",
+                "yes_sub_title": "Player A",
+                "occurrence_datetime": "2026-08-01T17:00:00Z",
+            }
+        ],
+    }
+    assert _kalshi_event_start_time(event) == datetime(2026, 8, 1, 17, 0, tzinfo=timezone.utc)
+
+
+def test_find_best_kalshi_event_confident_despite_misleading_occurrence_datetime():
+    """Regresión end-to-end del bug real (ver CONTINUITY.md §0.31): antes
+    de este fix, esto daba NEEDS_REVIEW (diferencia temporal 180min >
+    tolerancia 90min) pese a que el nombre del equipo coincide exacto --
+    exactamente la causa raíz de que /analyze devolviera 404 justo
+    después de que el mapeador Robinhood resolviera el ticker correcto."""
+    events = [
+        {
+            "title": "Washington vs Philadelphia",
+            "markets": [
+                {
+                    "ticker": "KXMLBGAME-26AUG031840WSHPHI-WSH",
+                    "yes_sub_title": "Washington",
+                    "occurrence_datetime": "2026-08-04T01:40:00Z",
+                }
+            ],
+        }
+    ]
+    real_mlb_start_time = datetime(2026, 8, 3, 22, 40, tzinfo=timezone.utc)  # real, de MLB Stats API
+
+    result = find_best_kalshi_event(
+        "Washington Nationals", "Philadelphia Phillies", real_mlb_start_time, events, tolerance_minutes=90
+    )
+
+    assert result.match_result.method == MatchMethod.EXACT_NAME_TIME
+    assert result.match_result.is_confident
+    assert result.selected_market["ticker"] == "KXMLBGAME-26AUG031840WSHPHI-WSH"
 
 
 def test_find_best_kalshi_event_skips_malformed_candidate_without_crashing(kalshi_atp_events_sample):

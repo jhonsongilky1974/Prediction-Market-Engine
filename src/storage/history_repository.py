@@ -30,7 +30,9 @@ Ver PLAN_PHASE2.md §11 para el diseño completo aprobado.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +40,8 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from config.settings import DB_PATH
 from src.models.schemas import NormalizedRecord
+
+logger = logging.getLogger(__name__)
 
 HISTORY_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS event_snapshots (
@@ -188,6 +192,8 @@ class HistoryRepository:
         """Inserta una NUEVA fila de snapshot. Nunca actualiza una fila
         existente: dos llamadas para el mismo `event_id` producen dos
         filas distintas, cada una con su propio `captured_at`."""
+        save_started = time.monotonic()
+        logger.info("-> save_event_snapshot event_id=%r source=%r", record.event_id, source)
         captured_at = captured_at or datetime.now(timezone.utc)
         _require_utc_aware(captured_at, "captured_at")
 
@@ -230,7 +236,12 @@ class HistoryRepository:
                     json.dumps(record.raw_refs),
                 ),
             )
-            return cursor.lastrowid
+            snapshot_id = cursor.lastrowid
+        logger.info(
+            "<- save_event_snapshot OK event_id=%r snapshot_id=%d elapsed_ms=%.1f",
+            record.event_id, snapshot_id, (time.monotonic() - save_started) * 1000,
+        )
+        return snapshot_id
 
     def get_snapshots_for_event(self, event_id: str) -> List[Dict[str, Any]]:
         """Devuelve todos los snapshots de un evento, ordenados por
@@ -250,12 +261,19 @@ class HistoryRepository:
         (Paso 5b): el dataset builder de Elo (Paso 6) necesita recorrer
         identidad de equipos/`event_start_time` de TODOS los eventos, no de
         uno a la vez."""
+        query_started = time.monotonic()
+        logger.info("-> get_all_event_snapshots")
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM event_snapshots ORDER BY captured_at ASC, id ASC"
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        logger.info(
+            "<- get_all_event_snapshots OK rows=%d elapsed_ms=%.1f",
+            len(result), (time.monotonic() - query_started) * 1000,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # feature_snapshots (INSERT-only, aditiva, se activa desde el Paso 2)

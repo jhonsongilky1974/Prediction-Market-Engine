@@ -9,10 +9,14 @@ payload actual — por eso EXCHANGE_FEE/FEE_TYPE quedan NULL (ver market_normali
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from config.settings import KALSHI_BASE_URL, KALSHI_POLICY, KALSHI_SPORT_SERIES
 from src.connectors.base_client import BaseHttpClient, FetchResult
+
+logger = logging.getLogger(__name__)
 
 
 class KalshiConnector:
@@ -79,15 +83,26 @@ class KalshiConnector:
         obtenidas (no se descartan) pero `ok=False` y `error` documentan
         que la lista quedó incompleta -- nunca se finge que está completa.
         """
+        fetch_started = time.monotonic()
+        logger.info("-> get_all_events_for_sport sport_key=%r status=%r max_pages=%d", sport_key, status, max_pages)
         series_ticker = KALSHI_SPORT_SERIES[sport_key]
         all_events: List[Dict[str, Any]] = []
         cursor: Optional[str] = None
         last_result: Optional[FetchResult] = None
 
-        for _ in range(max_pages):
+        for page in range(max_pages):
+            page_started = time.monotonic()
             result = self.get_events(series_ticker, status=status, cursor=cursor)
+            logger.info(
+                "get_all_events_for_sport: page=%d/%d ok=%r elapsed_ms=%.1f",
+                page + 1, max_pages, result.ok, (time.monotonic() - page_started) * 1000,
+            )
             last_result = result
             if not result.ok:
+                logger.info(
+                    "<- get_all_events_for_sport FAILED sport_key=%r page=%d elapsed_ms=%.1f",
+                    sport_key, page + 1, (time.monotonic() - fetch_started) * 1000,
+                )
                 return FetchResult(
                     ok=False,
                     status_code=result.status_code,
@@ -102,6 +117,10 @@ class KalshiConnector:
             if not cursor or not events:
                 break
 
+        logger.info(
+            "<- get_all_events_for_sport OK sport_key=%r total_events=%d elapsed_ms=%.1f",
+            sport_key, len(all_events), (time.monotonic() - fetch_started) * 1000,
+        )
         return FetchResult(
             ok=True,
             status_code=last_result.status_code if last_result else None,

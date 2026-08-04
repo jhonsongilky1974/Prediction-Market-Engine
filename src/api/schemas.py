@@ -1,17 +1,18 @@
-"""Contrato de respuesta HTTP de `/analyze` (Fase 5). Ver
-`HTTP_SERVICE_SPEC.md` §1.
+"""Contratos HTTP de la API (Fase 5). `/analyze` -- ver
+`HTTP_SERVICE_SPEC.md` §1. `/map/robinhood` -- ver
+`ROBINHOOD_KALSHI_MAPPER_SPEC.md` §5.
 
 Capa de PRESENTACIÓN únicamente -- ningún campo aquí se calcula, todos
 se leen literalmente de contratos ya cerrados del motor
-(`OpportunityEvaluation`, `ConfidenceProfile`, `EvidenceItem`). No
-reemplaza ni duplica esos contratos.
+(`OpportunityEvaluation`, `ConfidenceProfile`, `EvidenceItem`,
+`MappingResult`). No reemplaza ni duplica esos contratos.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UncertaintyBreakdown(BaseModel):
@@ -82,3 +83,34 @@ class AnalyzeResponse(BaseModel):
 
 class AnalyzeError(BaseModel):
     detail: str
+
+
+class RobinhoodMapRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    """Campo `symbol` real de un contrato de Robinhood Prediction Markets
+    (`.../marketdata/event/contract/quotes/v1/`), ej.
+    `"MLBGAME-26AUG03WSHPHI-WSH"` o `"KXWTAMATCH-26AUG02PEGEAL-PEG"`."""
+    game_start: Optional[datetime] = None
+    """Señal opcional adicional -- solo la usa la estrategia 3
+    (event_matcher) del mapeador como criterio de proximidad temporal
+    (mapea 1:1 a `robinhood_start_time` de
+    `map_robinhood_symbol_to_kalshi_ticker`). Su ausencia no bloquea las
+    estrategias 1/2."""
+
+
+class RobinhoodMapResponse(BaseModel):
+    kalshi_ticker: str
+    """Ticker de mercado Kalshi real y verificado en vivo -- listo para
+    pasar directamente a `GET /analyze/{ticker}` (paso independiente)."""
+    strategy: str
+    """"exact" | "substring" | "event_matcher" -- qué estrategia del
+    mapeador encontró el match, para auditoría del lado cliente."""
+    candidate: str
+    """Ticker candidato construido a partir del `symbol` de Robinhood,
+    antes de verificar contra Kalshi en vivo -- se conserva aunque la
+    estrategia final haya sido substring/event_matcher."""
+    sport: str
+    """`Sport.value` ("MLB"/"TENNIS") -- mismo campo/convención que
+    `AnalyzeResponse.sport`."""
+    sport_key: str
+    """"MLB"/"ATP"/"WTA" -- serie Kalshi real consultada por el mapeador."""
