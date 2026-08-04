@@ -19,6 +19,17 @@ from src.api.event_resolver import ResolverError
 from src.api.robinhood_mapper import MappingError, map_robinhood_symbol_to_kalshi_ticker
 from src.api.schemas import AnalyzeResponse, RobinhoodMapRequest, RobinhoodMapResponse
 
+# Diagnóstico temporal (localizar el bloqueo de /analyze en tenis): sin esto
+# los logger.info(...) de entrada/salida/tiempo añadidos en toda la cadena
+# de /analyze nunca se ven -- uvicorn configura sus propios loggers
+# (uvicorn/uvicorn.access/uvicorn.error), pero no toca el root logger del
+# que cuelgan los loggers de este proyecto (logging.getLogger(__name__)),
+# que por defecto queda en WARNING sin ningún handler.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
