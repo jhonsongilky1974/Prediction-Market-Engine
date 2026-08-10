@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Prediction Market Engine — puente Robinhood",
+  "version": "0.1.0",
+  "description": "Lee los eventos de Prediction Markets que Robinhood ya carga en la pestaña, los mapea a un ticker Kalshi vía el backend local (127.0.0.1:8000) y muestra el análisis del motor.",
+  "host_permissions": [
+    "https://robinhood.com/*",
+    "https://*.robinhood.com/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://robinhood.com/*", "https://*.robinhood.com/*"],
+      "js": ["page_hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://robinhood.com/*", "https://*.robinhood.com/*"],
+      "js": ["content_script.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
