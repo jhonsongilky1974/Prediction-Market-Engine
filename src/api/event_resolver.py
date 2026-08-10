@@ -186,6 +186,25 @@ def resolve_ticker(
                 enrichment_mode=enrichment_mode,
             )
 
+    # Diagnóstico real 2026-08-10 (ver CONTINUITY.md): ESPN Tennis bloqueado
+    # por Akamai (403) hacía que `run_tennis_pipeline` devolviera
+    # `records=[]` (fuente primaria caída, no best-effort) y esta función
+    # reportaba SIEMPRE el mismo 404 "no encontró un match confidente" --
+    # indistinguible de un fallo real de matching/umbral de confianza, pese
+    # a que el motor nunca llegó a tener datos con los que intentar
+    # matchear. Si algún paso del pipeline falló, se reporta como caída de
+    # fuente (502) en vez de mezclarse con el 404 de matching genuino.
+    failed_steps = [step for step in pipeline_result.steps if not step.ok]
+    if failed_steps:
+        failures = "; ".join(f"{step.source}.{step.step}={step.error}" for step in failed_steps)
+        raise ResolverError(
+            502,
+            f"ticker {ticker!r} existe en Kalshi (evento {kalshi_event.get('title')!r}), pero el pipeline de "
+            f"datos no pudo completarse -- fuente(s) upstream con fallo: {failures}. Esto es una caída de "
+            "fuente de datos, NO un fallo de matching/confianza: el motor nunca llegó a tener datos "
+            "completos con los que evaluar este ticker.",
+        )
+
     raise ResolverError(
         404,
         f"ticker {ticker!r} existe en Kalshi (evento {kalshi_event.get('title')!r}), pero el motor no "

@@ -9,6 +9,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import requests
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_RAW_DIR = PROJECT_ROOT / "data" / "raw"
 DATA_NORMALIZED_DIR = PROJECT_ROOT / "data" / "normalized"
@@ -56,6 +58,13 @@ ESPN_TENNIS_POLICY = HttpPolicy(
     max_retries=2,
     backoff_base_seconds=0.5,
     min_seconds_between_requests=0.3,
+    # El User-Agent por defecto de HttpPolicy ("prediction-market-engine/0.1
+    # ...") lo bloquea Akamai con 403 en site.api.espn.com -- verificado con
+    # curl directo el 2026-08-10 (3/3 intentos), mientras que el User-Agent
+    # genérico que `requests` manda por defecto sí pasa (200). Cambio acotado
+    # a ESTE conector -- no se toca el default de HttpPolicy ni las políticas
+    # de MLB/Kalshi/SofaScore/Odds API.
+    user_agent=requests.utils.default_user_agent(),
 )
 
 # Kalshi API pública (read-only, sin auth para market data de series abiertas).

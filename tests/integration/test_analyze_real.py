@@ -51,8 +51,11 @@ def test_analyze_ticker_against_real_kalshi_and_mlb_apis(tmp_path):
     except ResolverError as exc:
         # Honesto: el matcher (Fase 1, sin modificar) puede no confirmar
         # el match hoy -- 404/400 son resultados válidos, nunca un 5xx
-        # inesperado ni un crash.
-        assert exc.status_code in (400, 404)
+        # inesperado ni un crash. 502 también es válido desde el fix de
+        # 2026-08-10: una fuente upstream caída (ver event_resolver.py)
+        # se reporta como caída de fuente, no como 404 de matching --
+        # sigue siendo un ResolverError honesto y controlado, no un crash.
+        assert exc.status_code in (400, 404, 502)
         return
 
     assert response.ticker == ticker

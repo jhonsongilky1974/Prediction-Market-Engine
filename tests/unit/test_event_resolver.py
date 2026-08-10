@@ -17,6 +17,7 @@ from src.api.event_resolver import ResolverError, _date_from_market, _find_marke
 from src.connectors.base_client import FetchResult
 from src.connectors.kalshi import KalshiConnector
 from src.models.schemas import NormalizedRecord, Sport
+from src.pipelines.mlb_pipeline import PipelineStepResult
 
 
 def _ok(data):
@@ -134,10 +135,11 @@ def _record(market_id, event_id="mlb_1"):
 
 
 class _FakeMlbPipelineResult:
-    def __init__(self, records, feature_inputs_list=None, feature_cutoffs=None):
+    def __init__(self, records, feature_inputs_list=None, feature_cutoffs=None, steps=None):
         self.records = records
         self.feature_inputs_list = feature_inputs_list or [None] * len(records)
         self.feature_cutoffs = feature_cutoffs or [None] * len(records)
+        self.steps = steps or []
 
 
 def test_resolve_ticker_happy_path(monkeypatch):
@@ -267,3 +269,31 @@ def test_resolve_ticker_no_confident_match_raises_404(monkeypatch):
     with pytest.raises(ResolverError) as exc_info:
         resolve_ticker("KXMLBGAME-26AUG01LAADET-LAA")
     assert exc_info.value.status_code == 404
+
+
+def test_resolve_ticker_upstream_pipeline_failure_raises_502_not_404(monkeypatch):
+    """Diagnóstico real 2026-08-10: ESPN Tennis bloqueado por Akamai (403)
+    hacía que el pipeline devolviera `records=[]` -- y `resolve_ticker`
+    reportaba el mismo 404 "no match confidente" que un fallo de matching
+    genuino, indistinguible sin leer logs internos. Una fuente upstream
+    caída (`steps` con algún `ok=False`) debe reportarse como 502, no
+    mezclarse con el 404 de matching."""
+    monkeypatch.setattr(
+        KalshiConnector,
+        "get_all_events_for_sport",
+        lambda self, sport_key, status="open", max_pages=10: _ok({"events": [_MLB_EVENT]}),
+    )
+
+    def fake_run_mlb_pipeline(date, repository=None, history_repository=None):
+        return _FakeMlbPipelineResult(
+            [],
+            steps=[PipelineStepResult("mlb", "schedule", False, error="http_403")],
+        )
+
+    monkeypatch.setattr(resolver_module, "run_mlb_pipeline", fake_run_mlb_pipeline)
+
+    with pytest.raises(ResolverError) as exc_info:
+        resolve_ticker("KXMLBGAME-26AUG01LAADET-LAA")
+    assert exc_info.value.status_code == 502
+    assert "http_403" in exc_info.value.detail
+    assert "no es" in exc_info.value.detail.lower() or "no un fallo" in exc_info.value.detail.lower()
