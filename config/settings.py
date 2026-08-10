@@ -115,6 +115,22 @@ EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT = {
     "TENNIS": 240,
 }
 
+# Auditoria real 2026-08-10 (ver CONTINUITY.md): `occurrence_datetime` de
+# Kalshi para tenis es un estimado que erra sistematicamente mas en
+# rondas tempranas de cuadros grandes -- se juegan repartidas en varios
+# dias, asi que un valor a nivel de ronda puede errar por dias -- que en
+# rondas tardias, un partido por dia por cancha. Medido contra datos
+# reales (n=77 Cuartos/Semis/Final + Clasificatorias, ATP+WTA, ventana de
+# 30 dias): 330min cubre 97-100% de esas rondas. En Round Of 128/64/32/16
+# ninguna tolerancia razonable (probado hasta 480min) supera el 76% de
+# cobertura -- es un problema distinto (que DIA es el partido, no que
+# HORA) que esta constante deliberadamente no intenta resolver; esas
+# rondas se quedan en EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT
+# ["TENNIS"] (240) sin cambios. Solo se usa en el camino de tenis
+# (src/pipelines/tennis_pipeline.py) -- MLB no la referencia en ningun
+# punto del codigo.
+TENNIS_LATE_ROUND_TOLERANCE_MINUTES = 330
+
 # Umbral de confianza de nombre (0-1) por debajo del cual el matching de
 # evento se marca NEEDS_REVIEW en vez de forzarse.
 EVENT_NAME_MATCH_MIN_CONFIDENCE = 0.72

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from config.settings import EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT
+from config.settings import EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT, TENNIS_LATE_ROUND_TOLERANCE_MINUTES
 from src.connectors.espn_tennis import EspnTennisConnector
 from src.connectors.kalshi import KalshiConnector
 from src.connectors.sofascore import SofascoreConnector
@@ -38,6 +38,41 @@ logger = logging.getLogger(__name__)
 def _is_upcoming(match: Dict[str, Any]) -> bool:
     state = ((match.get("status") or {}).get("type") or {}).get("state")
     return state in ("pre", "in")
+
+
+# Auditoria real 2026-08-10 (ver CONTINUITY.md): ronda -> tolerancia,
+# leida del campo ESTRUCTURADO de ESPN (`match["round"]`), nunca del
+# titulo de texto libre de Kalshi -- Kalshi no expone ronda en ningun
+# campo estructurado (solo embebida en `market["title"]`/`rules_primary`).
+# `round["id"]` es un enum pequeno y estable verificado contra datos
+# reales (ATP+WTA, cuadros de distinto tamano): 5=Quarterfinal,
+# 6=Semifinal, 7=Final. Las rondas de clasificacion se detectan por
+# `displayName` (ids observados: 11, 14 -- podria haber mas sin
+# confirmar, ej. cuadros de clasificacion mas grandes) en vez de una
+# lista de ids no verificada contra datos reales.
+_LATE_STAGE_ROUND_IDS = {"5", "6", "7"}
+_LATE_STAGE_ROUND_NAMES = {"quarterfinal", "semifinal", "final"}
+
+
+def _tennis_round_tolerance_minutes(espn_match: Dict[str, Any]) -> int:
+    """Tolerancia de tiempo (minutos) para el matching Kalshi de ESTE
+    partido, segun su ronda real. Cuartos de Final/Semifinal/Final/
+    Clasificatorias -> TENNIS_LATE_ROUND_TOLERANCE_MINUTES (330, evidencia
+    real: cubre 97-100% de esas rondas). Cualquier otra ronda (Round Of
+    128/64/32/16) o ronda ausente/no reconocida -> el valor conservador
+    actual (240) sin cambios -- ahi ampliar la tolerancia no ayuda
+    (medido: <76% de cobertura incluso a 480min) y solo aumentaria el
+    riesgo de cruzar partidos sin ganar nada."""
+    round_info = espn_match.get("round") or {}
+    round_id = str(round_info.get("id")) if round_info.get("id") is not None else None
+    round_name = (round_info.get("displayName") or "").strip().lower()
+
+    is_late_stage = round_id in _LATE_STAGE_ROUND_IDS or round_name in _LATE_STAGE_ROUND_NAMES
+    is_qualifying = "qualif" in round_name
+
+    if is_late_stage or is_qualifying:
+        return TENNIS_LATE_ROUND_TOLERANCE_MINUTES
+    return EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["TENNIS"]
 
 
 @dataclass
@@ -160,15 +195,17 @@ def run_tennis_pipeline(
             logger.info("run_tennis_pipeline: sofascore enrichment disabled, skipping match=%s", match_label)
 
         if kalshi_events:
+            tolerance_minutes = _tennis_round_tolerance_minutes(match)
             with log_step(
-                logger, "run_tennis_pipeline.find_best_kalshi_event", match=match_label, candidates=len(kalshi_events)
+                logger, "run_tennis_pipeline.find_best_kalshi_event", match=match_label,
+                candidates=len(kalshi_events), tolerance_minutes=tolerance_minutes,
             ):
                 best = find_best_kalshi_event(
                     record.participant_a,
                     record.participant_b,
                     record.start_time,
                     kalshi_events,
-                    tolerance_minutes=EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["TENNIS"],
+                    tolerance_minutes=tolerance_minutes,
                 )
             apply_kalshi_match(record, best, missing)
         else:
