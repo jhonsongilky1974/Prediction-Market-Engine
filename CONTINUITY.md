@@ -143,6 +143,14 @@ corregir (evidencia insuficiente, requiere sesión dedicada) — ver
 `FASE5_CIERRE_FINAL.md`. Riesgo nuevo documentado (R1: el fix de
 §0.31 no contempla partidos pospuestos, sin evidencia de impacto
 real). Veredicto: flujo MLB listo para la siguiente fase, tenis no.**
+**Actualizado de nuevo: 2026-08-10 — Cerrado el blocker de tenis
+documentado como hallazgo real de fallo en §0.32/§0.33 (R2/H4):
+tolerancia de matching específica por ronda (330min en Cuartos de
+Final/Semifinal/Final/Clasificatorias, 240min sin cambios en Round Of
+128/64/32/16) + corrección de orientación de lado del mercado para
+ambos participantes de un mismo evento — ver §0.34. Validado E2E real
+contra ambos lados de Merida vs Tien y Jodar vs Fils. Suite en 1108.
+MLB sin cambios. Commit publicado: `5352c0586537ba9b976519031a2e0eb56263c646`.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -3508,6 +3516,51 @@ escalar volumen.
 
 Sin cambios de código en este paso (instrucción explícita). Cierre
 formal de Fase 5 -- ver `FASE5_CIERRE_FINAL.md`.
+
+## 0.34 Cierre del blocker de tenis: tolerancia por ronda + orientación de lado del mercado (2026-08-10)
+
+### Contexto
+
+Cierra el hallazgo real de fallo en tenis que §0.32/§0.33 dejó
+documentado sin corregir ("R2/H4"), investigado y resuelto en esta
+sesión con evidencia real, sin ningún ticker ni nombre de jugador
+hardcodeado en la lógica de producción.
+
+### Hechos verificados
+
+- **Tolerancia de tiempo específica por ronda, solo tenis.** Nueva
+  constante `TENNIS_LATE_ROUND_TOLERANCE_MINUTES = 330`
+  (`config/settings.py`), aplicada únicamente en Cuartos de
+  Final/Semifinal/Final/Clasificatorias — leída del campo
+  ESTRUCTURADO de ESPN (`match["round"]["id"]`/`displayName`), nunca
+  de texto libre de Kalshi. Round Of 128/64/32/16 se quedan en 240min
+  sin cambios. `EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["MLB"]`
+  (90) intacto.
+- **Corrección de orientación de lado del mercado, ambos
+  participantes.** `src/api/event_resolver.py`: nueva función
+  `_resolve_other_side_tennis()`, gateada por `sport == Sport.TENNIS`,
+  reutiliza `apply_kalshi_match()` tal cual para que `p_model` y
+  `p_market` queden siempre del mismo jugador tras el swap de
+  perspectiva (participant_a/b, contexto de espn_ids, ranking_a/b,
+  `prior_match_start_times`). `match_event()` sin cambios de firma ni
+  de algoritmo.
+- **Validación E2E real** contra el backend real, mismo camino
+  `/map/robinhood` → `/analyze` que usa la extensión: los 4 lados
+  (Merida vs Tien, Jodar vs Fils) devuelven HTTP 200, con
+  `participant_a`/`p_model`/`p_market` consistentemente orientados al
+  mismo jugador en cada lado.
+- **Suite completa: 1108 passed, 0 failed, 0 skipped** (30 tests
+  nuevos entre `tests/unit/test_tennis_round_tolerance.py` y
+  `tests/unit/test_tennis_side_swap.py`).
+- **MLB permanece sin cambios** — verificado con test dedicado
+  (`_resolve_other_side_tennis` nunca se invoca desde el camino MLB) y
+  con un partido real: el lado ya resuelto sigue en 200, el lado no
+  adjunto sigue en 404, igual que antes de este commit.
+- **Commit publicado**: `5352c0586537ba9b976519031a2e0eb56263c646`
+  (`main` local y `origin/main` sincronizados, verificado con
+  `git rev-parse`).
+- Working tree limpio antes de esta actualización de
+  `CONTINUITY.md` (único archivo tocado en este paso).
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
