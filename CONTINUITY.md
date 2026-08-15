@@ -151,6 +151,15 @@ Final/Semifinal/Final/Clasificatorias, 240min sin cambios en Round Of
 ambos participantes de un mismo evento — ver §0.34. Validado E2E real
 contra ambos lados de Merida vs Tien y Jodar vs Fils. Suite en 1108.
 MLB sin cambios. Commit publicado: `5352c0586537ba9b976519031a2e0eb56263c646`.**
+**Actualizado de nuevo: 2026-08-15 — CIERRE FORMAL DEL TRAMO 1 (resolver
+estructural de pares para tenis, Qualifying + Group Stage): investigado
+y resuelto el caso real Faria vs Wu (12 ago) dejado abierto por §0.34,
+implementado `src/matching/tennis_pair_matcher.py`, validado E2E real
+vía Robinhood → extensión → backend (Halys vs de Minaur), auditoría
+empírica de Tramo 2 (1237 casos reales, 0 desempates justificados) y de
+cobertura NOT_FOUND (99.65% cobertura parcial de Kalshi, 0% defecto de
+matching) — ver §0.35. Suite en 1151. MLB sin cambios. Commit publicado
+e integrado en `origin/main`: `734e081a5d4c0e14c636c34621ce431b39dc6a57`.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -3561,6 +3570,119 @@ hardcodeado en la lógica de producción.
   `git rev-parse`).
 - Working tree limpio antes de esta actualización de
   `CONTINUITY.md` (único archivo tocado en este paso).
+
+## 0.35 Cierre formal del Tramo 1: resolver estructural de pares para tenis (2026-08-15)
+
+### Contexto
+
+Cierra el hallazgo real dejado abierto por §0.34: el caso Faria vs Wu
+(12 ago 2026, detectado vía la extensión Robinhood) seguía fallando pese
+al fix de tolerancia por ronda — reconstrucción real (12 ago,
+re-verificada en vivo el 15 ago contra las APIs reales de ESPN/Kalshi
+porque la captura histórica local no tenía snapshots de esos días)
+determinó que la identidad del par era perfecta
+(`participants_similarity=1.0`) y el único motivo del fallo era que el
+delta real (390min) excedía por 60min la tolerancia de Qualifying
+(330min, ya fijada en §0.34) — no era un problema de candidatos
+múltiples ni de identidad de participantes.
+
+### Estado del Tramo 1
+
+- **Implementado e integrado directamente en `origin/main`** (sin PR —
+  ya integrado). Commit: `734e081a5d4c0e14c636c34621ce431b39dc6a57`.
+- Resolver estructural **tennis-only**, nuevo módulo
+  `src/matching/tennis_pair_matcher.py::resolve_tennis_pair_by_structure()`
+  — nunca importado por `mlb_pipeline.py`/`market_matcher.py`.
+- Gate determinístico, solo Qualifying (`"qualif"` en `round.displayName`)
+  y Group Stage (`round.id="15"` o `displayName="Group Stage"` — verificado
+  en vivo contra dos torneos reales, Nitto ATP Finals y WTA Finals; "Round
+  Robin" nunca aparece como valor real de ESPN). Cuartos/Semifinal/Final y
+  Round Of 128/64/32/16 quedan exactamente en su camino existente, sin
+  cambios.
+- Identificación obligatoria mediante **par completo A+B** dentro del
+  mismo candidato Kalshi (nunca combina nombres de eventos distintos);
+  permite inversión A-B/B-A por nombre, nunca por posición.
+- Contrato de resultado: **0 candidatos → `NOT_FOUND`**; **1 candidato
+  inequívoco → `MatchMethod.TENNIS_STRUCTURAL_PAIR_UNIQUE`**; **2+
+  candidatos → `NEEDS_REVIEW`**. Sin ningún desempate secundario.
+- `MatchMethod.TENNIS_STRUCTURAL_PAIR_UNIQUE` nuevo, incluido en
+  `_CONFIDENT_METHODS` (event_matcher.py) y en el filtro de siblings de
+  `_resolve_other_side_tennis` (event_resolver.py) — cierra el mismo bug
+  de orientación de lado de §0.34 también para estas rondas.
+- **MLB permanece completamente aislado** — verificado estructural (grep
+  sobre `mlb_pipeline.py`/`market_matcher.py`) y funcionalmente (test
+  dedicado ejecutando `run_mlb_pipeline` real).
+
+### Validaciones
+
+- **1151 tests passed, 0 failed** (1108 previos + 43 nuevos/ajustados).
+- Faria vs Wu resuelto correctamente vía `TENNIS_STRUCTURAL_PAIR_UNIQUE`.
+- Ambos sides (`-FAR`/`-YIB`) validados: mismo encuentro, participante/side
+  correctos.
+- Ausencia de doble swap confirmada con un test dedicado que combina las
+  dos únicas fuentes posibles de inversión del sistema (orden Kalshi
+  invertido + `_resolve_other_side_tennis`).
+- Regresiones de tenis existentes (tolerancia por ronda, QF/SF/Final)
+  intactas, sin tocar.
+- Aislamiento MLB confirmado.
+- **E2E real validado**: Robinhood → extensión → `POST /map/robinhood` →
+  `GET /analyze/{ticker}` → panel flotante, ambos lados, caso real Halys
+  vs de Minaur, sin 404 ni errores de obtención.
+
+### Auditoría empírica de Tramo 2 (desempate multi-candidato)
+
+Muestra real de **1237 casos** de Qualifying/Group Stage (ATP+WTA, varios
+meses, decenas de torneos), ejecutando la función ya commiteada contra el
+pool real de candidatos Kalshi modelado con su ventana temporal real
+(`open_time`/`close_time`/`settlement_ts`). **0 casos genuinos de 2+
+candidatos tras el pair-match** — el ciclo de liquidación de Kalshi
+(un ticket se liquida antes de que se cree el siguiente, incluso en el
+caso más ajustado real encontrado: Aksu vs Costoulas, revancha al día
+siguiente, Prague Open) previene estructuralmente la ambigüedad antes de
+que llegue al resolver. `product_metadata.competition` (Kalshi) confirmado
+no apto como señal excluyente (colisión léxica real en 3/4 torneos
+verificados, ej. "ATP Montreal" vs "National Bank Open presented by
+Rogers").
+
+**Decisión**: no implementar Tramo 2. Política vigente:
+- Mantener `NEEDS_REVIEW` para 2+ candidatos.
+- No implementar desempate hasta que aparezca evidencia real que lo
+  justifique.
+- Ninguna señal secundaria puede compensar una coincidencia insuficiente
+  del par de participantes — principio a conservar si Tramo 2 se retoma
+  en el futuro.
+
+### Auditoría de cobertura NOT_FOUND
+
+Clasificación de los 573 casos `NOT_FOUND` de la muestra anterior:
+
+| Categoría | Casos | % |
+|---|---|---|
+| A — Kalshi no ofrecía el partido | 571 | 99.65% |
+| B — mercado existente pero fuera de ventana/pool | 2 | 0.35% |
+| C — mercado presente pero matching falló | 0 | 0.0% |
+
+**Conclusión**: los `NOT_FOUND` observados corresponden abrumadoramente a
+cobertura parcial de Kalshi (no cubre la mayoría de los partidos reales
+de Qualifying, incluso dentro de torneos parcialmente cubiertos), no a un
+defecto demostrado del resolver — 0 casos de categoría C en toda la
+muestra. Los 2 casos de categoría B quedan como observación futura, sin
+justificar cambios de arquitectura.
+
+### Deudas conocidas, no bloqueantes
+
+- `TENNIS_PAIR_MATCH_MIN_CONFIDENCE=0.97` no calibrado específicamente
+  para esta estrategia (heredado de `EXACT_NAME_TIME` por consistencia).
+- Docstrings cosméticos en `tennis_pair_matcher.py` (líneas 3 y 29)
+  todavía dicen "Round Robin" en vez de "Group Stage" — inconsistencia de
+  nomenclatura en comentarios, sin efecto en comportamiento.
+- `product_metadata.competition` no se usa como señal decisiva (evidencia
+  real en contra, ver arriba).
+- Cobertura parcial de mercados Kalshi (ver auditoría NOT_FOUND) — no es
+  un defecto del resolver, pero limita cuántos partidos reales de
+  Qualifying/Group Stage llegan a resolverse en absoluto.
+- Tramo 2 queda deferido hasta que exista evidencia real que lo
+  justifique.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
