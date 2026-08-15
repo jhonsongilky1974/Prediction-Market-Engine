@@ -46,6 +46,15 @@ class MatchMethod(str, Enum):
     SOURCE_ID = "SOURCE_ID"
     EXACT_NAME_TIME = "EXACT_NAME_TIME"
     FUZZY_NAME_TIME = "FUZZY_NAME_TIME"
+    # Tramo 1 del resolver estructural de pares (tenis, SOLO Qualifying/Round
+    # Robin -- ver src/matching/tennis_pair_matcher.py). Nunca producido por
+    # match_event()/find_best_kalshi_event() ni por el camino de MLB --
+    # verificado por
+    # tests/unit/test_tennis_pair_matcher.py::test_mlb_pipeline_never_references_tennis_pair_matcher.
+    # Distinto de EXACT_NAME_TIME/FUZZY_NAME_TIME porque nunca confirma
+    # proximidad temporal (ver CONTINUITY.md, investigación real Faria vs Wu
+    # 2026-08-12/15).
+    TENNIS_STRUCTURAL_PAIR_UNIQUE = "TENNIS_STRUCTURAL_PAIR_UNIQUE"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     NO_MATCH = "NO_MATCH"
 

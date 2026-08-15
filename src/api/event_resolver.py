@@ -179,7 +179,21 @@ def _resolve_other_side_tennis(
         if record.market_id is not None
         and record.market_id != ticker
         and record.source_event_ids.get("kalshi") == target_event_ticker
-        and record.data_quality.match_method in (MatchMethod.EXACT_NAME_TIME, MatchMethod.FUZZY_NAME_TIME)
+        # TENNIS_STRUCTURAL_PAIR_UNIQUE incluido junto a los métodos ya
+        # confidentes (Tramo 1 del resolver estructural de pares, ver
+        # src/matching/tennis_pair_matcher.py, 2026-08-15) -- semántica
+        # verificada equivalente: `match_result.method` se copia tal cual del
+        # hermano (línea de abajo), `is_confident` ya lo reconoce vía
+        # _CONFIDENT_METHODS (event_matcher.py), y `apply_kalshi_match` sigue
+        # seleccionando el mercado del lado nuevo por comparación de NOMBRE
+        # contra `new_record.participant_a` (nunca por posición) -- mismo
+        # invariante de orientación que ya protegía EXACT_NAME_TIME/
+        # FUZZY_NAME_TIME, sin lógica nueva en esta función.
+        and record.data_quality.match_method in (
+            MatchMethod.EXACT_NAME_TIME,
+            MatchMethod.FUZZY_NAME_TIME,
+            MatchMethod.TENNIS_STRUCTURAL_PAIR_UNIQUE,
+        )
         and not record.data_quality.needs_review
     ]
     if len(siblings) != 1:

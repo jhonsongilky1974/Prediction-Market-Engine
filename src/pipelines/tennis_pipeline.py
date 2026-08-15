@@ -23,6 +23,7 @@ from src.connectors.kalshi import KalshiConnector
 from src.connectors.sofascore import SofascoreConnector
 from src.features.tennis_features import TennisFeatureInputs, persist_tennis_feature_snapshot
 from src.matching.market_matcher import apply_kalshi_match, find_best_kalshi_event
+from src.matching.tennis_pair_matcher import resolve_tennis_pair_by_structure
 from src.models.schemas import NormalizedRecord, SourceStatus
 from src.normalization.tennis_normalizer import normalize_espn_tennis_match
 from src.observability.step_timer import log_step
@@ -73,6 +74,38 @@ def _tennis_round_tolerance_minutes(espn_match: Dict[str, Any]) -> int:
     if is_late_stage or is_qualifying:
         return TENNIS_LATE_ROUND_TOLERANCE_MINUTES
     return EVENT_TIME_MATCH_TOLERANCE_MINUTES_BY_SPORT["TENNIS"]
+
+
+# Tramo 1 del resolver estructural de pares (2026-08-15, ver
+# src/matching/tennis_pair_matcher.py y CONTINUITY.md -- investigación real
+# Faria vs Wu, 2026-08-12). SOLO Qualifying (misma detección real ya usada
+# arriba, "qualif" en displayName) y el formato de grupos tipo round-robin.
+#
+# Verificacion real hecha antes de codificar esto (2026-08-15, consulta en
+# vivo a la API real de ESPN Tennis, NO asumido): "Round Robin" no aparece
+# NUNCA como valor real de round.displayName. El unico valor real
+# encontrado para el formato de grupos es round.id="15",
+# displayName="Group Stage" -- confirmado en DOS torneos reales distintos,
+# ambos tours (Nitto ATP Finals, ej. Alcaraz vs de Minaur 2025-11-09; y WTA
+# Finals, mismas fechas), unico formato round-robin real que existe en el
+# calendario ATP/WTA. No se encontro ninguna otra variante de texto real.
+# Round Of 128/64/32/16 y Cuartos/Semifinal/Final quedan explicitamente
+# FUERA -- sin evidencia propia todavia -- y siguen exactamente su camino
+# actual, sin ningun cambio de comportamiento.
+_STRUCTURAL_PAIR_GROUP_STAGE_ROUND_IDS = {"15"}
+_STRUCTURAL_PAIR_GROUP_STAGE_ROUND_NAMES = {"group stage"}
+
+
+def _tennis_uses_structural_pair_resolver(espn_match: Dict[str, Any]) -> bool:
+    round_info = espn_match.get("round") or {}
+    round_id = str(round_info.get("id")) if round_info.get("id") is not None else None
+    round_name = (round_info.get("displayName") or "").strip().lower()
+    is_qualifying = "qualif" in round_name
+    is_group_stage = (
+        round_id in _STRUCTURAL_PAIR_GROUP_STAGE_ROUND_IDS
+        or round_name in _STRUCTURAL_PAIR_GROUP_STAGE_ROUND_NAMES
+    )
+    return is_qualifying or is_group_stage
 
 
 @dataclass
@@ -195,18 +228,32 @@ def run_tennis_pipeline(
             logger.info("run_tennis_pipeline: sofascore enrichment disabled, skipping match=%s", match_label)
 
         if kalshi_events:
-            tolerance_minutes = _tennis_round_tolerance_minutes(match)
-            with log_step(
-                logger, "run_tennis_pipeline.find_best_kalshi_event", match=match_label,
-                candidates=len(kalshi_events), tolerance_minutes=tolerance_minutes,
-            ):
-                best = find_best_kalshi_event(
-                    record.participant_a,
-                    record.participant_b,
-                    record.start_time,
-                    kalshi_events,
-                    tolerance_minutes=tolerance_minutes,
+            if _tennis_uses_structural_pair_resolver(match):
+                with log_step(
+                    logger, "run_tennis_pipeline.resolve_tennis_pair_by_structure", match=match_label,
+                    candidates=len(kalshi_events),
+                ):
+                    best, pair_diagnostics = resolve_tennis_pair_by_structure(
+                        record.participant_a, record.participant_b, kalshi_events,
+                    )
+                logger.info(
+                    "run_tennis_pipeline: tennis_pair_matcher match=%s outcome=%s examined=%d passed=%d",
+                    match_label, pair_diagnostics.outcome, pair_diagnostics.candidates_examined,
+                    pair_diagnostics.candidates_passed_pair_match,
                 )
+            else:
+                tolerance_minutes = _tennis_round_tolerance_minutes(match)
+                with log_step(
+                    logger, "run_tennis_pipeline.find_best_kalshi_event", match=match_label,
+                    candidates=len(kalshi_events), tolerance_minutes=tolerance_minutes,
+                ):
+                    best = find_best_kalshi_event(
+                        record.participant_a,
+                        record.participant_b,
+                        record.start_time,
+                        kalshi_events,
+                        tolerance_minutes=tolerance_minutes,
+                    )
             apply_kalshi_match(record, best, missing)
         else:
             record.data_quality.needs_review = True

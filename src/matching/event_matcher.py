@@ -165,7 +165,22 @@ def participants_similarity(
     return direct, False
 
 
-_CONFIDENT_METHODS = (MatchMethod.SOURCE_ID, MatchMethod.EXACT_NAME_TIME, MatchMethod.FUZZY_NAME_TIME)
+# TENNIS_STRUCTURAL_PAIR_UNIQUE incluido aquí porque MatchResult.is_confident
+# (abajo) es la única puerta que decide si apply_kalshi_match() adjunta datos
+# de mercado -- sin incluirlo, un registro resuelto por
+# src/matching/tennis_pair_matcher.py nunca podría marcarse confidente pese a
+# tener par completo único verificado. Es una inclusión aditiva y genérica
+# (un MatchMethod más en un set de clasificación), no una rama condicional
+# nueva: match_event()/find_best_kalshi_event() (usadas por MLB y por tenis en
+# las demás rondas) nunca producen ese valor -- solo lo produce
+# tennis_pair_matcher.py, verificado por
+# tests/unit/test_tennis_pair_matcher.py::test_mlb_pipeline_never_references_tennis_pair_matcher.
+_CONFIDENT_METHODS = (
+    MatchMethod.SOURCE_ID,
+    MatchMethod.EXACT_NAME_TIME,
+    MatchMethod.FUZZY_NAME_TIME,
+    MatchMethod.TENNIS_STRUCTURAL_PAIR_UNIQUE,
+)
 
 
 @dataclass
