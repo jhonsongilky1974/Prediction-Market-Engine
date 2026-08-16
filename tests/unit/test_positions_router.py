@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import sqlite3
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,10 +29,17 @@ def client(tmp_path):
     main_module.app.dependency_overrides.clear()
 
 
-def _create_position(client, **overrides) -> dict:
-    body = dict(kalshi_ticker="KXMLBGAME-1", sport="MLB", side="YES", source="MANUAL")
+def _create_position_response(client, **overrides):
+    # idempotency_key por defecto ÚNICA por llamada (uuid4) -- un test
+    # que quiera probar idempotencia real pasa la MISMA key explícita en
+    # dos llamadas.
+    body = dict(idempotency_key=uuid4().hex, kalshi_ticker="KXMLBGAME-1", sport="MLB", side="YES", source="MANUAL")
     body.update(overrides)
-    response = client.post("/positions", json=body)
+    return client.post("/positions", json=body)
+
+
+def _create_position(client, **overrides) -> dict:
+    response = _create_position_response(client, **overrides)
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -89,9 +97,27 @@ def test_2_create_position_model_opportunity(client):
 
 def test_create_position_model_opportunity_missing_link_returns_400(client):
     response = client.post(
-        "/positions", json={"kalshi_ticker": "K-1", "sport": "MLB", "side": "YES", "source": "MODEL_OPPORTUNITY"}
+        "/positions",
+        json={"idempotency_key": uuid4().hex, "kalshi_ticker": "K-1", "sport": "MLB", "side": "YES", "source": "MODEL_OPPORTUNITY"},
     )
     assert response.status_code == 400
+
+
+def test_create_position_same_idempotency_key_same_payload_returns_same_position(client):
+    key = uuid4().hex
+    first = _create_position(client, idempotency_key=key)
+    second = _create_position(client, idempotency_key=key)
+    assert first == second
+    all_positions = client.get("/positions?status=all").json()["positions"]
+    assert len(all_positions) == 1
+
+
+def test_create_position_same_idempotency_key_different_payload_returns_409(client):
+    key = uuid4().hex
+    first_response = _create_position_response(client, idempotency_key=key, kalshi_ticker="K-A")
+    assert first_response.status_code == 200
+    conflict_response = _create_position_response(client, idempotency_key=key, kalshi_ticker="K-B")
+    assert conflict_response.status_code == 409
 
 
 # ---------------------------------------------------------------------
@@ -424,6 +450,25 @@ def test_20_patch_order_planned_to_submitted(client):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "SUBMITTED"
+
+
+def test_20b_patch_order_to_filled_without_fill_rejected_400(client):
+    """Auditoría Tramo 3: PATCH nunca puede fabricar FILLED sin
+    OrderFill real detrás -- ver corrección en positions_repository.py."""
+    position = _create_position(client)
+    pos_id = position["position_id"]
+    order = _create_order(client, pos_id).json()
+
+    response = client.patch(
+        f"/positions/{pos_id}/orders/{order['order_id']}",
+        json={"expected_version": 1, "new_status": "FILLED", "reason": "STATUS_TRANSITION"},
+    )
+    assert response.status_code == 400
+
+    # La Order sigue perfectamente legible tras el rechazo -- sin corrupción.
+    unchanged = client.get(f"/positions/{pos_id}/orders").json()["orders"][0]
+    assert unchanged["status"] == "PLANNED"
+    assert unchanged["confirmed_filled_qty"] == 0
 
 
 def test_21_patch_order_invalid_transition_rejected(client):

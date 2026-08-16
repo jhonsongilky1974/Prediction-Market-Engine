@@ -89,6 +89,18 @@ class FeeView(BaseModel):
 class CreatePositionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    idempotency_key: str = Field(..., min_length=1)
+    """Auditoría Tramo 3: idempotency key OBLIGATORIA de la intención de
+    creación -- reenviar la misma key con el mismo payload lógico
+    (kalshi_ticker/sport/side/source/linked_opportunity_id) devuelve la
+    Position ya creada (no-op, nunca duplica fila ni PositionEvent);
+    reenviarla con datos distintos es 409. Protege contra retry HTTP,
+    timeout ambiguo, refresh/reload y doble entrega -- la protección
+    real vive en el backend (`Position.create_intent_id`, UNIQUE en
+    SQLite), este campo solo la transporta. NUNCA usar ticker+side como
+    sustituto: dos intenciones (keys) distintas pueden crear
+    legítimamente dos Position separadas para el mismo ticker/side."""
+
     kalshi_ticker: str = Field(..., min_length=1)
     sport: Sport
     side: Side

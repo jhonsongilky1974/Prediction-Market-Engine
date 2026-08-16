@@ -135,6 +135,7 @@ def create_position(request: CreatePositionRequest, *, repository: PositionsRepo
     try:
         position = Position(
             position_id=_new_id("pos"),
+            create_intent_id=request.idempotency_key,
             source=request.source,
             linked_opportunity_id=request.linked_opportunity_id,
             kalshi_ticker=request.kalshi_ticker,

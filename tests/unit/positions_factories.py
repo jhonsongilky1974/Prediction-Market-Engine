@@ -32,8 +32,15 @@ def make_fee(**overrides) -> Fee:
 
 
 def make_position(**overrides) -> Position:
+    # create_intent_id por defecto DERIVADO del position_id (posiblemente
+    # sobreescrito) -- así dos llamadas con distinto position_id nunca
+    # colisionan por accidente en la idempotencia real de create_intent_id;
+    # un test que SÍ quiera probar idempotencia pasa create_intent_id
+    # explícito (mismo valor en ambas llamadas).
+    position_id = overrides.get("position_id", "pos-1")
     base = dict(
-        position_id="pos-1",
+        position_id=position_id,
+        create_intent_id=f"intent-{position_id}",
         source=PositionSource.MANUAL,
         linked_opportunity_id=None,
         kalshi_ticker="KXMLBGAME-1",

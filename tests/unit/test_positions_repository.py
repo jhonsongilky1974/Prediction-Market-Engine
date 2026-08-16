@@ -60,10 +60,14 @@ def test_get_position_missing_returns_none(tmp_path):
 
 
 def test_create_position_duplicate_id_rejected(tmp_path):
+    """position_id reutilizado con un create_intent_id DISTINTO (nunca
+    debería ocurrir con IDs generados por uuid4, pero es un backstop) --
+    distinto del caso de idempotencia real (mismo create_intent_id),
+    cubierto en test_create_position_idempotency.py."""
     repo = _repo(tmp_path)
-    repo.create_position(make_position(position_id="pos-1"))
+    repo.create_position(make_position(position_id="pos-1", create_intent_id="intent-a"))
     with pytest.raises(IdempotencyConflictError, match="ya existe"):
-        repo.create_position(make_position(position_id="pos-1"))
+        repo.create_position(make_position(position_id="pos-1", create_intent_id="intent-b"))
 
 
 def test_create_position_records_position_opened_event(tmp_path):
@@ -834,3 +838,60 @@ def test_f5_idempotent_retry_of_sell_order_does_not_recount_reservation(tmp_path
     # ord-a -- el reintento NO agrega una tercera.
     assert len(repo.get_orders_for_position("pos-1")) == 2
     assert repo.get_position("pos-1").open_contracts == 19  # sin cambios por el reintento
+
+
+# ---------------------------------------------------------------------
+# Auditoría Tramo 3 -- defecto real detectado y corregido:
+# update_order_status NO debe poder asignar FILLED/PARTIALLY_FILLED sin
+# ningún OrderFill real detrás (rompería el invariante de Order y
+# corrompería la fila de forma permanente, dado que el UPDATE ya hace
+# commit antes de que la reconstrucción Pydantic del valor de retorno
+# fallara). Ver positions_repository.py::update_order_status.
+# ---------------------------------------------------------------------
+
+
+def test_update_order_status_rejects_filled_without_any_fill(tmp_path):
+    repo = _repo(tmp_path)
+    repo.create_position(make_position(position_id="pos-1"))
+    order = repo.create_order(make_order(order_id="ord-1", position_id="pos-1", intent_id="i-1", requested_qty=19))
+
+    with pytest.raises(InvariantViolationError, match="no puede asignar FILLED"):
+        repo.update_order_status(
+            "ord-1", expected_version=1, new_status=OrderStatus.FILLED, reason=OrderEventReason.STATUS_TRANSITION
+        )
+
+    # La fila NUNCA quedó corrompida: sigue siendo legible y coherente
+    # (status/version/confirmed_filled_qty intactos, sin commit parcial).
+    unchanged = repo.get_order("ord-1")
+    assert unchanged.status == OrderStatus.PLANNED
+    assert unchanged.confirmed_filled_qty == 0
+    assert unchanged.version == 1
+
+
+def test_update_order_status_rejects_partially_filled_without_any_fill(tmp_path):
+    repo = _repo(tmp_path)
+    repo.create_position(make_position(position_id="pos-1"))
+    repo.create_order(make_order(order_id="ord-1", position_id="pos-1", intent_id="i-1", requested_qty=19))
+
+    with pytest.raises(InvariantViolationError, match="no puede asignar PARTIALLY_FILLED"):
+        repo.update_order_status(
+            "ord-1", expected_version=1, new_status=OrderStatus.PARTIALLY_FILLED, reason=OrderEventReason.STATUS_TRANSITION
+        )
+
+    unchanged = repo.get_order("ord-1")
+    assert unchanged.status == OrderStatus.PLANNED
+    assert unchanged.version == 1
+
+
+def test_update_order_status_still_allows_filled_indirectly_via_apply_fill(tmp_path):
+    """La corrección no bloquea el camino legítimo -- apply_fill sigue
+    pudiendo producir FILLED, siempre con confirmed_filled_qty consistente."""
+    repo = _repo(tmp_path)
+    repo.create_position(make_position(position_id="pos-1"))
+    repo.create_order(make_order(order_id="ord-1", position_id="pos-1", intent_id="i-1", requested_qty=5))
+    order, _ = repo.apply_fill(
+        make_fill(fill_id="f1", order_id="ord-1", position_id="pos-1", qty=5, price_cents=Decimal(50), filled_at=_t(1), recorded_at=_t(1)),
+        expected_order_version=1,
+    )
+    assert order.status == OrderStatus.FILLED
+    assert order.confirmed_filled_qty == 5

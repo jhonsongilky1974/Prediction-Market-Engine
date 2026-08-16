@@ -94,6 +94,16 @@ class Position(StrictModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     position_id: str
+    create_intent_id: str
+    """Idempotency key de la INTENCIÓN de creación (auditoría Tramo 3) --
+    mismo patrón que `Order.intent_id`. `UNIQUE` a nivel de motor
+    (positions_repository.py). Reenviar la misma key con el mismo
+    payload lógico (kalshi_ticker/sport/side/source/linked_opportunity_id)
+    es un no-op idempotente; con datos distintos es un conflicto
+    explícito (409) -- ver `PositionsRepository.create_position`. NUNCA
+    se usa ticker+side como idempotencia global: dos intenciones
+    distintas (create_intent_id distintos) pueden crear legítimamente
+    dos Position separadas para el mismo ticker/side."""
     source: PositionSource
     linked_opportunity_id: Optional[str] = None
     kalshi_ticker: str

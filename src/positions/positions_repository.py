@@ -78,6 +78,7 @@ from src.positions.state_machine import (
 POSITIONS_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS positions (
     position_id TEXT PRIMARY KEY,
+    create_intent_id TEXT NOT NULL UNIQUE,
     source TEXT NOT NULL,
     linked_opportunity_id TEXT,
     kalshi_ticker TEXT NOT NULL,
@@ -322,10 +323,42 @@ class PositionsRepository:
             raise InvariantViolationError("create_position exige open_contracts==0 al abrir")
 
         with self._connect_for_write() as conn:
-            existing = conn.execute(
+            conn.row_factory = sqlite3.Row
+            # Idempotencia real de la INTENCIÓN de creación (auditoría
+            # Tramo 3): create_intent_id -- nunca ticker+side (dos
+            # intenciones distintas pueden crear legítimamente dos
+            # Position separadas para el mismo ticker/side). Mismo
+            # patrón que create_order/apply_fill: se verifica ANTES de
+            # cualquier INSERT, dentro de la misma transacción
+            # BEGIN IMMEDIATE -- dos llamadas concurrentes con la misma
+            # key se serializan por el lock de escritura de SQLite, la
+            # segunda ve la fila ya comprometida de la primera y
+            # devuelve el no-op idempotente en vez de duplicar.
+            existing_by_intent = conn.execute(
+                "SELECT * FROM positions WHERE create_intent_id = ?", (position.create_intent_id,)
+            ).fetchone()
+            if existing_by_intent is not None:
+                existing_position = self._row_to_position(existing_by_intent)
+                if (
+                    existing_position.kalshi_ticker == position.kalshi_ticker
+                    and existing_position.sport == position.sport
+                    and existing_position.side == position.side
+                    and existing_position.source == position.source
+                    and existing_position.linked_opportunity_id == position.linked_opportunity_id
+                ):
+                    # Misma intención lógica -- no-op idempotente (evita
+                    # duplicar por retry HTTP, timeout ambiguo, refresh,
+                    # o doble entrega de la misma intención).
+                    return existing_position
+                raise IdempotencyConflictError(
+                    f"create_intent_id={position.create_intent_id!r} ya fue usado con datos "
+                    "distintos -- posible colisión de idempotency key, no un reintento legítimo"
+                )
+
+            existing_by_id = conn.execute(
                 "SELECT position_id FROM positions WHERE position_id = ?", (position.position_id,)
             ).fetchone()
-            if existing is not None:
+            if existing_by_id is not None:
                 raise IdempotencyConflictError(
                     f"position_id={position.position_id!r} ya existe -- create_position no es "
                     "un upsert, usar get_position() para consultar el estado actual"
@@ -334,16 +367,17 @@ class PositionsRepository:
             conn.execute(
                 """
                 INSERT INTO positions (
-                    position_id, source, linked_opportunity_id, kalshi_ticker, sport, side,
+                    position_id, create_intent_id, source, linked_opportunity_id, kalshi_ticker, sport, side,
                     status, blocked_by_unknown_order, open_contracts,
                     capital_invested_cents, capital_invested_fee_status,
                     capital_recovered_cents, capital_recovered_fee_status,
                     runner_contracts,
                     version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     position.position_id,
+                    position.create_intent_id,
                     position.source.value,
                     position.linked_opportunity_id,
                     position.kalshi_ticker,
@@ -406,6 +440,7 @@ class PositionsRepository:
     def _row_to_position(row: sqlite3.Row) -> Position:
         return Position(
             position_id=row["position_id"],
+            create_intent_id=row["create_intent_id"],
             source=PositionSource(row["source"]),
             linked_opportunity_id=row["linked_opportunity_id"],
             kalshi_ticker=row["kalshi_ticker"],
@@ -601,6 +636,26 @@ class PositionsRepository:
                 raise OptimisticLockError(
                     f"Order {order_id!r}: version esperada={expected_version}, "
                     f"version almacenada={current.version} -- relectura requerida"
+                )
+            if new_status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+                # Auditoría Tramo 3: `ORDER_TRANSITIONS` permite topológicamente
+                # PLANNED/SUBMITTED/PENDING -> FILLED/PARTIALLY_FILLED porque
+                # `apply_fill` las necesita (un fill puede llegar directo sin
+                # pasar por SUBMITTED/PENDING). Pero ESTE método no recibe
+                # ningún OrderFill -- si se le permitiera asignar FILLED aquí,
+                # el UPDATE dejaría confirmed_filled_qty desincronizado del
+                # status persistido (violando el invariante que Order._validate_
+                # invariants exige) y, peor, ese UPDATE ya habría hecho commit
+                # antes de que la reconstrucción Pydantic del valor de retorno
+                # fallara -- corrompiendo la fila de forma permanente e
+                # imposibilitando leerla de nuevo. FILLED/PARTIALLY_FILLED solo
+                # son alcanzables como efecto derivado de un fill real, vía
+                # `apply_fill` (que sí mantiene confirmed_filled_qty consistente
+                # en la misma escritura atómica).
+                raise InvariantViolationError(
+                    f"update_order_status no puede asignar {new_status.value} directamente -- "
+                    "ese status solo es válido como efecto derivado de un fill real (ver apply_fill()), "
+                    "nunca como reconciliación manual sin OrderFill asociado"
                 )
             validate_order_transition(current.status, new_status)
 

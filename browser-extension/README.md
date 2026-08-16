@@ -21,9 +21,41 @@ presentes).
   `.../marketdata/event/contract/quotes/v1/`, y las publica vía
   `window.postMessage`.
 - `content_script.js` (mundo aislado) — recibe ese `postMessage`, pide
-  el análisis a `background.js` y pinta el panel flotante en la pestaña.
+  el análisis a `background.js` y pinta el panel flotante en la pestaña
+  (sección "Market Analysis" + sección "Position Management").
+- `position_logic.js` (mundo aislado, se carga ANTES que
+  `content_script.js`) — lógica PURA de Position Management (Fase 6,
+  Tramo 3): asociación Position↔ticker fail-closed, estabilidad de
+  idempotency keys de UI, validación de formato de fees, helpers de
+  formato. Cero dependencias de `chrome.*`/DOM -- por eso es testeable
+  fuera del navegador, ver `tests/position_logic.test.js`.
 - `background.js` (service worker) — único contexto que llama al
-  backend: `POST /map/robinhood` → `GET /analyze/{kalshi_ticker}`.
+  backend: `POST /map/robinhood` → `GET /analyze/{kalshi_ticker}`, y
+  (Tramo 3) el bridge de Position Management (`POSITION_ACTIONS`,
+  whitelist cerrado de 8 acciones read/register/prepare/reconcile bajo
+  `/positions`, nunca un passthrough de URL/método arbitrario).
+
+## Position Management (Fase 6, Tramo 3)
+
+Sección nueva del panel, bajo "Market Analysis". Estrictamente
+human-in-the-loop: la extensión puede consultar/mostrar/calcular,
+crear/seleccionar una Position, registrar manualmente fills que el
+usuario confirma que YA ocurrieron en Robinhood, calcular un
+`PositionPlan` advisory, preparar una Order en estado `PLANNED`
+("prepared locally — not submitted to Robinhood") y reconciliar
+manualmente el status observado de una Order. **Nunca** ejecuta nada en
+Robinhood, nunca hace click/automatiza el DOM del broker, nunca escribe
+SQLite directamente -- todo pasa por `browser-extension → FastAPI →
+positions_service/repository → SQLite`. Ver `tests/unit/
+test_browser_extension_scope.py` (auditoría de scope, corre con
+`pytest`) y `tests/position_logic.test.js` (lógica pura, corre con
+`node --test`).
+
+Asociación Position↔ticker: 0 coincidencias → "No position registered"
++ acción explícita "Create Position"; exactamente 1 → se muestra
+directo; 2+ (posible YES/NO opuestos, o dos posiciones del mismo
+ticker) → nunca se selecciona sola, exige selección explícita del
+usuario (`NEEDS_REVIEW`).
 
 ## Cómo cargarla
 
@@ -55,7 +87,20 @@ presentes).
   con `host_permissions` declarado no está sujeto a la política CORS de
   un fetch de página normal -- si en algún navegador/versión esto no
   aplica, el síntoma sería un error de red visible en el panel.
-- Sin tests automatizados (JS) -- verificación es manual, vía
-  `chrome://extensions` → "Inspeccionar vistas: service worker" para
-  confirmar el `symbol` que sale hacia `/map/robinhood` y la respuesta
-  que entra.
+- Flujo de análisis (Market Analysis) sin tests automatizados (JS) --
+  verificación manual, vía `chrome://extensions` → "Inspeccionar vistas:
+  service worker" para confirmar el `symbol` que sale hacia
+  `/map/robinhood` y la respuesta que entra. `position_logic.js` (Tramo
+  3) SÍ tiene tests (`tests/position_logic.test.js`, `node --test`) --
+  este sandbox de desarrollo no tenía `node` instalado, así que se
+  verificaron en su lugar ejecutando la misma lógica en vivo con el
+  motor JS del navegador (Claude Browser tool); quedan listos para
+  correr con `node --test browser-extension/tests/` en cualquier
+  máquina con Node ≥18.
+- `POST /positions` (crear Position) NO tiene idempotency key en el
+  contrato de Tramo 2 -- la UI mitiga con un guard de "single flight"
+  (botón deshabilitado durante el envío) pero no hay protección de
+  idempotencia real del lado del servidor para ESTE endpoint específico
+  (a diferencia de fills/orders, que sí la tienen vía `fill_id`/
+  `intent_id`). Riesgo residual documentado, no corregido en este tramo
+  (requeriría tocar el contrato ya auditado de Tramo 2).
