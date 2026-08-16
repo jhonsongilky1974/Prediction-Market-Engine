@@ -393,6 +393,15 @@ class PositionsRepository:
             ).fetchall()
         return [self._row_to_position(r) for r in rows]
 
+    def list_all_positions(self) -> List[Position]:
+        """Sin filtro de status -- mismo patrón que `get_all_event_snapshots`
+        (Fase 2). Añadido para Tramo 2 (`GET /positions?status=all`), lectura
+        pura, no toca ningún invariante de escritura ya auditado."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM positions ORDER BY created_at ASC").fetchall()
+        return [self._row_to_position(r) for r in rows]
+
     @staticmethod
     def _row_to_position(row: sqlite3.Row) -> Position:
         return Position(
@@ -463,6 +472,23 @@ class PositionsRepository:
                     "terminal -- debe resolverse (reconciliar UNKNOWN o esperar estado "
                     "terminal) antes de crear otra (F5, idempotencia estructural)"
                 )
+
+            if order.action == OrderAction.SELL:
+                # Añadido para Tramo 2: rechazar de entrada la PREPARACIÓN
+                # de una orden SELL que ya es imposible de cumplir, sin
+                # esperar al fill (apply_fill ya rechazaba el fill en sí,
+                # pero permitía preparar una orden nunca ejecutable).
+                position_row = conn.execute(
+                    "SELECT open_contracts FROM positions WHERE position_id = ?", (order.position_id,)
+                ).fetchone()
+                if position_row is None:
+                    raise InvariantViolationError(f"position_id={order.position_id!r} no existe")
+                open_contracts = position_row[0]
+                if order.requested_qty > open_contracts:
+                    raise InvariantViolationError(
+                        f"No se puede preparar una orden SELL por {order.requested_qty} contratos: "
+                        f"la posición {order.position_id!r} solo tiene {open_contracts} abiertos"
+                    )
 
             conn.execute(
                 """

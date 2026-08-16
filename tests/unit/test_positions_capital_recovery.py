@@ -151,9 +151,18 @@ def test_case_multiple_partial_sells_at_different_prices():
     ]
     metrics = compute_capital_metrics(fills)
     assert metrics.open_contracts == 19 - 14
+    assert metrics.total_buy_qty == 19
+    assert metrics.total_sell_qty == 14
     assert metrics.realized_net_proceeds_cents == Decimal(6 * 63 + 5 * 66 + 3 * 69)  # 915, suma exacta
     assert metrics.capital_remaining_cents == Decimal(950 - 915)  # 35, aun no recuperado
     assert metrics.avg_exit_price_cents == Decimal(65)  # 915/14=65.357... -> ROUND_HALF_UP -> 65
+
+
+def test_case_capital_metrics_total_buy_sell_qty_with_no_fills():
+    metrics = compute_capital_metrics([])
+    assert metrics.total_buy_qty == 0
+    assert metrics.total_sell_qty == 0
+    assert metrics.open_contracts == 0
 
 
 # ---------------------------------------------------------------------

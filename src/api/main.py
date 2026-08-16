@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 
 from src.api.analysis_service import analyze_ticker
 from src.api.event_resolver import ResolverError
+from src.api.positions_router import router as positions_router
 from src.api.robinhood_mapper import MappingError, map_robinhood_symbol_to_kalshi_ticker
 from src.api.schemas import AnalyzeResponse, RobinhoodMapRequest, RobinhoodMapResponse
 
@@ -42,6 +43,12 @@ app = FastAPI(
     ),
     version="5.0.0",
 )
+
+# Phase 6 Tramo 2: API read/register/prepare sobre Position Management
+# (src.positions, ya auditado). Aditivo -- no toca /analyze ni
+# /map/robinhood. Cero ejecución de órdenes reales: browser-extension ->
+# FastAPI -> service/repository -> SQLite, nunca al revés.
+app.include_router(positions_router)
 
 
 @app.get("/health")

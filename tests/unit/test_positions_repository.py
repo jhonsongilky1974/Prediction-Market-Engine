@@ -475,13 +475,34 @@ def test_case_two_positions_are_isolated(tmp_path):
     assert {f.fill_id for f in repo.get_fills_for_position("pos-b")} == {"fb"}
 
 
+def test_list_all_positions_includes_reserved_terminal_statuses(tmp_path):
+    """`list_all_positions` (añadido para Tramo 2, GET /positions?status=all)
+    -- a diferencia de `list_open_positions`, no filtra por status."""
+    repo = _repo(tmp_path)
+    repo.create_position(make_position(position_id="pos-open"))
+    repo.create_position(make_position(position_id="pos-closed"))
+    conn = sqlite3.connect(repo.db_path)
+    conn.execute("UPDATE positions SET status = 'CLOSED' WHERE position_id = 'pos-closed'")
+    conn.commit()
+    conn.close()
+
+    all_ids = {p.position_id for p in repo.list_all_positions()}
+    assert all_ids == {"pos-open", "pos-closed"}
+    open_ids = {p.position_id for p in repo.list_open_positions()}
+    assert open_ids == {"pos-open"}
+
+
 # ---------------------------------------------------------------------
 # Test obligatorio #15/#16 -- nunca open_contracts negativo / nunca
 # vender más de lo abierto
 # ---------------------------------------------------------------------
 
 
-def test_case_sell_more_than_open_contracts_rejected(tmp_path):
+def test_case_sell_order_exceeding_open_contracts_rejected_at_creation(tmp_path):
+    """Auditoría Tramo 2: `create_order` ahora rechaza de entrada
+    PREPARAR una orden SELL ya imposible de cumplir (antes solo
+    `apply_fill` lo rechazaba, permitiendo preparar una orden nunca
+    ejecutable)."""
     repo = _repo(tmp_path)
     repo.create_position(make_position(position_id="pos-1"))
     repo.create_order(make_order(order_id="ord-buy", position_id="pos-1", intent_id="i-buy", action=OrderAction.BUY, requested_qty=5))
@@ -489,7 +510,43 @@ def test_case_sell_more_than_open_contracts_rejected(tmp_path):
         make_fill(fill_id="b1", order_id="ord-buy", position_id="pos-1", action=OrderAction.BUY, qty=5, price_cents=Decimal(50), filled_at=_t(1), recorded_at=_t(1)),
         expected_order_version=1,
     )
-    repo.create_order(make_order(order_id="ord-sell", position_id="pos-1", intent_id="i-sell", action=OrderAction.SELL, requested_qty=6))
+    with pytest.raises(InvariantViolationError, match="No se puede preparar una orden SELL"):
+        repo.create_order(make_order(order_id="ord-sell", position_id="pos-1", intent_id="i-sell", action=OrderAction.SELL, requested_qty=6))
+    # Estado intacto tras el rechazo -- ninguna orden SELL quedó creada.
+    assert repo.get_position("pos-1").open_contracts == 5
+    assert repo.get_orders_for_position("pos-1") == [repo.get_order("ord-buy")]
+
+
+def test_case_sell_fill_exceeding_open_contracts_rejected_at_apply_fill_defense_in_depth(tmp_path):
+    """Defensa en profundidad: aunque `create_order` ya bloquea la
+    preparación de una SELL imposible, `apply_fill` conserva su propio
+    chequeo independiente (F15/F16) -- se prueba insertando una Order
+    directamente vía SQL crudo (bypass deliberado de `create_order`,
+    mismo patrón que los tests de trigger append-only) para verificar
+    que la segunda capa de defensa sigue activa por sí sola."""
+    repo = _repo(tmp_path)
+    repo.create_position(make_position(position_id="pos-1"))
+    repo.create_order(make_order(order_id="ord-buy", position_id="pos-1", intent_id="i-buy", action=OrderAction.BUY, requested_qty=5))
+    repo.apply_fill(
+        make_fill(fill_id="b1", order_id="ord-buy", position_id="pos-1", action=OrderAction.BUY, qty=5, price_cents=Decimal(50), filled_at=_t(1), recorded_at=_t(1)),
+        expected_order_version=1,
+    )
+    bad_order = make_order(order_id="ord-sell", position_id="pos-1", intent_id="i-sell", action=OrderAction.SELL, requested_qty=6)
+    conn = sqlite3.connect(repo.db_path)
+    conn.execute(
+        "INSERT INTO orders (order_id, position_id, intent_id, action, requested_qty, "
+        "planned_target_price_cents, order_price_cents, status, confirmed_filled_qty, "
+        "avg_fill_price_cents, source_of_truth, replaces_order_id, version, created_at, last_updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, NULL, ?, NULL, 1, ?, ?)",
+        (
+            bad_order.order_id, bad_order.position_id, bad_order.intent_id, bad_order.action.value,
+            bad_order.requested_qty, str(bad_order.planned_target_price_cents), bad_order.status.value,
+            bad_order.source_of_truth.value, bad_order.created_at.isoformat(), bad_order.last_updated_at.isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
     with pytest.raises(InvariantViolationError, match="No se puede vender"):
         repo.apply_fill(
             make_fill(fill_id="s1", order_id="ord-sell", position_id="pos-1", action=OrderAction.SELL, qty=6, price_cents=Decimal(60), filled_at=_t(2), recorded_at=_t(2)),
@@ -707,3 +764,73 @@ def test_list_open_positions_excludes_reserved_terminal_statuses(tmp_path):
 
     open_ids = {p.position_id for p in repo.list_open_positions()}
     assert open_ids == {"pos-open"}
+
+
+# ---------------------------------------------------------------------
+# Auditoría posterior a Tramo 2 -- punto 3: semántica de "reserva" de
+# contratos por SELL orders no terminales (F5). Verificación explícita:
+# F5 es MÁS ESTRICTA que un modelo de "reservation accounting" parcial
+# -- bloquea CUALQUIER segunda Order (de cualquier acción, cualquier
+# qty) mientras exista una no terminal, sin excepción. No hay una
+# cantidad "disponible tras reserva" distinta de open_contracts porque
+# nunca puede coexistir más de una Order no terminal para recalcularla
+# contra. Esto satisface trivialmente "múltiples órdenes no terminales
+# nunca reservan en conjunto más de lo abierto" (el conjunto nunca tiene
+# más de un elemento) sin necesitar contabilidad de reserva separada.
+# ---------------------------------------------------------------------
+
+
+def test_f5_blocks_second_sell_order_even_within_remaining_capacity(tmp_path):
+    """Bajo F5 (Tramo 1, sin cambios), Order A SELL 15 no terminal
+    bloquea CUALQUIER Order B nueva -- incluida una SELL 4 que, en un
+    modelo de reserva parcial, cabría en los 4 contratos no
+    comprometidos (19-15). F5 es deliberadamente más estricta: un único
+    no-terminal-order-per-position, sin cálculo de disponibilidad
+    parcial. No es un defecto -- es la política ya aprobada en Tramo 1,
+    y es la opción más conservadora posible frente a doble-venta."""
+    repo = _repo(tmp_path)
+    _open_kirkin_position(repo)  # 19 BUY @ 50c ya confirmados, open_contracts=19
+    repo.create_order(make_order(order_id="ord-a", position_id="pos-1", intent_id="i-a", action=OrderAction.SELL, requested_qty=15, planned_target_price_cents=63))
+
+    with pytest.raises(NonTerminalOrderExistsError):
+        repo.create_order(make_order(order_id="ord-b-big", position_id="pos-1", intent_id="i-b-big", action=OrderAction.SELL, requested_qty=10, planned_target_price_cents=63))
+
+    # Incluso una SELL de 4 (que cabría en 19-15=4 "no comprometidos" en
+    # un modelo de reserva parcial) queda bloqueada por F5 tal como está
+    # aprobado -- no por una cuenta de reserva insuficiente.
+    with pytest.raises(NonTerminalOrderExistsError):
+        repo.create_order(make_order(order_id="ord-b-small", position_id="pos-1", intent_id="i-b-small", action=OrderAction.SELL, requested_qty=4, planned_target_price_cents=63))
+
+
+def test_f5_canceling_order_frees_position_for_new_order(tmp_path):
+    """Order A SELL 15 -> CANCELED libera la posición: open_contracts
+    nunca se decrementó al solo PREPARAR la orden (solo un fill real lo
+    hace), así que tras cancelar, una nueva Order puede pedir hasta los
+    19 contratos físicamente abiertos."""
+    repo = _repo(tmp_path)
+    _open_kirkin_position(repo)
+    order_a = repo.create_order(make_order(order_id="ord-a", position_id="pos-1", intent_id="i-a", action=OrderAction.SELL, requested_qty=15, planned_target_price_cents=63))
+    assert repo.get_position("pos-1").open_contracts == 19  # preparar NO reserva/decrementa
+
+    repo.update_order_status("ord-a", expected_version=order_a.version, new_status=OrderStatus.CANCELED, reason=OrderEventReason.CANCEL_REPLACE)
+
+    order_b = repo.create_order(make_order(order_id="ord-b", position_id="pos-1", intent_id="i-b", action=OrderAction.SELL, requested_qty=19, planned_target_price_cents=63))
+    assert order_b.status == OrderStatus.PLANNED
+
+
+def test_f5_idempotent_retry_of_sell_order_does_not_recount_reservation(tmp_path):
+    """Reintentar exactamente la misma Order (mismo intent_id, mismo
+    payload) es un no-op idempotente -- el guard SELL-vs-open_contracts
+    no se re-evalúa como si fuera una intención nueva y separada, y no
+    hay ninguna reserva que 'contar dos veces' (create_order nunca
+    decrementa open_contracts en primer lugar)."""
+    repo = _repo(tmp_path)
+    _open_kirkin_position(repo)
+    order_a = repo.create_order(make_order(order_id="ord-a", position_id="pos-1", intent_id="i-a", action=OrderAction.SELL, requested_qty=15, planned_target_price_cents=63))
+
+    retry = repo.create_order(make_order(order_id="ord-a", position_id="pos-1", intent_id="i-a", action=OrderAction.SELL, requested_qty=15, planned_target_price_cents=63))
+    assert retry == order_a
+    # 2 Orders en total: la BUY ya confirmada por _open_kirkin_position +
+    # ord-a -- el reintento NO agrega una tercera.
+    assert len(repo.get_orders_for_position("pos-1")) == 2
+    assert repo.get_position("pos-1").open_contracts == 19  # sin cambios por el reintento

@@ -49,7 +49,20 @@ class OrderStatus(str, Enum):
     """Aprendizajes operativos incorporados directamente: distinguir
     PLANNED/SUBMITTED/PENDING/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/
     UNKNOWN. UNKNOWN es NO terminal y bloqueante -- ver
-    `src.positions.state_machine`."""
+    `src.positions.state_machine`.
+
+    Auditoría Tramo 2 -- confirmación explícita PLANNED vs SUBMITTED:
+    PLANNED significa "orden preparada localmente en el motor, NUNCA
+    sometida al broker" -- es el único status que produce
+    `PositionsRepository.create_order`/`src.api.positions_router` al
+    crear una orden ("PREPARED" del alcance de Tramo 2 == PLANNED). Es
+    estructuralmente imposible interpretar PLANNED como "enviada": nada
+    en `src.positions`/`src.api` marca una orden como sometida al
+    broker. SUBMITTED solo es alcanzable mediante una llamada explícita
+    a `update_order_status`/`PATCH .../orders/{order_id}` con
+    `new_status=SUBMITTED` provisto por el llamador -- ningún código de
+    este módulo asigna `OrderStatus.SUBMITTED` de forma automática o
+    implícita en ninguna ruta de escritura."""
 
     PLANNED = "PLANNED"
     SUBMITTED = "SUBMITTED"

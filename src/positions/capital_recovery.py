@@ -53,6 +53,8 @@ class CapitalMetrics(StrictModel):
     capital_remaining, open_contracts, average entry/fill values."""
 
     open_contracts: int
+    total_buy_qty: int
+    total_sell_qty: int
     total_capital_at_risk_cents: Decimal
     total_capital_at_risk_fee_status: FeeStatus
     realized_net_proceeds_cents: Decimal
@@ -118,6 +120,8 @@ def compute_capital_metrics(fills: Sequence[OrderFill]) -> CapitalMetrics:
 
     return CapitalMetrics(
         open_contracts=open_contracts,
+        total_buy_qty=buy_qty,
+        total_sell_qty=sell_qty,
         total_capital_at_risk_cents=capital_invested,
         total_capital_at_risk_fee_status=aggregate_fee_status(invested_fee_statuses),
         realized_net_proceeds_cents=capital_recovered,
