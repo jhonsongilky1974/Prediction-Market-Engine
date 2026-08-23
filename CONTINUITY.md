@@ -160,6 +160,23 @@ empírica de Tramo 2 (1237 casos reales, 0 desempates justificados) y de
 cobertura NOT_FOUND (99.65% cobertura parcial de Kalshi, 0% defecto de
 matching) — ver §0.35. Suite en 1151. MLB sin cambios. Commit publicado
 e integrado en `origin/main`: `734e081a5d4c0e14c636c34621ce431b39dc6a57`.**
+**Actualizado de nuevo: 2026-08-22 — CIERRE FORMAL DE FASE 6 (Tramos
+1-4): Position Management semi-automática, estrictamente advisory/
+human-in-the-loop, cero ejecución real contra Robinhood — ver §0.36.
+Núcleo de dominio + persistencia SQLite (Tramo 1), API FastAPI advisory
+(Tramo 2), integración visual con browser-extension (Tramo 3), y dos
+fixes reales encontrados en validación E2E real: batch transaction de
+persistencia de tenis (~62s → <200ms) y fix del listener async de
+`background.js` ("message port closed") (Tramo 4). Auditado en 10
+puntos (scope de commits/archivos, ausencia de instrumentación
+residual, cero capacidad de ejecución/credenciales, neutralidad
+funcional del batch fix, no regresión) con veredicto GO antes de
+autorizar merge. PR #4 fusionado en GitHub por el usuario
+(`feat/phase6-position-management-core` → `main`, merge commit
+`d0141f8214e173fc453c76ccb297e19549bc6bab`), `main` local actualizado
+por fast-forward y verificado idéntico a `origin/main`, rama local y
+rama remota ya fusionadas eliminadas. Suite completa: 1369 passed, 0
+failed. MLB y matching sin cambios. Tramo 5 NO autorizado.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -3683,6 +3700,189 @@ justificar cambios de arquitectura.
   Qualifying/Group Stage llegan a resolverse en absoluto.
 - Tramo 2 queda deferido hasta que exista evidencia real que lo
   justifique.
+
+## 0.36 CIERRE FORMAL DE FASE 6 (Tramos 1-4): Position Management semi-automática (2026-08-22)
+
+### Contexto
+
+Diseño previo aprobado en Design Proposal dedicado (sin código): gestión
+semi-automática de posiciones sobre Robinhood — capital invertido/
+recuperado/remanente, fees KNOWN/ESTIMATED/UNKNOWN sin tolerancia,
+captura manual de fills, target price siempre separado del observed
+price, multi-tranche. Implementado en 4 tramos, cada uno con su propio
+ciclo de auditoría (invariantes, sobre-ingeniería, seguridad/scope)
+antes de commitear, y un commit atómico por tramo.
+
+### Estado por tramo
+
+- **Tramo 1 — núcleo** (`a561aaa`): dominio + matemática pura +
+  persistencia SQLite. `Position`/`Order`/`OrderFill`/`PositionPlan`/
+  `PositionEvent` como `StrictModel` Pydantic con invariantes explícitos;
+  `capital_recovery.py` (cantidad mínima de contratos a vender, sin
+  tolerancia); optimistic locking (`version` + `BEGIN IMMEDIATE`);
+  idempotencia (`intent_id`/`fill_id` UNIQUE); triggers append-only
+  sobre `order_fills`/`position_events`/`position_plans`. Sin API, sin
+  browser-extension, sin ejecución de órdenes reales.
+  `CLOSED`/`SETTLED_WIN`/`SETTLED_LOSS` quedan reservados, inalcanzables
+  en estos 4 tramos. Sin realized P&L (fuera de alcance, requeriría
+  FIFO/average cost). 140 tests nuevos, suite 1267 passed.
+- **Tramo 2 — API** (`f7c706b`): capa FastAPI read/register/prepare/
+  reconcile sobre el núcleo ya auditado — `browser-extension → API →
+  service/repository → SQLite`, nunca al revés. Crear una `Order`
+  siempre produce `PLANNED` ("prepared"), nunca `SUBMITTED` automático.
+  Precios por contrato como `int` centavos; montos con fee como
+  `string` decimal exacto; nunca `float`. Correcciones auditadas al
+  núcleo: guard SELL-vs-`open_contracts` en `create_order` (antes solo
+  `apply_fill` lo rechazaba), `total_buy_qty`/`total_sell_qty` en
+  `CapitalMetrics`. 183 tests Phase 6 (37 nuevos), suite 1310 passed.
+- **Tramo 3 — extensión** (`c547476`): integración visual del
+  browser-extension con la API, estrictamente human-in-the-loop.
+  `position_logic.js` (lógica pura, sin `chrome.*`/DOM) para asociación
+  Position↔ticker fail-closed (0/1/2+, nunca mezcla YES/NO). Sección
+  "Position Management" en el panel: Create Position, Register Fill
+  (disclaimer "does not place an order"), Calculate Recovery Plan,
+  Prepare Exit Order (siempre "Prepared locally — not submitted to
+  Robinhood"), reconciliación manual excluyendo `FILLED`/
+  `PARTIALLY_FILLED` del dropdown. `background.js` con whitelist
+  cerrado de 8 acciones bajo `/positions`, nunca passthrough de URL/
+  método arbitrario. Correcciones auditadas: `update_order_status` ya
+  no permite asignar `FILLED`/`PARTIALLY_FILLED` sin un `OrderFill`
+  real detrás; `POST /positions` gana idempotencia real server-side
+  (`Position.create_intent_id`, UNIQUE), verificada con concurrencia
+  real (threads). 209 tests Phase 6 backend, suite 1336 passed.
+- **Tramo 4 — validación E2E real + 2 fixes** (`fb21d72`): validación
+  en vivo (Uvicorn real + extensión real contra eventos reales de
+  tenis en Robinhood) encontró y corrigió dos defectos reales, cada
+  uno con evidencia real antes de implementar el fix (sin "fix por
+  inferencia"):
+  1. **Batch transaction de persistencia de tenis**: `persist_records`
+     hacía ~903 transacciones SQLite individuales (una conexión+commit
+     +cierre por fila) para 301 records — causa raíz de un pico real de
+     ~62s (~68.5s en `/analyze`), agravado por contención de lock con
+     escritores concurrentes (LaunchAgents + la extensión). Fix:
+     `batch_write()` en `Repository`/`HistoryRepository` (una sola
+     transacción por lote); `save_normalized_record`/
+     `save_event_snapshot`/`save_feature_snapshot` ganan un `conn`
+     opcional que reutiliza la conexión del lote sin cambiar el SQL/
+     parámetros (verificado byte-idéntico), preservando el
+     comportamiento exacto anterior en cualquier llamador que no pase
+     `conn`. Segundo defecto encontrado al implementar el fix:
+     `Repository`/`HistoryRepository` comparten el mismo archivo SQLite
+     en producción — dos conexiones batch separadas al mismo archivo se
+     autobloqueaban; ahora comparten una única conexión cuando
+     `db_path` coincide (preservando `PRAGMA foreign_keys=ON`).
+     Verificado 524ms → 187.8ms sobre copia real de `data/engine.db`,
+     ambos sides de un partido real, secuencial y concurrente, sin
+     errores de lock. MLB (`mlb_pipeline.py`) sin tocar.
+  2. **Fix del listener async de `background.js`**: el listener de
+     `pme-position-request` usaba `sendResponse(...)` + `return true`
+     (patrón fragil MV3) — cualquier excepción síncrona antes de la
+     línea `return true` abortaba el listener sin esa señal, y Chrome
+     cerraba el canal ("message port closed before a response was
+     received"). Reproducido real en E2E (Nakashima vs Tiafoe) tras un
+     primer fix que pareció no resolverlo — investigación con
+     instrumentación temporal (TRACE/BUILD_MARKER) determinó que la
+     causa de esa persistencia aparente era caché de "Load unpacked" de
+     Chrome ejecutando un content script viejo, no un defecto del fix.
+     Fix real (confirmado tras remove+reinstall completo de la
+     extensión): el listener devuelve la Promise directamente (patrón
+     soportado desde Chrome MV3 ≥99), con `try/catch` síncrono adicional
+     — nunca depende de `return true`. Toda la instrumentación temporal
+     fue removida antes del commit (ver Auditoría de scope). El listener
+     preexistente de `pme-analyze` (Fase 5) permanece sin tocar; ambos
+     listeners son mutuamente excluyentes por `message.type`, sin riesgo
+     de doble respuesta.
+
+  1345 tests, suite completa. Commit publicado e integrado en
+  `origin/main` como parte del PR #4 (ver abajo).
+
+### Auditoría pre-merge del PR #4 (2026-08-22)
+
+Antes de autorizar el merge, auditoría de 10 puntos sobre
+`main...feat/phase6-position-management-core` (34 archivos, +8167/-105,
+4 commits) — sin cambios de código, solo lectura/verificación:
+
+1. Los 4 commits corresponden exactamente a Tramos 1-4, sin mezcla de
+   alcance entre ellos.
+2. Los 34 archivos caen todos dentro de `src/positions/`, `src/api/
+   positions_*`, `browser-extension/*`, infraestructura de persistencia
+   de tenis y sus tests — ningún archivo de MLB/matching/config fuera de
+   alcance.
+3. Cero `TRACE`/`BUILD_MARKER`/archivos temporales en el diff ni en el
+   árbol.
+4. Cero `.click(`/`dispatchEvent(` en toda la extensión.
+5. Único uso de `"robinhood.com"` es `host_permissions` de
+   `manifest.json` (declarativo, necesario, patrón preexistente de Fase
+   5) y asserts de test que lo prohíben como destino de `fetch()`; cero
+   `document.cookie`/`chrome.cookies`/`password`/`credential`/`token`
+   reales.
+6. Position Management confirmado advisory/local: disclaimers
+   explícitos en el panel, `create_order` produce siempre `PLANNED`.
+7. Batch transaction de tenis confirmado funcionalmente neutro (SQL/
+   parámetros idénticos antes/después); `mlb_pipeline.py` y matching sin
+   tocar.
+8. Fix del listener de `background.js` confirmado sin doble respuesta
+   (dos listeners mutuamente excluyentes por `message.type`) y sin
+   dependencia de `return true`.
+9. `main` no modificado (`git merge-base` == HEAD de `main` == `f5e7cfb`
+   antes del merge).
+10. Suite completa reconfirmada: 1369 passed, 0 failed (1345 + 24
+    previamente deselected en el conteo del commit de Tramo 4), árbol
+    limpio.
+
+**Veredicto: GO.** Sin hallazgos Critical/High/Medium. Un único Low
+(los tests JS de la extensión no tienen gate automatizado en este
+entorno por ausencia de `node`; verificados solo vía motor JS del
+navegador en vivo) y dos riesgos residuales no bloqueantes ya
+documentados (caché de "Load unpacked" de Chrome como riesgo
+operativo de testing manual; misma brecha de cobertura de CI para JS).
+
+### Cierre Git post-merge
+
+Usuario fusionó el PR #4 en GitHub. Cierre post-merge verificado en
+este repositorio: `git checkout main` → `git fetch origin` → `git merge
+--ff-only origin/main` (fast-forward limpio `f5e7cfb..d0141f8`, diff
+idéntico al auditado pre-merge) → verificado `main` local == `origin/
+main` == `d0141f8214e173fc453c76ccb297e19549bc6bab` (merge commit del
+PR #4, padres `f5e7cfb`/`fb21d72`), working tree clean, los 4 commits
+de Phase 6 confirmados como ancestros de `main` (`git merge-base
+--is-ancestor`). Rama local `feat/phase6-position-management-core`
+eliminada con `git branch -d` (solo permite borrar ramas ya
+completamente fusionadas). Rama remota eliminada después, por
+instrucción explícita separada del usuario
+(`git push origin --delete feat/phase6-position-management-core`),
+confirmada ausente tanto local como remotamente.
+
+### Deudas conocidas, no bloqueantes
+
+- `CLOSED`/`SETTLED_WIN`/`SETTLED_LOSS` siguen reservados, sin ningún
+  camino de transición implementado — decisión de diseño explícita del
+  Design Proposal, no una omisión.
+- Sin realized P&L (requeriría FIFO/average cost) — fuera de alcance
+  declarado desde el Tramo 1.
+- Tests JS de la extensión (`position_logic.test.js`,
+  `background_position_listener.test.js`) sin gate automatizado de CI
+  en este entorno (`node` no disponible) — verificados solo vía motor
+  JS del navegador en vivo y estáticamente vía
+  `test_browser_extension_scope.py`.
+- Caché de "Load unpacked" de Chrome (reload no siempre re-inyecta
+  content scripts frescos en pestañas ya abiertas) queda como riesgo
+  operativo conocido para cualquiera que pruebe la extensión — no es un
+  defecto de código, documentado en el README de la extensión.
+- D-3 (fees reales de Kalshi) y el bloqueo de MLB de tenis (Fase 4)
+  siguen sin resolver, sin relación con Phase 6 — vigentes desde antes.
+
+### Qué NO se autorizó en este cierre
+
+- **Tramo 5 no existe y no fue autorizado.** Cualquier trabajo posterior
+  de Position Management (ejecución real de órdenes, automatización de
+  reconciliación, integración de broker) requiere una nueva propuesta y
+  aprobación explícita, siguiendo el mismo proceso institucional que
+  todas las fases anteriores.
+- Cero ejecución real de órdenes contra Robinhood en ningún punto de
+  Fase 6 — confirmado por auditoría de scope dedicada
+  (`test_browser_extension_scope.py`, 14 tests) y por la auditoría
+  pre-merge del PR #4.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
