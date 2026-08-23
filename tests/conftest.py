@@ -42,6 +42,11 @@ def espn_atp_scoreboard_with_doubles_sample():
 
 
 @pytest.fixture
+def livetennisapi_live_sample():
+    return load_fixture("livetennisapi_live_sample.json")
+
+
+@pytest.fixture
 def tmp_repository(tmp_path):
     from src.storage.repository import Repository
 

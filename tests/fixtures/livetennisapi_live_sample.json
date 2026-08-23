@@ -1,0 +1,88 @@
+{
+  "data": [
+    {
+      "id": "lt_1001",
+      "status": "live",
+      "players": {
+        "p1": {"name": "Carlos Alcaraz", "ranking": 2, "elo": 2185},
+        "p2": {"name": "Jannik Sinner", "ranking": 1, "elo": 2210}
+      },
+      "score": {
+        "sets": {"p1": 1, "p2": 1},
+        "games": {"p1": 4, "p2": 5},
+        "points": {"p1": "30", "p2": "40"},
+        "server": 1,
+        "tiebreak": false
+      }
+    },
+    {
+      "id": "lt_1002",
+      "status": "live",
+      "players": {
+        "p1": {"name": "Iga Swiatek", "ranking": 1, "elo": 2150},
+        "p2": {"name": "Aryna Sabalenka", "ranking": 2, "elo": 2140}
+      },
+      "score": {
+        "sets": {"p1": 0, "p2": 0},
+        "games": {"p1": 3, "p2": 3},
+        "points": {"p1": "40", "p2": "40"},
+        "server": 2,
+        "tiebreak": false
+      }
+    },
+    {
+      "id": "lt_1003",
+      "status": "live",
+      "players": {
+        "p1": {"name": "Novak Djokovic", "ranking": 5, "elo": 2160},
+        "p2": {"name": "Daniil Medvedev", "ranking": 6, "elo": 2095}
+      },
+      "score": {
+        "sets": {"p1": 1, "p2": 0},
+        "games": {"p1": 6, "p2": 6},
+        "points": {"p1": "5", "p2": "6"},
+        "server": 1,
+        "tiebreak": true
+      }
+    },
+    {
+      "id": "lt_1004",
+      "status": "live",
+      "players": {
+        "p1": {"name": "Coco Gauff", "ranking": 3, "elo": 2088},
+        "p2": {"name": "Elena Rybakina", "ranking": 4, "elo": 2101}
+      },
+      "score": {
+        "sets": {"p1": 0, "p2": 1},
+        "games": {"p1": 2, "p2": 3},
+        "points": {"p1": "AD", "p2": "40"},
+        "server": null,
+        "tiebreak": false
+      }
+    },
+    {
+      "id": "lt_1005",
+      "status": "retired",
+      "players": {
+        "p1": {"name": "Holger Rune", "ranking": 9, "elo": 2010},
+        "p2": {"name": "Casper Ruud", "ranking": 8, "elo": 2025}
+      },
+      "score": {
+        "sets": {"p1": 1, "p2": 0},
+        "games": {"p1": 2, "p2": 1},
+        "points": {"p1": "0", "p2": "0"},
+        "server": 2,
+        "tiebreak": false
+      }
+    },
+    {
+      "id": "lt_1006",
+      "status": "walkover",
+      "players": {
+        "p1": {"name": "Taylor Fritz", "ranking": 7},
+        "p2": {"name": "Ben Shelton", "ranking": 12}
+      },
+      "score": {}
+    }
+  ]
+}

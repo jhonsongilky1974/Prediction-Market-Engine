@@ -83,11 +83,22 @@ ODDS_API_POLICY = HttpPolicy(
     min_seconds_between_requests=1.0,
 )
 
+# Live Tennis API: fuente de estado-de-partido en vivo (score/servidor/estado)
+# con cuota por key en el tier gratuito (30 req/min, 100 req/dia). Se es
+# conservador con el espaciado para no agotar la cuota diaria en un solo poll.
+LIVE_TENNIS_API_POLICY = HttpPolicy(
+    timeout_seconds=10.0,
+    max_retries=2,
+    backoff_base_seconds=1.0,
+    min_seconds_between_requests=2.0,
+)
+
 MLB_BASE_URL = "https://statsapi.mlb.com"
 SOFASCORE_BASE_URL = "https://api.sofascore.com/api/v1"
 ESPN_TENNIS_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/tennis"
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+LIVE_TENNIS_API_BASE_URL = "https://api.livetennisapi.com/api/public/v1"
 
 KALSHI_SPORT_SERIES = {
     "MLB": "KXMLBGAME",
@@ -100,6 +111,13 @@ ODDS_API_KEY_ENV_VAR = "ODDS_API_KEY"
 
 def get_odds_api_key() -> str | None:
     return os.environ.get(ODDS_API_KEY_ENV_VAR) or None
+
+
+LIVE_TENNIS_API_KEY_ENV_VAR = "LIVE_TENNIS_API_KEY"
+
+
+def get_live_tennis_api_key() -> str | None:
+    return os.environ.get(LIVE_TENNIS_API_KEY_ENV_VAR) or None
 
 
 # Tolerancia de tiempo (minutos) para considerar dos eventos como el mismo
