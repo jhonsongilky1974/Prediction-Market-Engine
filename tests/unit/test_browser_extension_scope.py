@@ -204,3 +204,35 @@ def test_no_automatic_recompute_or_polling_loop_introduced():
     una acción (crear/fill/plan/order/refresh explícito)."""
     content_script = _read("content_script.js")
     assert "setInterval(" not in content_script
+
+
+def test_position_request_listener_never_uses_the_fragile_sendresponse_return_true_pattern():
+    """Auditoría Tramo 4 (2a parte) -- regresión estática del fix de
+    "message port closed before a response was received": el listener
+    de `pme-position-request` debe devolver la Promise directamente
+    (`return action(...)`), nunca el patrón antiguo
+    `action(...).then(sendResponse); return true;`, que dejaba el canal
+    sin respuesta ante cualquier excepción síncrona ocurrida ANTES de la
+    línea `return true`. Ver browser-extension/tests/
+    background_position_listener.test.js para la prueba de
+    comportamiento (con excepción síncrona inyectada)."""
+    background = _read("background.js")
+    match = re.search(
+        r"chrome\.runtime\.onMessage\.addListener\(\(message, sender, sendResponse\) => \{\s*"
+        r"if \(message\?\.type !== \"pme-position-request\"\).*?\n\}\);",
+        background,
+        re.DOTALL,
+    )
+    assert match, "no se encontró el listener de pme-position-request"
+    listener_body = match.group(0)
+    # Descarta comentarios de línea (`//...`) antes de buscar el patrón --
+    # el propio comentario explicativo del fix MENCIONA a propósito el
+    # patrón viejo en prosa, y eso no debe hacer fallar la auditoría.
+    code_only = "\n".join(line.split("//", 1)[0] for line in listener_body.splitlines())
+    assert "return action(" in code_only
+    assert ".then(sendResponse)" not in code_only, (
+        "patrón frágil reintroducido: action(...).then(sendResponse) sin devolver la Promise"
+    )
+    assert "return true;" not in code_only, (
+        "el listener de pme-position-request no debe depender de return true -- debe devolver la Promise"
+    )

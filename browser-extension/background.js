@@ -207,13 +207,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const action = POSITION_ACTIONS[message.action];
   if (!action) {
     console.error(`${LOG_PREFIX} pme-position-request acción desconocida: ${message.action}`);
-    sendResponse({ ok: false, status: 0, body: { detail: `acción desconocida: ${message.action}` } });
-    return true;
+    return Promise.resolve({ ok: false, status: 0, body: { detail: `acción desconocida: ${message.action}` } });
   }
 
-  // Igual que pme-analyze: una sola llamada por mensaje, sin reintento
-  // automático de este lado -- la decisión de reintentar (con qué key)
-  // es exclusivamente de content_script.js/del usuario.
-  action(message.payload ?? {}).then(sendResponse);
-  return true;
+  // Auditoría Tramo 4 (2a parte) -- "el puerto de mensajes se cerró
+  // antes de recibir una respuesta" en Position Management: el patrón
+  // anterior (`sendResponse(...)` + `return true`) exige que la
+  // ejecución SÍ llegue a la línea `return true` para que Chrome
+  // mantenga el canal abierto. Si `action(...)` lanzara una excepción
+  // SÍNCRONA en cualquier punto ANTES de devolver su Promise (antes de
+  // que `.then(sendResponse)` pudiera engancharse), esa excepción
+  // aborta el listener completo sin llegar nunca a `return true` --
+  // Chrome no tiene ninguna señal de "responderé async" y cierra el
+  // canal de inmediato, produciendo exactamente ese error del lado del
+  // llamador. Fix (confirmado en E2E real, ver informe de diagnóstico):
+  // devolver la Promise DIRECTAMENTE desde el listener (patrón
+  // soportado por Chrome MV3 desde Chrome 99) -- ya no depende de
+  // ninguna línea de código posterior a un posible throw. El try/catch
+  // síncrono + el `.catch()` de la propia promesa garantizan además que
+  // el valor devuelto NUNCA sea un throw ni una promesa rechazada --
+  // siempre una Promise resuelta con un objeto de error legible, nunca
+  // un canal cerrado sin explicación. Igual que pme-analyze: una sola
+  // llamada por mensaje, sin reintento automático de este lado -- la
+  // decisión de reintentar (con qué key) es exclusivamente de
+  // content_script.js/del usuario.
+  try {
+    return action(message.payload ?? {}).catch((err) => ({
+      ok: false,
+      status: 0,
+      body: { detail: `excepción inesperada en background.js: ${err?.message ?? err}` },
+    }));
+  } catch (err) {
+    return Promise.resolve({
+      ok: false,
+      status: 0,
+      body: { detail: `excepción síncrona inesperada en background.js: ${err?.message ?? err}` },
+    });
+  }
 });
