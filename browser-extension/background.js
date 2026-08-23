@@ -124,3 +124,124 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true; // respuesta asíncrona -- mantiene el canal de sendResponse abierto
 });
+
+// ---------------------------------------------------------------------
+// Fase 6, Tramo 3 -- puente Position Management. MISMO principio que el
+// bloque de arriba (pme-analyze): content_script.js NUNCA hace fetch
+// directo al backend, solo manda mensajes; este service worker es el
+// ÚNICO contexto que golpea la red. A diferencia de pme-analyze (un
+// flujo fijo map->analyze), aquí hay 9 operaciones read/register/
+// prepare/reconcile distintas -- se resuelven con un whitelist EXPLÍCITO
+// y cerrado de acciones (POSITION_ACTIONS), cada una con un método HTTP
+// y patrón de URL fijos bajo /positions -- nunca un passthrough
+// genérico de URL/método arbitrario. Ninguna acción de esta tabla
+// somete nada a Robinhood: todas son GET/POST/PATCH contra el backend
+// LOCAL (127.0.0.1:8000), nunca contra robinhood.com.
+//
+// Timeout corto (operación local sobre SQLite vía FastAPI, no depende
+// de ningún conector externo lento como Kalshi/MLB/ESPN) -- muy por
+// debajo de los presupuestos de /analyze.
+const POSITIONS_TIMEOUT_MS = 8000;
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+function backendJsonFetch(path, options, label) {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), POSITIONS_TIMEOUT_MS);
+  const startedAt = Date.now();
+  return fetch(`${BACKEND_BASE}${path}`, { ...options, signal: controller.signal })
+    .then(async (response) => {
+      console.info(`${LOG_PREFIX} ${label} status=${response.status} tiempo=${Date.now() - startedAt}ms`);
+      const body = await response.json().catch(() => null);
+      return { ok: response.ok, status: response.status, body };
+    })
+    .catch((err) => {
+      if (err?.name === "AbortError") {
+        return { ok: false, status: 0, body: { detail: `timeout de backend (${POSITIONS_TIMEOUT_MS}ms) en ${label}` } };
+      }
+      return { ok: false, status: 0, body: { detail: `fallo de red en ${label}: ${err?.message ?? err}` } };
+    })
+    .finally(() => clearTimeout(timeoutHandle));
+}
+
+// Whitelist cerrado -- cada entrada es una llamada fija (método + patrón
+// de URL bajo /positions), nunca una URL/método provistos por el
+// llamador. Auditar este objeto es auditar TODA la superficie de red
+// que Position Management puede alcanzar.
+const POSITION_ACTIONS = {
+  list_positions: () => backendJsonFetch(`/positions?status=all`, { method: "GET" }, "GET /positions"),
+  create_position: (p) =>
+    backendJsonFetch(`/positions`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(p.body) }, "POST /positions"),
+  register_fill: (p) =>
+    backendJsonFetch(
+      `/positions/${encodeURIComponent(p.position_id)}/fills`,
+      { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(p.body) },
+      "POST /positions/:id/fills"
+    ),
+  compute_plan: (p) =>
+    backendJsonFetch(
+      `/positions/${encodeURIComponent(p.position_id)}/plan`,
+      { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(p.body) },
+      "POST /positions/:id/plan"
+    ),
+  create_order: (p) =>
+    backendJsonFetch(
+      `/positions/${encodeURIComponent(p.position_id)}/orders`,
+      { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(p.body) },
+      "POST /positions/:id/orders"
+    ),
+  update_order: (p) =>
+    backendJsonFetch(
+      `/positions/${encodeURIComponent(p.position_id)}/orders/${encodeURIComponent(p.order_id)}`,
+      { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(p.body) },
+      "PATCH /positions/:id/orders/:order_id"
+    ),
+  list_orders: (p) =>
+    backendJsonFetch(`/positions/${encodeURIComponent(p.position_id)}/orders`, { method: "GET" }, "GET /positions/:id/orders"),
+  list_events: (p) =>
+    backendJsonFetch(`/positions/${encodeURIComponent(p.position_id)}/events`, { method: "GET" }, "GET /positions/:id/events"),
+};
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "pme-position-request") return false;
+
+  const action = POSITION_ACTIONS[message.action];
+  if (!action) {
+    console.error(`${LOG_PREFIX} pme-position-request acción desconocida: ${message.action}`);
+    return Promise.resolve({ ok: false, status: 0, body: { detail: `acción desconocida: ${message.action}` } });
+  }
+
+  // Auditoría Tramo 4 (2a parte) -- "el puerto de mensajes se cerró
+  // antes de recibir una respuesta" en Position Management: el patrón
+  // anterior (`sendResponse(...)` + `return true`) exige que la
+  // ejecución SÍ llegue a la línea `return true` para que Chrome
+  // mantenga el canal abierto. Si `action(...)` lanzara una excepción
+  // SÍNCRONA en cualquier punto ANTES de devolver su Promise (antes de
+  // que `.then(sendResponse)` pudiera engancharse), esa excepción
+  // aborta el listener completo sin llegar nunca a `return true` --
+  // Chrome no tiene ninguna señal de "responderé async" y cierra el
+  // canal de inmediato, produciendo exactamente ese error del lado del
+  // llamador. Fix (confirmado en E2E real, ver informe de diagnóstico):
+  // devolver la Promise DIRECTAMENTE desde el listener (patrón
+  // soportado por Chrome MV3 desde Chrome 99) -- ya no depende de
+  // ninguna línea de código posterior a un posible throw. El try/catch
+  // síncrono + el `.catch()` de la propia promesa garantizan además que
+  // el valor devuelto NUNCA sea un throw ni una promesa rechazada --
+  // siempre una Promise resuelta con un objeto de error legible, nunca
+  // un canal cerrado sin explicación. Igual que pme-analyze: una sola
+  // llamada por mensaje, sin reintento automático de este lado -- la
+  // decisión de reintentar (con qué key) es exclusivamente de
+  // content_script.js/del usuario.
+  try {
+    return action(message.payload ?? {}).catch((err) => ({
+      ok: false,
+      status: 0,
+      body: { detail: `excepción inesperada en background.js: ${err?.message ?? err}` },
+    }));
+  } catch (err) {
+    return Promise.resolve({
+      ok: false,
+      status: 0,
+      body: { detail: `excepción síncrona inesperada en background.js: ${err?.message ?? err}` },
+    });
+  }
+});

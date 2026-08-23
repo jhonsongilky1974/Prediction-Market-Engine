@@ -23,6 +23,7 @@ en la práctica -- resultado honesto, no un error.
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -154,12 +155,19 @@ def persist_tennis_feature_snapshot(
     inputs: TennisFeatureInputs,
     data_cutoff_timestamp: datetime,
     computed_at: Optional[datetime] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Tuple[int, Dict[str, Any], List[str], List[str]]:
     """Calcula las features (`compute_tennis_features`) y las persiste en
     `feature_snapshots` (Paso 0, INSERT-only) en un solo paso -- mismo
     patrón que `persist_mlb_feature_snapshot` (Paso 5b, Bloque 2).
     `event_snapshot_id` debe ser el id devuelto por un
-    `HistoryRepository.save_event_snapshot` previo del MISMO evento/instante."""
+    `HistoryRepository.save_event_snapshot` previo del MISMO evento/instante.
+
+    `conn` opcional (auditoría Tramo 4): pasado tal cual a
+    `save_feature_snapshot` -- si se provee (típicamente el yielded por
+    `HistoryRepository.batch_write()`), reutiliza esa conexión/
+    transacción sin commitear aquí; si se omite, comportamiento
+    preexistente sin cambios."""
     features, missing, warnings = compute_tennis_features(record, inputs, data_cutoff_timestamp)
     feature_snapshot_id = history_repository.save_feature_snapshot(
         event_id=record.event_id,
@@ -169,5 +177,6 @@ def persist_tennis_feature_snapshot(
         features=features,
         missing_features=missing,
         computed_at=computed_at,
+        conn=conn,
     )
     return feature_snapshot_id, features, missing, warnings

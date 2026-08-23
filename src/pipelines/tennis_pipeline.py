@@ -11,6 +11,7 @@ READ-ONLY. No calcula P_model/EDGE/EV/CONFIDENCE/señales.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -286,24 +287,71 @@ def run_tennis_pipeline(
         annotate_duplicate_markets(records)
 
     if repository is not None:
+        # Auditoría Tramo 4 (latencia real de tenis, ver informe de
+        # diagnóstico): ~62s medidos en este bloque para 301 records,
+        # causados por 903 transacciones SQLite individuales (una
+        # conexión+commit+cierre POR llamada save_*), vulnerables a
+        # contención de lock con cualquier escritor concurrente (el
+        # propio lado hermano del mismo partido, o los LaunchAgents
+        # programados que también escriben data/engine.db). Fix: UNA
+        # sola conexión/transacción por repositorio para TODO el lote
+        # (batch_write()), en vez de una por fila -- mismos upserts,
+        # misma deduplicación, mismo resultado persistido; solo cambia
+        # CUÁNTAS transacciones SQLite hacen falta (de ~903 a 1-2).
+        # Atomicidad: si cualquier escritura del lote lanza, ExitStack
+        # deshace TODOS los context managers abiertos -- cada
+        # batch_write() hace rollback explícito y cierra, nunca queda
+        # persistencia parcial del lote.
         with log_step(logger, "run_tennis_pipeline.persist_records", records=len(records)):
-            for record, feature_inputs, feature_cutoff in zip(records, feature_inputs_list, feature_cutoffs):
-                repository.save_normalized_record(record)
-                # Paso 0c: snapshot histórico append-only del MISMO record ya
-                # persistido -- nunca antes, nunca en su lugar (ver PLAN_PHASE2.md §11).
-                if history_repository is not None:
-                    snapshot_id = history_repository.save_event_snapshot(record, source="tennis_pipeline_run")
-                    # Paso 11: feature_snapshot del MISMO snapshot ya guardado --
-                    # solo si se pidieron features para este record (mismo
-                    # patrón que el Bloque 2 del Paso 5b para MLB).
-                    if feature_inputs is not None:
-                        persist_tennis_feature_snapshot(
-                            history_repository=history_repository,
-                            record=record,
-                            event_snapshot_id=snapshot_id,
-                            inputs=feature_inputs,
-                            data_cutoff_timestamp=feature_cutoff,
+            with contextlib.ExitStack() as stack:
+                # `repository`/`history_repository` apuntan por DEFECTO al
+                # MISMO archivo (config.settings.DB_PATH) -- abrir DOS
+                # conexiones de escritura SEPARADAS al mismo archivo,
+                # cada una con una transacción abierta durante TODO el
+                # lote, autobloquea: la segunda espera el lock que la
+                # primera mantiene abierto hasta el commit final, que
+                # nunca llega porque el propio bucle está esperando esa
+                # segunda escritura -- "database is locked" garantizado
+                # en el primer record (hallazgo real, reproducido contra
+                # una copia de data/engine.db durante la implementación
+                # de este fix). Si ambos apuntan al MISMO path, se
+                # comparte UNA sola conexión para todo el lote (SQLite no
+                # distingue "capa lógica": una conexión puede escribir
+                # cualquier tabla del mismo archivo). Se prefiere la
+                # conexión de HistoryRepository como la compartida porque
+                # es la que activa `PRAGMA foreign_keys = ON` (protección
+                # ya exigida por la auditoría de Fase 2 para
+                # feature_snapshots.event_snapshot_id) -- compartir la de
+                # Repository perdería esa protección silenciosamente. Si
+                # apuntan a archivos DISTINTOS (configuración no-default),
+                # se abren dos conexiones independientes, como antes: no
+                # compiten por ningún lock porque son archivos distintos.
+                if history_repository is not None and history_repository.db_path == repository.db_path:
+                    hist_conn = stack.enter_context(history_repository.batch_write())
+                    norm_conn = hist_conn
+                else:
+                    norm_conn = stack.enter_context(repository.batch_write())
+                    hist_conn = stack.enter_context(history_repository.batch_write()) if history_repository is not None else None
+                for record, feature_inputs, feature_cutoff in zip(records, feature_inputs_list, feature_cutoffs):
+                    repository.save_normalized_record(record, conn=norm_conn)
+                    # Paso 0c: snapshot histórico append-only del MISMO record ya
+                    # persistido -- nunca antes, nunca en su lugar (ver PLAN_PHASE2.md §11).
+                    if history_repository is not None:
+                        snapshot_id = history_repository.save_event_snapshot(
+                            record, source="tennis_pipeline_run", conn=hist_conn
                         )
+                        # Paso 11: feature_snapshot del MISMO snapshot ya guardado --
+                        # solo si se pidieron features para este record (mismo
+                        # patrón que el Bloque 2 del Paso 5b para MLB).
+                        if feature_inputs is not None:
+                            persist_tennis_feature_snapshot(
+                                history_repository=history_repository,
+                                record=record,
+                                event_snapshot_id=snapshot_id,
+                                inputs=feature_inputs,
+                                data_cutoff_timestamp=feature_cutoff,
+                                conn=hist_conn,
+                            )
 
     steps.append(PipelineStepResult("pipeline", "normalized_records", True, count=len(records)))
     logger.info(

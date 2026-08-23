@@ -85,6 +85,30 @@ class Repository:
         finally:
             conn.close()
 
+    @contextmanager
+    def batch_write(self) -> Iterator[sqlite3.Connection]:
+        """Auditoría Tramo 4 (latencia real de tenis, ~62s en
+        `persist_records` -- ver informe de diagnóstico): UNA sola
+        conexión/transacción reutilizada para un LOTE de escrituras, en
+        vez de abrir+commitear+cerrar una conexión por fila (901+
+        transacciones individuales medidas para 301 records). El
+        llamador pasa el `conn` producido aquí a
+        `save_normalized_record(..., conn=conn)` en cada iteración; el
+        commit ocurre UNA sola vez al salir de este bloque sin
+        excepción. Si cualquier escritura del lote lanza, se hace
+        rollback explícito del lote COMPLETO (nunca persistencia
+        parcial) y la excepción se relanza intacta -- nunca se traga
+        silenciosamente."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ---------------------------------------------------------------
     # RAW capture (JSON en disco + índice en SQLite)
     # ---------------------------------------------------------------
@@ -138,24 +162,28 @@ class Repository:
     # ---------------------------------------------------------------
     # Registros normalizados
     # ---------------------------------------------------------------
-    def save_normalized_record(self, record: NormalizedRecord) -> None:
+    def save_normalized_record(self, record: NormalizedRecord, conn: Optional[sqlite3.Connection] = None) -> None:
+        """`conn` opcional (auditoría Tramo 4): si se provee (típicamente
+        el yielded por `batch_write()`), se reutiliza esa conexión/
+        transacción SIN commitear aquí -- el llamador controla el commit
+        del lote completo. Si se omite (default, comportamiento
+        preexistente sin cambios), abre+commitea+cierra su propia
+        conexión como siempre."""
         save_started = time.monotonic()
         logger.info("-> save_normalized_record event_id=%r", record.event_id)
         payload = record.model_dump_json()
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO normalized_records (event_id, sport, market_id, last_updated, payload_json) "
-                "VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(event_id) DO UPDATE SET "
-                "market_id=excluded.market_id, last_updated=excluded.last_updated, payload_json=excluded.payload_json",
-                (
-                    record.event_id,
-                    record.sport.value,
-                    record.market_id,
-                    _utcnow_iso(),
-                    payload,
-                ),
-            )
+        sql = (
+            "INSERT INTO normalized_records (event_id, sport, market_id, last_updated, payload_json) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(event_id) DO UPDATE SET "
+            "market_id=excluded.market_id, last_updated=excluded.last_updated, payload_json=excluded.payload_json"
+        )
+        params = (record.event_id, record.sport.value, record.market_id, _utcnow_iso(), payload)
+        if conn is not None:
+            conn.execute(sql, params)
+        else:
+            with self._connect() as owned_conn:
+                owned_conn.execute(sql, params)
         logger.info(
             "<- save_normalized_record OK event_id=%r elapsed_ms=%.1f",
             record.event_id, (time.monotonic() - save_started) * 1000,

@@ -180,6 +180,29 @@ class HistoryRepository:
         finally:
             conn.close()
 
+    @contextmanager
+    def batch_write(self) -> Iterator[sqlite3.Connection]:
+        """Auditoría Tramo 4 (latencia real de tenis, ~62s en
+        `persist_records` -- ver informe de diagnóstico): UNA sola
+        conexión/transacción reutilizada para un LOTE de escrituras, en
+        vez de abrir+commitear+cerrar una conexión por fila. El llamador
+        pasa el `conn` producido aquí a `save_event_snapshot(...,
+        conn=conn)`/`save_feature_snapshot(..., conn=conn)` en cada
+        iteración; el commit ocurre UNA sola vez al salir de este bloque
+        sin excepción. Rollback explícito del lote COMPLETO si cualquier
+        escritura falla -- nunca persistencia parcial, la excepción se
+        relanza intacta."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # event_snapshots (INSERT-only)
     # ------------------------------------------------------------------
@@ -188,10 +211,17 @@ class HistoryRepository:
         record: NormalizedRecord,
         source: str,
         captured_at: Optional[datetime] = None,
+        conn: Optional[sqlite3.Connection] = None,
     ) -> int:
         """Inserta una NUEVA fila de snapshot. Nunca actualiza una fila
         existente: dos llamadas para el mismo `event_id` producen dos
-        filas distintas, cada una con su propio `captured_at`."""
+        filas distintas, cada una con su propio `captured_at`.
+
+        `conn` opcional (auditoría Tramo 4): si se provee (típicamente el
+        yielded por `batch_write()`), se reutiliza esa conexión/
+        transacción SIN commitear aquí. Si se omite (default,
+        comportamiento preexistente sin cambios), abre+commitea+cierra su
+        propia conexión como siempre."""
         save_started = time.monotonic()
         logger.info("-> save_event_snapshot event_id=%r source=%r", record.event_id, source)
         captured_at = captured_at or datetime.now(timezone.utc)
@@ -200,43 +230,44 @@ class HistoryRepository:
         market = record.market
         dq = record.data_quality
 
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO event_snapshots (
-                    event_id, sport, source, captured_at, event_start_time, market_id,
-                    yes_bid, yes_ask, no_bid, no_ask, last_price,
-                    spread_yes, spread_no, volume, volume_24h, open_interest, liquidity,
-                    source_timestamps_json, data_quality_json, normalized_record_json, raw_refs_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.event_id,
-                    record.sport.value,
-                    source,
-                    captured_at.isoformat(),
-                    _iso(record.start_time),
-                    record.market_id,
-                    market.yes_bid,
-                    market.yes_ask,
-                    market.no_bid,
-                    market.no_ask,
-                    market.last_price,
-                    market.spread_yes,
-                    market.spread_no,
-                    market.volume,
-                    market.volume_24h,
-                    market.open_interest,
-                    market.liquidity,
-                    json.dumps(
-                        {src: _iso(ts) for src, ts in dq.source_timestamps.items()}
-                    ),
-                    dq.model_dump_json(),
-                    record.model_dump_json(),
-                    json.dumps(record.raw_refs),
-                ),
-            )
+        sql = """
+            INSERT INTO event_snapshots (
+                event_id, sport, source, captured_at, event_start_time, market_id,
+                yes_bid, yes_ask, no_bid, no_ask, last_price,
+                spread_yes, spread_no, volume, volume_24h, open_interest, liquidity,
+                source_timestamps_json, data_quality_json, normalized_record_json, raw_refs_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        params = (
+            record.event_id,
+            record.sport.value,
+            source,
+            captured_at.isoformat(),
+            _iso(record.start_time),
+            record.market_id,
+            market.yes_bid,
+            market.yes_ask,
+            market.no_bid,
+            market.no_ask,
+            market.last_price,
+            market.spread_yes,
+            market.spread_no,
+            market.volume,
+            market.volume_24h,
+            market.open_interest,
+            market.liquidity,
+            json.dumps({src: _iso(ts) for src, ts in dq.source_timestamps.items()}),
+            dq.model_dump_json(),
+            record.model_dump_json(),
+            json.dumps(record.raw_refs),
+        )
+        if conn is not None:
+            cursor = conn.execute(sql, params)
             snapshot_id = cursor.lastrowid
+        else:
+            with self._connect() as owned_conn:
+                cursor = owned_conn.execute(sql, params)
+                snapshot_id = cursor.lastrowid
         logger.info(
             "<- save_event_snapshot OK event_id=%r snapshot_id=%d elapsed_ms=%.1f",
             record.event_id, snapshot_id, (time.monotonic() - save_started) * 1000,
@@ -287,29 +318,36 @@ class HistoryRepository:
         features: Dict[str, Any],
         missing_features: Optional[List[str]] = None,
         computed_at: Optional[datetime] = None,
+        conn: Optional[sqlite3.Connection] = None,
     ) -> int:
+        """`conn` opcional (auditoría Tramo 4): mismo contrato que
+        `save_event_snapshot` -- si se provee, reutiliza esa conexión/
+        transacción sin commitear aquí; si se omite, comportamiento
+        preexistente sin cambios."""
         _require_utc_aware(data_cutoff_timestamp, "data_cutoff_timestamp")
         computed_at = computed_at or datetime.now(timezone.utc)
         _require_utc_aware(computed_at, "computed_at")
 
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO feature_snapshots (
-                    event_id, event_snapshot_id, feature_set_version,
-                    data_cutoff_timestamp, computed_at, features_json, missing_features_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    event_snapshot_id,
-                    feature_set_version,
-                    data_cutoff_timestamp.isoformat(),
-                    computed_at.isoformat(),
-                    json.dumps(features),
-                    json.dumps(missing_features or []),
-                ),
-            )
+        sql = """
+            INSERT INTO feature_snapshots (
+                event_id, event_snapshot_id, feature_set_version,
+                data_cutoff_timestamp, computed_at, features_json, missing_features_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+        params = (
+            event_id,
+            event_snapshot_id,
+            feature_set_version,
+            data_cutoff_timestamp.isoformat(),
+            computed_at.isoformat(),
+            json.dumps(features),
+            json.dumps(missing_features or []),
+        )
+        if conn is not None:
+            cursor = conn.execute(sql, params)
+            return cursor.lastrowid
+        with self._connect() as owned_conn:
+            cursor = owned_conn.execute(sql, params)
             return cursor.lastrowid
 
     def get_feature_snapshots_for_event(self, event_id: str) -> List[Dict[str, Any]]:
