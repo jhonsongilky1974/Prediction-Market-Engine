@@ -14,6 +14,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException
 
+from src.api.advisory_router import router as advisory_router
 from src.api.analysis_service import analyze_ticker
 from src.api.event_resolver import ResolverError
 from src.api.positions_router import router as positions_router
@@ -43,6 +44,19 @@ app = FastAPI(
     ),
     version="5.0.0",
 )
+
+# Phase 6 Tramo 5B: Position Management Advisory (src.advisory, capa
+# nueva y separada, solo lectura/cómputo sobre src.positions ya
+# auditado). Stateless -- no crea tablas, no persiste su resultado.
+# Aditivo -- no toca /analyze, /map/robinhood ni los endpoints de
+# Tramo 1-4. Cero ejecución de órdenes reales.
+#
+# DEBE montarse ANTES que positions_router: expone GET /positions/exposure,
+# una ruta LITERAL que Starlette resolvería por error contra
+# GET /positions/{position_id} (con position_id="exposure") si
+# positions_router se registrara primero -- el orden de include_router()
+# es el orden de resolución de rutas.
+app.include_router(advisory_router)
 
 # Phase 6 Tramo 2: API read/register/prepare sobre Position Management
 # (src.positions, ya auditado). Aditivo -- no toca /analyze ni
