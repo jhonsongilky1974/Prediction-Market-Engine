@@ -436,6 +436,24 @@ class PositionsRepository:
             rows = conn.execute("SELECT * FROM positions ORDER BY created_at ASC").fetchall()
         return [self._row_to_position(r) for r in rows]
 
+    def list_positions_for_tickers(self, kalshi_tickers: List[str]) -> List[Position]:
+        """Lectura pura, aditiva (Phase 6, Tramo 5B): todas las Position
+        (cualquier status, incluidos terminales) cuyo `kalshi_ticker` esté
+        entre los provistos -- usada por `src.advisory` para reunir las
+        posiciones de AMBOS lados de un mismo evento sin tener que iterar
+        `list_all_positions()` en el llamador. No añade ningún invariante
+        de escritura ni modifica los métodos ya auditados."""
+        if not kalshi_tickers:
+            return []
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            placeholders = ",".join("?" * len(kalshi_tickers))
+            rows = conn.execute(
+                f"SELECT * FROM positions WHERE kalshi_ticker IN ({placeholders}) ORDER BY created_at ASC",
+                tuple(kalshi_tickers),
+            ).fetchall()
+        return [self._row_to_position(r) for r in rows]
+
     @staticmethod
     def _row_to_position(row: sqlite3.Row) -> Position:
         return Position(
