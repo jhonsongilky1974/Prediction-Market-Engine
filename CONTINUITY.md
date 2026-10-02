@@ -177,6 +177,13 @@ autorizar merge. PR #4 fusionado en GitHub por el usuario
 por fast-forward y verificado idéntico a `origin/main`, rama local y
 rama remota ya fusionadas eliminadas. Suite completa: 1369 passed, 0
 failed. MLB y matching sin cambios. Tramo 5 NO autorizado.**
+**Actualizado de nuevo: 2026-10-02 — CIERRE FORMAL DEL TRAMO 5B
+(Position Management Advisory): capa nueva `src/advisory/` stateless y
+de solo lectura sobre Position Management (Tramo 1-4, sin cambios),
+auditada en 3 rondas (implementación, corrección post-auditoría,
+verificación final de PR) y fusionada vía PR #6 — ver §0.37. Tramo 5A
+(probabilidad conservadora / `ev_net_strength`) sigue bloqueado, sin
+datos de calibración suficientes.**
 Propósito: única fuente de verdad para continuar este proyecto en una
 conversación nueva, sin acceso al historial de chat.
 
@@ -3883,6 +3890,117 @@ confirmada ausente tanto local como remotamente.
   Fase 6 — confirmado por auditoría de scope dedicada
   (`test_browser_extension_scope.py`, 14 tests) y por la auditoría
   pre-merge del PR #4.
+
+## 0.37 CIERRE FORMAL DEL TRAMO 5B: Position Management Advisory (2026-10-02)
+
+### Contexto
+
+Tras el diagnóstico de cobertura de calibración (Tramo 5A): `ev_net_strength`
+es siempre `None` en producción (D-3, fee real de Kalshi no verificado) y no
+existe ningún límite inferior/probabilidad conservadora calibrada en Market
+Analysis — confirmado empíricamente contra `data/engine.db` (0 de 2377
+`opportunity_evaluations` con `signal_type=ENTER`). Por eso Tramo 5 se dividió:
+5A (Market Analysis Contract Readiness, bloqueado, pendiente de más datos
+etiquetados) y 5B (Position Management Advisory, autorizado ahora, sin
+depender de calibración alguna).
+
+### Alcance implementado
+
+Paquete nuevo `src/advisory/` (10 módulos) + capa HTTP `src/api/advisory_*.py`
++ `rate_limiter.py`, aditivo sobre `src/positions/` (Tramo 1-4) sin modificar
+su comportamiento — un único método de lectura nuevo
+(`PositionsRepository.list_positions_for_tickers`). Stateless: sin tabla
+nueva, sin persistencia de su propio resultado. Dos endpoints de solo
+lectura: `POST /advisory/positions/evaluate`, `GET /positions/exposure`.
+
+- Exposición agregada gross/conservadora: `base_capital_at_risk =
+  max(0, capital_invested_cents - capital_recovered_cents)`; solo una Order
+  BUY no-terminal reserva capital nuevo (la porción pendiente); una SELL
+  no-terminal nunca aumenta capital comprometido, solo reserva contratos.
+- TP1 reutiliza literalmente `src.positions.capital_recovery.compute_recovery_plan`
+  — ninguna matemática de recuperación duplicada. Sin `target_exit_price_cents`,
+  TP1 es `UNAVAILABLE` explícito, nunca una recomendación fabricada.
+- Tres runners distintos, nunca confundidos: `capital_recovery_runner_contracts`
+  (semántica exacta de `compute_recovery_plan`), `strategic_runner_contracts_projected`
+  (por defecto igual al remanente tras TP1, `None` si TP1 es `UNAVAILABLE`),
+  `strategic_runner_contracts_confirmed` (fijo en `None` en Tramo 5B).
+- Stop informativo (`avg_entry_price_cents - max_adverse_move_cents`,
+  clamped a `[1,99]`) e invalidación mediante códigos estructurados
+  (`condition_code`/`subject`/`operator`/`evidence_id`) — nunca texto libre
+  ejecutable, nunca ejecutado.
+- Identidad de evento fail-closed: `event_id` + ticker + sport + market_profile
+  validados cruzados contra cada `Position` real; una contradicción produce
+  `EventIdentityMismatchError` (409), nunca descarta la posición en silencio.
+- Rate limit (2/s, burst 5) con clave primaria por IP observada por el
+  servidor — un header secundario nunca evade el bucket (corregido durante
+  la propia auditoría de implementación).
+- Staleness de `prices_timestamp` (máx. 15s) verificada al inicio Y al final
+  del cálculo (corregido durante la auditoría post-implementación).
+- Ningún `ENTER`/`WATCH`/`PASS` en ningún JSON visible — verificado por
+  serialización real.
+
+### Auditorías (3 rondas, sin cambios de alcance)
+
+1. **Auditoría de implementación**: encontrado y corregido un bug real de
+   orden de rutas (`GET /positions/exposure` habría sido interceptada por
+   `GET /positions/{position_id}`) y un diseño de rate limit evadible
+   rotando el header `X-Advisory-Client-Id` — ambos corregidos antes del
+   primer commit.
+2. **Auditoría post-corrección del runner**: la regla aprobada para
+   `strategic_runner_contracts_projected` ya se cumplía (verificado por
+   ejecución directa); se añadieron 15 tests que antes faltaban (equivalencia
+   paramétrica con `compute_recovery_plan`, invariante nueva de
+   `PositionExposureLine`, staleness-al-final, rutas explícitas) y se
+   documentó la limitación de memoria-por-proceso del rate limiter.
+3. **Auditoría final pre-merge del PR #6**: HEAD local/remoto/PR idénticos
+   (`2d49afa`), 1 commit, 26 archivos (24 nuevos + 2 modificados, +3526/-0),
+   `mergeable_state: clean`. Veredicto: **APROBADO, seguro para merge.**
+
+### Cierre Git post-merge
+
+Usuario fusionó el PR #6 manualmente en GitHub (merge commit real de 2
+padres, sin squash/rebase). Verificado en este repositorio:
+`git fetch origin` → confirmado `435dc1d2e4af562853fa0b174ea954892ad3f2d2`
+como HEAD de `origin/main`, padres `6a70fe1` (tip anterior de `main`) +
+`2d49afafcac8b25e96ca9d6338a95fcde1712de6` (commit único de Tramo 5B),
+coincide exactamente con `merge_commit_sha` de la API de GitHub para el
+PR #6 (`merged: true`). `git checkout main && git merge --ff-only origin/main`
+— fast-forward limpio `6a70fe1..435dc1d`, sin conflicto posible (`main`
+local era ancestro estricto). Rama `feat/phase6-tramo5b-position-management-advisory`
+[pendiente de borrado — todavía NO eliminada, local ni remota, a la espera
+de instrucción explícita separada].
+
+### Validación
+
+1493 tests (suite completa del repositorio, `tests/unit` + `tests/integration`
+sin selectores): 1493 passed, 0 failed, 0 skipped, 0 xfailed/xpassed. 320
+tests focalizados de Advisory/Position Management. Único warning preexistente
+de `urllib3`. `git diff --check` limpio en cada ronda.
+
+### Deudas conocidas, no bloqueantes
+
+- Validación completa de participantes/`scheduled_start_time` requiere
+  datos que `Position` todavía no persiste (requeriría ampliar su esquema,
+  fuera de alcance de Tramo 5B).
+- Lectura de orders/fills por posición es N+1 acotado al volumen actual
+  (sin método bulk).
+- Rate limiter en memoria por proceso — apropiado solo para el despliegue
+  local actual (un único worker, un único usuario).
+- Tramo 5B no determina precios de entrada ni nuevas oportunidades —
+  deliberado, fuera de su alcance.
+
+### Qué NO se autorizó en este cierre
+
+- **Tramo 5A sigue bloqueado.** `ev_net_strength`/probabilidad conservadora
+  por bucket requieren más datos de calibración reales (modelo MLB entrenado
+  inexistente hoy; `tennis_results_sync` detenido desde 2026-08-18) — sin
+  fecha, deuda documentada explícitamente, no una omisión.
+- Sin `entry_pricing.py`/`sizing.py`/`reentry.py`/`symmetry.py`/
+  `policy_gate_adapter.py`/`OpportunityDecision` — selección de nuevas
+  oportunidades queda fuera de Tramo 5B por diseño.
+- Cero ejecución real contra Robinhood, cero cambios en `browser-extension/`,
+  cero relajación de policy gates — confirmado por auditoría dedicada en
+  cada ronda.
 
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
