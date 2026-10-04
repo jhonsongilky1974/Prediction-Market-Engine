@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import scripts.train_tennis_model as train_script
 from src.storage.history_repository import HistoryRepository
-from tests.unit.test_tennis_baseline import _add_sample
+from tests.unit.tennis_preevent_factories import add_preevent_sample as _add_sample
 
 
 def _patch_history_repository(monkeypatch, tmp_path, db_name="hist.db"):
@@ -37,19 +37,17 @@ def test_script_reports_insufficient_history_honestly(monkeypatch, tmp_path):
 def test_script_trains_and_reports_metrics_when_threshold_reached(monkeypatch, tmp_path, capsys):
     hist = _patch_history_repository(monkeypatch, tmp_path)
     t0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
-    for i in range(6):
+    for i in range(160):  # política real: >=150 eventos y particiones >=30 (96/32/32)
+        a_wins = i % 2 == 0
         _add_sample(
-            hist, f"espn_tennis_atp_a{i}", t0 + timedelta(minutes=i), result="PARTICIPANT_A_WON",
-            rest_a=8.0, rest_b=1.0, round_context="Final",
-        )
-    for i in range(6):
-        _add_sample(
-            hist, f"espn_tennis_atp_b{i}", t0 + timedelta(minutes=100 + i), result="PARTICIPANT_B_WON",
-            rest_a=1.0, rest_b=8.0, round_context="Qualifying 1st Round",
+            hist, f"espn_tennis_atp_{i:03d}", t0 + timedelta(days=i),
+            result="PARTICIPANT_A_WON" if a_wins else "PARTICIPANT_B_WON",
+            rest_a=8.0 if a_wins else 1.0, rest_b=1.0 if a_wins else 8.0,
+            round_context="Final" if a_wins else "Qualifying 1st Round",
         )
     models_dir = tmp_path / "models"
     monkeypatch.setattr(
-        sys, "argv", ["train_tennis_model.py", "--min-samples", "10", "--models-dir", str(models_dir)]
+        sys, "argv", ["train_tennis_model.py", "--models-dir", str(models_dir)]
     )
 
     exit_code = train_script.main()
@@ -62,6 +60,7 @@ def test_script_trains_and_reports_metrics_when_threshold_reached(monkeypatch, t
     assert "ece (validation, modelo SIN calibrar):" in captured.out
     assert "calibration_version: None" in captured.out
     assert "artifact_sha256:" in captured.out
+    assert "candidate_status: PROMOTION_ELIGIBLE" in captured.out  # elegible NO es activo: requiere registro explícito
 
     # Regresión: el artefacto debe quedar en `models_dir` (tmp_path) --
     # nunca en DATA_MODELS_DIR de producción.

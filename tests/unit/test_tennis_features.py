@@ -22,7 +22,7 @@ from src.features.tennis_features import (
     compute_tournament_round_context,
     persist_tennis_feature_snapshot,
 )
-from src.models.schemas import NormalizedRecord, Sport
+from src.models.schemas import EventStatus, NormalizedRecord, Sport
 from src.storage.history_repository import HistoryRepository
 
 CUTOFF = datetime(2026, 7, 26, 10, 0, tzinfo=timezone.utc)
@@ -35,6 +35,7 @@ def _tennis_record(start_time=None, tournament_round="Qualifying 1st Round"):
         participant_a="Edas Butvilas",
         participant_b="Clement Tabur",
         start_time=start_time or datetime(2026, 7, 26, 11, 0, tzinfo=timezone.utc),
+        status=EventStatus.SCHEDULED,
     )
     record.model_inputs.context = {
         "tournament_name": "Millennium Estoril Open",
@@ -220,3 +221,71 @@ def test_feature_set_version_matches_registry():
     from src.features.registry import CURRENT_FEATURE_SET_VERSION as REGISTRY_VERSION
 
     assert CURRENT_FEATURE_SET_VERSION == REGISTRY_VERSION
+
+
+# ---------------------------------------------------------------------
+# Endurecimiento pre-evento (CONTINUITY.md §0.38)
+# ---------------------------------------------------------------------
+
+
+def test_compute_rest_days_ignores_prior_matches_at_or_after_the_match_start():
+    """Fuga original: tras el partido, el SIGUIENTE partido del ganador
+    contaba como "previo" y daba rest_days negativo (proxy del resultado)."""
+    match_start = datetime(2026, 7, 26, 11, 0, tzinfo=timezone.utc)
+    late_cutoff = datetime(2026, 8, 5, tzinfo=timezone.utc)  # corte posterior al partido
+    next_match = datetime(2026, 7, 28, 11, 0, tzinfo=timezone.utc)
+
+    assert compute_rest_days(match_start, [next_match], late_cutoff) is None
+    assert compute_rest_days(match_start, [match_start], late_cutoff) is None
+    prior = datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)
+    assert compute_rest_days(match_start, [prior, next_match], late_cutoff) == pytest.approx(6.0)
+
+
+def test_rest_days_is_never_negative_for_any_input_order():
+    match_start = datetime(2026, 7, 26, 11, 0, tzinfo=timezone.utc)
+    priors = [match_start + timedelta(days=d) for d in (-3, 0, 2, 10)]
+    value = compute_rest_days(match_start, priors, datetime(2026, 9, 1, tzinfo=timezone.utc))
+    assert value is not None and value >= 0
+
+
+@pytest.mark.parametrize("status", [EventStatus.LIVE, EventStatus.FINAL, EventStatus.UNKNOWN, EventStatus.POSTPONED])
+def test_compute_features_blocks_non_scheduled_status(status):
+    record = _tennis_record()
+    record.status = status
+    inputs = TennisFeatureInputs(prior_match_start_times={"participant_a": [datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)], "participant_b": []})
+
+    features, missing, warnings = compute_tennis_features(record, inputs, CUTOFF)
+
+    assert features["rest_days"] == {"participant_a": None, "participant_b": None}
+    assert "rest_days.participant_a" in missing and "rest_days.participant_b" in missing
+    assert any("contexto no pre-evento" in w for w in warnings)
+
+
+def test_compute_features_blocks_cutoff_after_match_start():
+    record = _tennis_record()  # inicio 2026-07-26 11:00
+    inputs = TennisFeatureInputs(prior_match_start_times={"participant_a": [datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)], "participant_b": []})
+
+    features, _missing, warnings = compute_tennis_features(record, inputs, datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc))
+
+    assert features["rest_days"]["participant_a"] is None
+    assert any("contexto no pre-evento" in w for w in warnings)
+
+
+def test_compute_features_blocks_missing_start_time():
+    record = _tennis_record()
+    record.start_time = None
+
+    features, _missing, warnings = compute_tennis_features(record, TennisFeatureInputs(), CUTOFF)
+
+    assert features["rest_days"] == {"participant_a": None, "participant_b": None}
+    assert any("contexto no pre-evento" in w for w in warnings)
+
+
+def test_compute_features_preevent_context_still_computes_rest_days():
+    features, _missing, warnings = compute_tennis_features(
+        _tennis_record(),
+        TennisFeatureInputs(prior_match_start_times={"participant_a": [datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)], "participant_b": []}),
+        CUTOFF,
+    )
+    assert features["rest_days"]["participant_a"] == pytest.approx(6.0)
+    assert not any("contexto no pre-evento" in w for w in warnings)

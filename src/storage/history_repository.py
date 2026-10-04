@@ -306,6 +306,39 @@ class HistoryRepository:
         )
         return result
 
+    def get_event_snapshot_contexts(self, event_snapshot_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+        """Contexto temporal mínimo de `event_snapshots` por id (lectura
+        pura, aditiva -- fix de fuga temporal de tenis, CONTINUITY.md
+        §0.38): `captured_at`, `event_start_time` y el `status` del
+        `NormalizedRecord` persistido (`json_extract`, sin deserializar el
+        registro completo). Los features de un snapshot solo son
+        pre-evento si ESTE contexto lo confirma; `feature_snapshots` por
+        sí sola no trae ni hora de inicio ni estado. Consulta en bloques
+        para respetar el límite de variables de SQLite."""
+        contexts: Dict[int, Dict[str, Any]] = {}
+        ids = list(dict.fromkeys(event_snapshot_ids))
+        if not ids:
+            return contexts
+        chunk_size = 500
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            for start in range(0, len(ids), chunk_size):
+                chunk = ids[start : start + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    "SELECT id, captured_at, event_start_time, "
+                    "json_extract(normalized_record_json, '$.status') AS event_status "
+                    f"FROM event_snapshots WHERE id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    contexts[row["id"]] = {
+                        "captured_at": row["captured_at"],
+                        "event_start_time": row["event_start_time"],
+                        "event_status": row["event_status"],
+                    }
+        return contexts
+
     # ------------------------------------------------------------------
     # feature_snapshots (INSERT-only, aditiva, se activa desde el Paso 2)
     # ------------------------------------------------------------------

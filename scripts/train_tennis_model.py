@@ -13,13 +13,18 @@ Sin lock de instancia única: este script solo LEE `HistoryRepository`
 `model_version` único (con timestamp) en `data/models/` -- dos corridas
 simultáneas no colisionan en el mismo archivo.
 
-Comportamiento honesto por diseño: si el histórico etiquetado no alcanza
-`min_samples`, el script termina con éxito (exit 0) reportando
-`INSUFFICIENT_HISTORY` -- nunca fabrica un modelo.
+Comportamiento honesto por diseño: si el histórico pre-evento no alcanza
+`min_samples` EVENTOS independientes (política: 150) o alguna partición
+temporal queda por debajo de 30 eventos, el script termina con éxito (exit
+0) reportando `INSUFFICIENT_HISTORY` -- nunca fabrica un modelo.
+
+El artefacto entrenado NO se activa por existir: solo es activable si
+figura `ALLOWED` (con su SHA-256) en `config/model_registry.json`, y el
+cargador rechaza además todo `REJECTED_CANDIDATE` (ver CONTINUITY.md §0.38).
 
 Uso:
     source .venv/bin/activate
-    python scripts/train_tennis_model.py [--min-samples 30] [--validation-fraction 0.2] [--models-dir data/models]
+    python scripts/train_tennis_model.py [--min-samples 150] [--validation-fraction 0.2] [--models-dir data/models]
 """
 from __future__ import annotations
 
@@ -32,8 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import DATA_MODELS_DIR
 from src.models.base import ModelStatus
 from src.models.tennis_baseline import (
-    DEFAULT_MIN_TRAINING_SAMPLES_TENNIS,
     DEFAULT_VALIDATION_FRACTION,
+    MIN_EVENTS_FOR_RETRAIN,
     train_tennis_baseline_model,
 )
 from src.storage.history_repository import HistoryRepository
@@ -41,7 +46,7 @@ from src.storage.history_repository import HistoryRepository
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--min-samples", type=int, default=DEFAULT_MIN_TRAINING_SAMPLES_TENNIS)
+    parser.add_argument("--min-samples", type=int, default=MIN_EVENTS_FOR_RETRAIN)
     parser.add_argument("--validation-fraction", type=float, default=DEFAULT_VALIDATION_FRACTION)
     parser.add_argument("--models-dir", type=Path, default=DATA_MODELS_DIR)
     args = parser.parse_args()
@@ -59,14 +64,15 @@ def main() -> int:
         print(f"  aviso: {w}")
 
     if status != ModelStatus.TRAINED or artifact is None:
-        print("\nNingún modelo entrenado -- histórico etiquetado insuficiente todavía.")
+        print("\nNingún modelo entrenado -- histórico pre-evento insuficiente todavía.")
         return 0
 
     print(f"\nmodel_version: {artifact.model_version}")
     print(f"feature_set_version: {artifact.feature_set_version}")
-    print(f"muestras totales etiquetadas: {artifact.n_training_samples}")
-    print(f"  train: {artifact.n_train_samples} muestras / {artifact.n_train_events} eventos distintos")
-    print(f"  validation: {artifact.n_validation_samples} muestras / {artifact.n_validation_events} eventos distintos")
+    print(f"eventos independientes totales: {artifact.n_training_samples} (spec {artifact.training_dataset_spec_version})")
+    print(f"  train: {artifact.n_train_events} eventos")
+    print(f"  validation: {artifact.n_validation_events} eventos")
+    print(f"  test temporal: {artifact.n_test_events} eventos")
     print(f"accuracy (validation): {artifact.accuracy}")
     print(f"precision (validation): {artifact.precision}")
     print(f"recall (validation): {artifact.recall}")
@@ -75,6 +81,9 @@ def main() -> int:
     print(f"brier_score (validation): {artifact.brier_score}")
     print(f"ece (validation, modelo SIN calibrar): {artifact.ece}")
     print(f"reliability_diagram: {artifact.reliability_diagram}")
+    print(f"TEST fuera de muestra: brier={artifact.test_brier} accuracy={artifact.test_accuracy} log_loss={artifact.test_log_loss}")
+    print(f"baseline (tasa base de train) en test: brier={artifact.baseline_test_brier} log_loss={artifact.baseline_test_log_loss}")
+    print(f"candidate_status: {artifact.candidate_status}  (NO activable hasta figurar ALLOWED en config/model_registry.json)")
     print(f"calibration_version: {artifact.calibration_version}  (None -- ningún Calibrator real existe todavía)")
     print(f"artifact_sha256: {artifact.artifact_sha256}")
     print(f"artefacto: {artifact.file_path}")
