@@ -50,7 +50,15 @@ def build_signal_inputs(
     probabilidad (`signal_inputs.p_model`, edge, EV bruto/neto) --
     resolución del invariante ya declarado en `CONTRACTS_FASE3.md` §2
     ("en cuanto exista calibration_version, el consumidor debe usar
-    p_model_calibrated"), nunca ambos valores mezclados."""
+    p_model_calibrated"), nunca ambos valores mezclados.
+
+    SEMÁNTICA YES/NO (CONTINUITY.md §0.38, solo documentación): `p_model`
+    guarda `p_model_yes` = P(participante A gana) = P(YES de `market_id`)
+    TAL CUAL en las oportunidades de AMBOS lados. Para evaluar el lado NO
+    contra un resultado hay que invertir AMBOS: `(1 - p_model, 1 - y)`
+    (`src.evaluation.calibration_pairs.mirror_to_no_side`); el lado NO es
+    el espejo exacto del YES, no una muestra independiente, y la unidad de
+    calibración es el evento (un par por `event_id`)."""
     if calibration_output is not None and calibration_output.p_model_calibrated is not None:
         model_output = dataclasses.replace(model_output, p_model_yes=calibration_output.p_model_calibrated)
 

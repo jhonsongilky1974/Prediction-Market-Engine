@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Lista explicita de modelos ACTIVABLES en produccion (fail-closed). Solo status=ALLOWED con artifact_sha256 verificado se carga. Cualquier modelo ausente de esta lista, INVALID o REJECTED_CANDIDATE se rechaza. Ver CONTINUITY.md seccion 0.38.",
+  "models": [
+    {
+      "model_version": "tennis_baseline_logreg_v1_20260801T184245Z",
+      "status": "INVALID",
+      "reason": "Fuga temporal: entrenado con 517 de 600 snapshots posteriores al inicio del partido (506 FINAL, 9 LIVE, 2 SCHEDULED pasada la hora nominal) y 336 con rest_days negativo; rest_days incluia el siguiente partido del ganador. Metricas publicadas contaminadas; fuera de muestra rinde peor que la tasa base. Conservado para auditoria, no activable.",
+      "artifact_sha256": "9f9409962e4568a0ca2fda1bcd40ec095377f0abf939338b08a46d779a0866a5"
+    },
+    {
+      "model_version": "tennis_calibrator_platt_v1_20260801T202949Z",
+      "status": "INVALID",
+      "reason": "Calibrador Platt ajustado sobre la validacion contaminada del modelo tennis_baseline_logreg_v1_20260801T184245Z (24 eventos, 120 filas no independientes). Nunca estuvo cableado en produccion. Conservado para auditoria.",
+      "artifact_sha256": "1a6985ee33a8230d7009a2157ff622186d0c63b466625c78064fab1f2630c484"
+    }
+  ]
+}

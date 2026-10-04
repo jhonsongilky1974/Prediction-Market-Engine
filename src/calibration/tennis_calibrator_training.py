@@ -24,7 +24,9 @@ from config.settings import DATA_MODELS_DIR
 from src.backtesting.metrics import brier_score, ece as compute_ece
 from src.calibration.platt_calibrator import PlattCalibrator, fit_platt_calibrator
 from src.models.base import ModelStatus
+from src.models.model_registry_policy import ModelRegistryPolicy
 from src.models.tennis_baseline import (
+    TRAINING_DATASET_SPEC_VERSION,
     build_tennis_training_dataset,
     load_latest_tennis_artifact,
     predict_tennis_baseline_from_features,
@@ -137,6 +139,7 @@ def train_tennis_calibrator(
     models_dir: Path = DATA_MODELS_DIR,
     cv_folds: int = DEFAULT_CV_FOLDS,
     now: Optional[datetime] = None,
+    registry: Optional[ModelRegistryPolicy] = None,
 ) -> Tuple[ModelStatus, Optional[TennisCalibratorArtifact], List[str]]:
     """Ajusta y persiste un `PlattCalibrator` real contra el modelo base
     de tenis más reciente. Nunca fabrica un calibrador: si no hay modelo
@@ -145,12 +148,23 @@ def train_tennis_calibrator(
     `INSUFFICIENT_HISTORY`/`MODEL_NOT_TRAINED` honestamente."""
     warnings: List[str] = []
 
-    loaded = load_latest_tennis_artifact(models_dir=models_dir)
+    loaded = load_latest_tennis_artifact(models_dir=models_dir, registry=registry)
     if loaded is None:
         return ModelStatus.MODEL_NOT_TRAINED, None, [
-            "no hay ningún modelo base de tenis entrenado -- nada que calibrar."
+            "no hay ningún modelo base de tenis ACTIVABLE (entrenado y permitido en config/model_registry.json) "
+            "-- nada que calibrar."
         ]
     model, base_artifact = loaded
+
+    # CONTINUITY.md §0.38: nunca se calibra un modelo base entrenado sin la
+    # spec pre-evento v2 (el modelo original con fuga temporal quedó
+    # INVALID; su validación contaminada no sirve para calibrar).
+    if getattr(base_artifact, "training_dataset_spec_version", None) != TRAINING_DATASET_SPEC_VERSION:
+        return ModelStatus.MODEL_NOT_TRAINED, None, [
+            f"el modelo base {base_artifact.model_version!r} no fue entrenado con la spec "
+            f"{TRAINING_DATASET_SPEC_VERSION!r} (dataset pre-evento, un snapshot por evento) -- "
+            "calibración rechazada, nada se fabrica."
+        ]
 
     validation_samples, warnings = _resolve_validation_samples(history_repository, base_artifact, warnings)
     if validation_samples is None:

@@ -5,7 +5,7 @@ preservan la forma real verificada contra la API de ESPN (`competitor.id`,
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -100,7 +100,10 @@ def test_run_tennis_pipeline_computes_rest_days_from_own_prior_history(
     HistoryRepository, debe producir un rest_days real -- no None -- en el
     siguiente partido de ese jugador. Emparejado por espn_id, nunca por
     nombre de texto."""
-    prior_start = datetime(2026, 7, 20, 11, 0, tzinfo=timezone.utc)
+    # El corte del pipeline es "ahora": el partido debe ser FUTURO (pre-evento).
+    # Partido previo exactamente 6 días antes del partido objetivo.
+    match_start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+    prior_start = match_start - timedelta(days=6)
     prior_record = NormalizedRecord(
         sport=Sport.TENNIS,
         event_id="espn_tennis_atp_prior",
@@ -117,13 +120,13 @@ def test_run_tennis_pipeline_computes_rest_days_from_own_prior_history(
     }
     tmp_history_repository.save_event_snapshot(prior_record, source="test", captured_at=prior_start)
 
-    payload = _scoreboard("301", "111", "222", "Home Player", "Away Player", "Semifinal", "2026-07-26T11:00Z")
+    payload = _scoreboard("301", "111", "222", "Home Player", "Away Player", "Semifinal", match_start.strftime("%Y-%m-%dT%H:%MZ"))
     monkeypatch.setattr(EspnTennisConnector, "get_scoreboard", lambda self, tour, date: _ok(payload))
     _patch_kalshi_down(monkeypatch)
     _patch_sofascore_down(monkeypatch)
 
     result = run_tennis_pipeline(
-        "atp", "20260726", repository=tmp_repository, history_repository=tmp_history_repository, enrich_sofascore=False
+        "atp", match_start.strftime("%Y%m%d"), repository=tmp_repository, history_repository=tmp_history_repository, enrich_sofascore=False
     )
 
     assert len(result.records) == 1

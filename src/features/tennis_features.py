@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.models.preevent_snapshots import preevent_violations
 from src.models.schemas import NormalizedRecord, Sport
 from src.storage.history_repository import HistoryRepository
 
@@ -60,7 +61,12 @@ def compute_rest_days(
     cutoff -- nunca se asume "descansado" con un valor por defecto."""
     if match_start_time is None:
         return None
-    eligible = [t for t in prior_match_start_times if t < data_cutoff_timestamp]
+    # Un partido "previo" debe comenzar ANTES del partido a predecir (fix de
+    # fuga temporal, CONTINUITY.md §0.38): sin esta cota, un snapshot
+    # posterior al partido incluía el siguiente partido del ganador como
+    # "previo" y producía rest_days negativo -- una proxy directa del
+    # resultado.
+    eligible = [t for t in prior_match_start_times if t < data_cutoff_timestamp and t < match_start_time]
     if not eligible:
         return None
     most_recent = max(eligible)
@@ -123,10 +129,27 @@ def compute_tennis_features(
     missing: List[str] = []
     warnings: List[str] = []
 
+    # Puerta pre-evento (CONTINUITY.md §0.38): si el corte de datos no es
+    # estrictamente anterior al inicio, o el evento no está SCHEDULED (ya
+    # LIVE/FINAL/etc.), o falta la hora de inicio, los features no son
+    # features pre-evento válidos -- rest_days queda None (nunca se calcula
+    # con información posterior al comienzo).
+    context_violations = preevent_violations(
+        event_start_time=record.start_time,
+        status=record.status,
+        data_cutoff_timestamp=data_cutoff_timestamp,
+    )
+    for violation in context_violations:
+        warnings.append(f"contexto no pre-evento ({violation.value}): rest_days no se calcula")
+
     rest_days_value: Dict[str, Optional[float]] = {}
     for side in ("participant_a", "participant_b"):
-        value = compute_rest_days(
-            record.start_time, inputs.prior_match_start_times.get(side, []), data_cutoff_timestamp
+        value = (
+            None
+            if context_violations
+            else compute_rest_days(
+                record.start_time, inputs.prior_match_start_times.get(side, []), data_cutoff_timestamp
+            )
         )
         rest_days_value[side] = value
         if value is None:
