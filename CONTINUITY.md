@@ -4071,6 +4071,44 @@ Verificada en la auditoría final previa al Commit 1 (`.venv/bin/python -m pytes
 - `git diff --check`: limpio (rastreados y archivos nuevos).
 - Commit 1: 19 archivos, +2002 −362.
 
+## 0.39 CIERRE FORMAL DEL PR #7: fuga temporal de tenis, política fail-closed de modelos y corrección YES/NO (2026-10-04)
+
+Registra el cierre Git y de validación de lo descrito en §0.38. **Sustituye la línea "Estado Git al escribir esta sección" de §0.38** (que decía "solo en local, sin push, sin PR y sin merge"): esa línea era correcta cuando se escribió y se conserva sin modificar como historial; el estado vigente es el de esta sección.
+
+### PR y merge
+
+- **PR #7**, título según lo informado por el usuario: "Fix tennis temporal leakage and enforce fail-closed model policy" (el título no pudo verificarse desde este repositorio; solo se verificó el merge en Git).
+- **Fusionado en `main`** mediante merge commit real de 2 padres, sin squash ni rebase: `6141a5a755c59f649f80ea22400559605311648b` ("Merge pull request #7 from jhonsongilky1974/fix/tennis-temporal-leakage-yesno"). Padres: `28040f53ef2115a0bc7419da5498a13d11c8567c` (tip anterior de `main`) y `8c2bf4d7a6abd08f97f08c1974f784693207f5bf`.
+- **Commits incluidos** (ambos verificados como ancestros de `main`):
+  - `a2677e47242e19a3d62f4582e0a486829f307e71` — Fix tennis temporal leakage: fail-closed model registry, pre-event dataset v2 and YES/NO event pairs (19 archivos de código, configuración y pruebas, +2002 −362).
+  - `8c2bf4d7a6abd08f97f08c1974f784693207f5bf` — Docs: add CONTINUITY section 0.38 (`CONTINUITY.md`, +69).
+
+### Cierre Git local
+
+- Working tree limpio antes de empezar la limpieza (`git status --short` vacío).
+- `git fetch --prune`: la rama remota `fix/tennis-temporal-leakage-yesno` ya no existía en `origin` (la referencia local `origin/fix/tennis-temporal-leakage-yesno` fue eliminada por el prune).
+- `main` local estaba 3 commits atrás de `origin/main`; actualizado únicamente con `git pull --ff-only origin main` (avance rápido).
+- Rama local `fix/tennis-temporal-leakage-yesno` eliminada con `git branch -d` (estaba en `8c2bf4d`, completamente fusionada). **La rama quedó eliminada local y remotamente.** No se borró ninguna otra rama.
+- `main` y `origin/main` idénticos en `6141a5a755c59f649f80ea22400559605311648b` (0 commits de diferencia en ambos sentidos); working tree limpio.
+
+### Validación realizada antes del merge
+
+Ejecutada sobre la rama `fix/tennis-temporal-leakage-yesno` en la auditoría final previa al Commit 1 (ver §0.38): **1583 pruebas de la suite completa aprobadas** (0 failed, 0 skipped, 0 xfailed/xpassed) y **141 pruebas focalizadas aprobadas**; `git diff --check` limpio. La suite no se volvió a ejecutar sobre `main` tras el merge; el merge commit no añade contenido propio más allá de unir ambas líneas.
+
+### Modelos y producción
+
+- **No se entrenó ni se activó ningún modelo** en este PR. Hoy no hay ningún modelo `ALLOWED` en `config/model_registry.json`; el modelo defectuoso `tennis_baseline_logreg_v1_20260801T184245Z` y su calibrador figuran `INVALID` y sus archivos se conservan sin tocar.
+- **No se modificó la base de datos** (sin cambios de esquema, datos ni backfill) ni los LaunchAgents/servicios en este cambio.
+- Efecto operativo a tener presente: como el checkout de `main` es el código que ejecutan el job horario y `/analyze`, la contención ya rige en producción; tenis permanece en `MODEL_NOT_TRAINED` (`p_model=None`) hasta una promoción explícita. Esto es el comportamiento previsto del cambio, no una modificación de datos.
+
+### Tramo 5A: CONTINÚA BLOQUEADO
+
+El PR #7 corrige la metodología (dataset pre-evento, política fail-closed, orientación YES/NO), pero **por sí solo no satisface los criterios de reapertura del Tramo 5A**. Siguen vigentes los bloqueadores de §0.38: D-3 (fee de Kalshi sin verificar, `ENTER` inalcanzable), ningún modelo limpio entrenado ni `ALLOWED`, ninguna medición de calibración válida por evento, y datos etiquetados insuficientes contra el umbral n ≥ 30 por bucket (intacto, sin reducir ni reinterpretar). El desbloqueo requiere una nueva decisión explícita (ver §0.38).
+
+### Deuda y siguientes pasos (sin cambios respecto a §0.38)
+
+Protección por registro de `load_latest_tennis_calibrator` antes de cablearlo; uso de `build_event_pairs`/`compute_calibration_coverage` en diagnósticos reales; PRs separados para MLB y backtesting general (filtro solo-`recorded_at` en `mlb_baseline.py:197` y `src/backtesting/dataset.py:107`).
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
