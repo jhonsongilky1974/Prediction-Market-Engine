@@ -4002,6 +4002,75 @@ de `urllib3`. `git diff --check` limpio en cada ronda.
   cero relajación de policy gates — confirmado por auditoría dedicada en
   cada ronda.
 
+## 0.38 FIX: fuga temporal del baseline de tenis + corrección YES/NO + contención fail-closed (2026-10-04, rama `fix/tennis-temporal-leakage-yesno`)
+
+**Estado Git al escribir esta sección:** Commit 1 (código, configuración y pruebas) creado ÚNICAMENTE en local, hash exacto `a2677e47242e19a3d62f4582e0a486829f307e71`. **Sin push, sin PR y sin merge** (no se hizo push; ninguna referencia remota local contiene el commit y `main` no lo incluye). No se entrenó ni activó ningún modelo.
+
+**Nota sobre las cifras:** las cifras de muestras, eventos y métricas de esta sección (600/120, 517, 336, 83/28, ≈372/364/285, Brier 0.2907/0.3384) son una **fotografía histórica** tomada durante la validación GO/NO-GO y los diagnósticos previos a este cambio, sobre una `data/engine.db` que los jobs programados siguen modificando. **No son conteos actuales ni permanentes y no fueron re-verificadas al escribir esta sección.** Se conservan como evidencia de por qué se hizo el cambio. Los valores de configuración (150, 60, 30, 60/20/20) sí son constantes del código del Commit 1.
+
+### Hallazgo
+
+*(Cifras de esta subsección: fotografía histórica de la validación GO/NO-GO, no conteos actuales.)*
+
+Validación GO/NO-GO (solo lectura) del modelo `tennis_baseline_logreg_v1_20260801T184245Z`: **NO-GO** para usarlo en calibración. Entrenado con 600 snapshots / 120 eventos, de los cuales **517 eran posteriores al inicio del partido** (506 `FINAL`, 9 `LIVE`, 2 `SCHEDULED` pasada la hora nominal) y 336 con `rest_days` negativo; solo 83 muestras / 28 eventos eran limpias. Causa raíz:
+
+- El dataset solo exigía `computed_at < event_result.recorded_at` (cuándo el sistema se enteró), no que el snapshot fuera anterior al inicio. Los resultados se cargaron en bloque (backfill), así que pasaron snapshots posteriores al partido.
+- `compute_rest_days` aceptaba como "partido previo" cualquier `t < data_cutoff`; con un corte posterior al partido, el SIGUIENTE partido del ganador contaba como previo → `rest_days` negativo, proxy directo de la etiqueta.
+- Fuera de muestra el modelo rinde peor que la tasa base; sus métricas publicadas (accuracy, Brier, ECE) están contaminadas.
+
+Defecto metodológico YES/NO (propio de los diagnósticos ad hoc del Tramo 5A, no del código de producción): `signal_inputs.p_model` guarda `p_model_yes` TAL CUAL en las oportunidades YES y NO del evento. Emparejarlo sin invertir con `y` del lado NO (complementario) produce frecuencias observadas artificiales de 0.5 y duplica `n`. Invalida las cifras de Brier 0.2907/0.3384 y los `n` por bucket del diagnóstico 5A previo.
+
+### Contención (opción B: lista de permitidos, fail-closed)
+
+- `config/model_registry.json` + `src/models/model_registry_policy.py`. Un artefacto solo es activable con `status=ALLOWED` y `artifact_sha256` igual al SHA-256 real del `.joblib`. Modelo desconocido, `INVALID`, `REJECTED_CANDIDATE`, SHA ausente/distinto, registro ausente o corrupto → rechazado (el cargador devuelve `None` ≡ `MODEL_NOT_TRAINED`, `p_model=None`; nunca se fabrica una probabilidad).
+- El modelo defectuoso y el calibrador Platt derivado (`tennis_calibrator_platt_v1_20260801T202949Z`) figuran `INVALID` con motivo y SHA verificado. Los archivos NO se movieron, sobrescribieron ni borraron (conservados para auditoría).
+- `load_latest_tennis_artifact` (cableado en `scripts/run_e2e.py` → job horario y `/analyze`) aplica la política en cada carga. Hoy **no hay ningún modelo `ALLOWED`**: tenis queda en `MODEL_NOT_TRAINED` hasta una promoción explícita (editar el registro a mano tras revisión).
+- `train_tennis_calibrator` rechaza un modelo base que no sea `ALLOWED` o cuya `training_dataset_spec_version` ≠ `v2_preevent_one_per_event`.
+- No cubierto aquí (PR separado): cargadores MLB (`mlb_baseline.py:197` y `src/backtesting/dataset.py:107` tienen el mismo filtro solo-`recorded_at`).
+
+### Política de dataset v2 (`v2_preevent_one_per_event`)
+
+Por snapshot: `event_start_time` presente; `status=SCHEDULED`; `data_cutoff`, `computed_at`, `captured_at` estrictamente < `event_start_time`; anticipación ≥ 60 min; `rest_days` ≥ 0. Exactamente **un** snapshot por evento (el de mayor `computed_at`, desempate por id, regla fijada antes de ver resultados). Unidad de muestra = EVENTO. Reglas en `src/models/preevent_snapshots.py` (puro, reutilizado por dataset, features e inferencia).
+
+- Mínimo **150 eventos independientes** para reentrenar (`MIN_EVENTS_FOR_RETRAIN`); split ESTRICTAMENTE temporal 60/20/20 por `event_start_time` (`split_events_temporally`), particiones disjuntas por evento, cada una ≥ 30 eventos (`MIN_PARTITION_EVENTS`). Las categorías de ronda se descubren solo de train.
+- Test temporal evaluado UNA vez, contra baseline simple (tasa base de train): `PROMOTION_ELIGIBLE` solo si supera en Brier Y log-loss y se entrenó con mínimos ≥ política; si no, `REJECTED_CANDIDATE` (nunca activable, nunca se ajusta con el test). `PROMOTION_ELIGIBLE` NO activa nada: la activación exige entrada `ALLOWED`.
+- Umbral n ≥ 30 por bucket de calibración: intacto. `src/evaluation/calibration_pairs.py` cuenta eventos por bucket (vacíos = insuficientes) y expone `fully_covered`; no se afirma calibración si algún bucket no llega a 30.
+- `compute_tennis_features`: solo lo necesario — con status ≠ `SCHEDULED`, sin `start_time` o con corte ≥ inicio, `rest_days` queda `None` con warning "contexto no pre-evento"; `compute_rest_days` ignora partidos previos que no empezaron antes del partido a predecir. `predict_tennis_baseline` devuelve `MODEL_NOT_TRAINED` en esos contextos.
+
+### Corrección YES/NO (contrato semántico)
+
+`p_model_yes` = P(participante A gana) = P(YES del `market_id`) (D-2, §0.17). Lado YES: `(p, y)`; lado NO: `(1-p, 1-y)` — espejo exacto, mismo Brier, NO muestra independiente. Un par por `event_id`; `build_event_pairs` lanza `DuplicateEventPairError` ante duplicados. `signal_builder` sigue guardando `p_model_yes` en ambas oportunidades (sin cambio de comportamiento, documentado en su docstring); el único consumidor productivo (`analysis_service`) usa el lado YES.
+
+### Limitaciones restantes
+
+- Fotografía histórica (diagnóstico previo a este cambio, no verificada al escribir esta sección): universo limpio ≈372 eventos con resultado (364 con anticipación ≥ 60 min); **285 de 372 con `event_start_time` placeholder 04:00:00Z** (solo fecha, ~77%) → el orden temporal y la anticipación son aproximados para esa fracción de eventos. El conteo real debe recalcularse antes de cualquier reentrenamiento.
+- Con 2 features (descanso, ronda) es previsible que el modelo limpio no supere la tasa base: en ese caso queda registrado como candidato rechazado y se recomienda una fase separada de acumulación de datos y nuevas features (no se ajusta con el test).
+- Probabilidades concentradas en pocos buckets → 10 buckets × n ≥ 30 no es alcanzable en la práctica; no se baja el umbral.
+- `gate_report`/coverage: la semántica de `coverage_ratio` pasa de filas-snapshot a eventos.
+- `_resolve_validation_samples` mantiene el split de 2 vías como fallback (inalcanzable para artefactos v2, que persisten `validation_event_ids`).
+- Fuera de alcance (PRs separados): MLB y la infraestructura general de backtesting con el mismo filtro solo-`recorded_at`.
+- NO se entrenó ningún modelo, NO se modificó la base de datos, NO se activó ningún modelo, NO se reiniciaron servicios/LaunchAgents en este cambio.
+
+### Tramo 5A (Market Analysis Contract Readiness): CONTINÚA BLOQUEADO
+
+Este cambio **no desbloquea el Tramo 5A**: corrige un defecto de datos/metodología y contiene el modelo defectuoso, pero no aporta ninguna evidencia de calibración nueva. Bloqueadores todavía vigentes:
+
+- **D-3**: la fórmula de fee de Kalshi sigue sin verificar → `net_ev_status` queda `UNKNOWN` y `ENTER` sigue inalcanzable (sin cambios; ver §0.37).
+- **Sin modelo validado/activable**: el único modelo de tenis es el defectuoso, `INVALID`; no hay ningún modelo `ALLOWED` y ningún modelo limpio ha sido entrenado todavía. Sin `p_model` válido no hay calibración posible. MLB queda fuera de este cambio (PR separado).
+- **Sin evidencia de calibración**: los diagnósticos previos de 5A quedan invalidados por el defecto YES/NO; no existe todavía una medición válida (por evento, orientada correctamente) ni un límite inferior/probabilidad conservadora calibrada.
+- **Datos etiquetados insuficientes**: el umbral n ≥ 30 por bucket se mantiene **intacto** (sin reducir, sin reinterpretar, sin combinar deportes ni agregar límites) y no hay garantía de que los datos lo alcancen.
+
+Desbloqueo (fuera de esta rama): modelo limpio entrenado bajo la política v2 que supere la baseline fuera de muestra y sea promovido explícitamente, más evidencia de calibración por evento que cumpla los umbrales vigentes, más resolución de D-3. Requiere nueva decisión explícita.
+
+### Validación
+
+Verificada en la auditoría final previa al Commit 1 (`.venv/bin/python -m pytest -ra`):
+
+- Suite completa sin selectores: **1583 passed**, 0 failed, 0 skipped, 0 xfailed/xpassed (único warning: `NotOpenSSLWarning` de urllib3/LibreSSL, de entorno).
+- Pruebas focalizadas (registro, snapshots pre-evento, pares de calibración, baseline de tenis, calibrador, features, wiring del pipeline, script de entrenamiento): **141 passed**.
+- `git diff --check`: limpio (rastreados y archivos nuevos).
+- Commit 1: 19 archivos, +2002 −362.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
