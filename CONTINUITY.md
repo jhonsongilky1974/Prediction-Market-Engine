@@ -4370,6 +4370,75 @@ Ninguno autorizado. Cualquier entrenamiento, evaluación real o cableado exige p
 
 ---
 
+## 0.44 CIERRE FORMAL DEL PR #11: formato JSON de solo datos para artefactos de modelo (B1) (2026-10-04)
+
+Registra la implementación y el cierre Git del PR #11, el formato de artefactos de modelo en JSON estrictamente de datos (B1). §0.38–§0.43 se conservan sin modificar. Este PR añade **un formato y su verificación**; **no entrena, no evalúa candidatos reales, no promueve, no cablea, no hace alcanzable `ELEGIBLE` y no desbloquea el entrenamiento ni el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #11**: "Feat: add safe JSON model artifact format" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/11
+- **Estado según la API**: `state: closed`, `merged: true`, fusionado manualmente en GitHub por `jhonsongilky1974`. Creado el 2026-10-04T23:10:53Z. Antes de fusionar: `mergeable: true`, `mergeable_state: clean`, 0 reviews, 0 comentarios y 0 check-runs.
+- **Rama**: `feat/safe-json-artifact-format`. Dato histórico: al redactar este cierre, la rama existía todavía tanto localmente como en `origin` (ambas en el head `1bd0d9c…`). Su eliminación operativa queda pendiente para después del commit documental. Eliminarla no cambia el merge ni la evidencia conservada: el head y el merge commit permanecen en el historial de `main`.
+- **Head original** (commit único, "Feat: add safe JSON model artifact format"): `1bd0d9ca5a30424c6646aed9ad66ed84029da907`. **1 commit y 5 archivos nuevos: +1997 −0**.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `605589e55f681f991af43367c37718aa0cd927d0` ("Merge pull request #11 from jhonsongilky1974/feat/safe-json-artifact-format"). Padres: **primer padre** `8cdfb61a97555405317dd542010b41ab5589af7a` (tip anterior de `main`, cierre documental del PR #10) y **segundo padre/head** `1bd0d9ca5a30424c6646aed9ad66ed84029da907`. El hash abreviado correcto es `605589e`; durante la sincronización se mencionó por error `6058896`, y rige el valor de la API.
+- **Fecha del merge**: `merged_at` de la API = 2026-10-04T23:23:12Z (2026-10-04 19:23:12 -0400); el commit del merge lleva 19:23:11 -0400 (un segundo menos que el registro de la API).
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main` (fast-forward de 2 commits); `main`, `origin/main` y el remoto real idénticos en `605589e55f681f991af43367c37718aa0cd927d0`; working tree limpio. El head `1bd0d9c…` aparece exactamente una vez en `main` y hay un solo merge "pull request #11". El merge introduce 2 commits (el head y el propio merge).
+- **Descripción del PR**: se publicó con un enlace de pie distinto del autorizado (error de transcripción) y se corrigió manualmente a `https://claude.com/claude-code` antes de fusionar; la comparación con el texto autorizado, normalizando solo CRLF a LF y el salto final, resultó idéntica. Ningún otro campo, commit, archivo, hash, base o head cambió con esa corrección.
+
+### Archivos fusionados
+
+Cinco archivos nuevos (+1997 −0), sin ningún archivo preexistente modificado:
+
+- `SAFE_ARTIFACT_FORMAT_SPEC.md` (+108)
+- `src/models/safe_artifact_export.py` (+161)
+- `src/models/safe_artifact_format.py` (+393)
+- `tests/unit/test_safe_artifact_format.py` (+959)
+- `tests/unit/test_safe_artifact_parity.py` (+376)
+
+El árbol de `main` es idéntico al del head aprobado (`9a4dea4ae74ac9833b9e3f569bdaf15722de5119`). Los cinco archivos coinciden con el head por blob y por SHA-256 (primeros 16 caracteres: `1e51a5e1ab0ecd1f`, `ccc7ba3e09572244`, `baedb8c356cad1bb`, `06b0527510a932d4`, `7d9014184f126b78`, en el orden de la lista) y con el árbol de trabajo tras la sincronización. Frente al primer padre, el merge cambia exactamente esos cinco archivos.
+
+### Funcionalidad
+
+- **Formato JSON estrictamente de solo datos** para dos objetos ya ajustados: `imputed_standardized_logreg_v1` (`Pipeline(SimpleImputer(median) -> StandardScaler -> LogisticRegression)` binario, el baseline de tenis) y `platt_logreg_1d_v1` (`LogisticRegression` de una variable, calibrador Platt).
+- **Esquema cerrado**: claves exactas por nivel, `model_type` en lista cerrada, tipos exactos (se rechazan enteros donde van flotantes, `bool`, `null` y texto numérico), `classes` exactamente `[0, 1]`, dimensiones coherentes, columnas descartadas por el imputer representadas con `null`.
+- **Bytes canónicos y SHA-256 estable**: serialización con claves ordenadas, sin espacios, ASCII, flotantes en su representación más corta con ida y vuelta exacta, sin `NaN`/`Infinity` y con un único salto de línea final; el cargador exige que los bytes de entrada sean idénticos a esa serialización, de modo que cada artefacto tiene una única forma válida. El hash es el SHA-256 de los bytes completos y es el `artifact_sha256` con la semántica actual del registro y del libro, que este PR no conecta.
+- **Carga, validación y predicción sin ejecutar código**: `load_artifact(data, *, expected_sha256, expected_model_version)` comprueba, en este orden, tipo y tamaño de los bytes, el SHA-256 **antes de analizar nada**, UTF-8 estricto, análisis JSON con controles (claves duplicadas, constantes no finitas, enteros de más de 20 dígitos), validación estructural completa, igualdad con la forma canónica y `expected_model_version`; solo entonces construye un objeto inmutable. Límites: 262 144 bytes, hasta 256 columnas, |valor| ≤ 1e6. La predicción es una fórmula cerrada en Python puro. Los enteros de Python mayores que cualquier flotante se convierten en `ArtifactInputError` (no escapa `OverflowError`).
+- **Exportador aislado** (`export_imputed_logreg_pipeline`, `export_platt_logreg`) para objetos de scikit-learn **ya ajustados en memoria**: importación perezosa de scikit-learn y numpy dentro de las funciones, no lee archivos ni usa joblib/pickle, acepta solo tipos exactos (no subclases) y configuraciones cerradas, y comprueba que el cargador acepta los bytes antes de devolverlos.
+- **Sin sklearn, joblib ni pickle en el cargador seguro**: lo comprueban una prueba de AST (solo importa `hashlib`, `hmac`, `json`, `math`, `re`, `dataclasses` y `typing`; únicas llamadas de (de)serialización `json.loads` y `json.dumps`) y una prueba en un intérprete nuevo, con los módulos prohibidos bloqueados, que procesa todos los casos hostiles y comprueba `sys.modules` completo (con un canario que demuestra que el detector funciona).
+- **Ningún flujo existente invoca automáticamente el exportador**: ningún archivo de `src/`, `scripts/` ni `config/` importa los módulos nuevos, `src/models/__init__.py` está vacío y una prueba lo comprueba.
+
+### Validación
+
+Cifras de la ejecución más reciente, repetida sobre `main` tras el merge (el árbol es idéntico al del head aprobado); único warning `NotOpenSSLWarning` de urllib3/LibreSSL (de entorno):
+
+- **Pruebas focalizadas de B1**: **265 passed**, 0 failed, 0 skipped (formato 204, paridad 61).
+- **Suite completa (`tests/unit`)**: **2259 passed**, 0 failed, 0 skipped, 0 xfailed, 0 xpassed (1994 previas + 265 de B1). No se ejecutó `tests/integration` (escribe en `data/raw/`).
+- **Paridad numérica con scikit-learn 1.6.1** (Python 3.9.6): las pruebas exigen diferencia absoluta máxima ≤ 1e-12 y pasan. Medición fresca sobre `main` en 24 escenarios de pipeline (8 configuraciones por 3 semillas, con columnas siempre vacías, columnas constantes, una sola columna y hasta 256 columnas): diferencia máxima 3.830e-15; en Platt, sobre 1506 puntos incluidos 0.0 y 1.0: 1.110e-16.
+- **Mutaciones sobre los dos módulos nuevos** (ejecución fresca sobre `main` tras el merge, en una copia fuera del repositorio cuyos dos módulos son byte a byte idénticos a los de `main`, comprobado por SHA-256; el repositorio no se modificó): 35 definidos; **35 aplicados**; **0 patrones no aplicados**; **34 detectados** (al menos una prueba falla con el mutante aplicado); **1 no detectado, clasificado como equivalente por análisis**: la autoverificación del exportador (`load_artifact` tras serializar), redundante con `canonical_bytes`; **0 sobrevivientes reales**; 0 errores o timeouts. La copia quedó restaurada (265 passed). En rondas previas dos patrones no se aplicaron (el del tope de tamaño, por coincidencia ambigua, y el del BOM, por una secuencia de escape mal escrita en el patrón); se corrigieron y no se cuentan como sobrevivientes. Esas rondas dejaron además sobrevivientes que eran defensas redundantes entre capas (claves duplicadas, constantes no finitas, CR, BOM y `add_indicator`), y la auditoría encontró un defecto real (`OverflowError` con enteros gigantes); todo se corrigió reforzando pruebas y código antes del commit.
+- **Estilo y diff** (antes del commit, sobre los mismos archivos): `pyflakes` sin avisos (también repetido sobre `main`); `git diff --check` limpio y comprobación equivalente sin índice con 0 bytes de avisos para los cinco archivos; escaneo de BOM, CR, NUL y caracteres invisibles limpio, con el caso BOM de prueba en representación explícita.
+- **No existe CI configurado**: `check-runs` 0, estado combinado del commit `pending` con 0 estados, 0 workflows de GitHub Actions y sin carpeta `.github` en `main`. **"0 checks" significa que no hay CI, no que haya checks aprobados**: ningún check automático respaldó el merge.
+
+### Límites y fuera de alcance
+
+- **No se entrenó ni se evaluó ningún candidato real, no se usó el conjunto test y no se generaron artefactos reales.** Las pruebas de paridad ajustan modelos de scikit-learn sobre datos sintéticos en memoria y una prueba entrena con la política del proyecto sobre eventos sintéticos en `tmp_path`.
+- **No se modificaron** los cargadores heredados, `scripts/train_tennis_model.py`, `scripts/train_tennis_calibrator.py`, `config/`, `data/`, `src/orchestration/` ni el registro de producción (`config/model_registry.json`, hash `a1662c88…`, sin cambios).
+- **Siguen sin decidir**: almacenamiento duradero, migración de entrenamiento y cargadores a este formato, promoción y `REJECTED_CANDIDATE`. Siguen sin existir `--db-path` en los scripts de entrenamiento, el congelado de copias, el CLI del manifiesto y el proveedor de métricas del test.
+- **B1 no hace alcanzable `ELEGIBLE`**: el evaluador no cambió y sigue deteniéndose antes de deserializar.
+- **Float32**: el exportador exige atributos ajustados `float64`; un modelo ajustado con `float32` se rechaza (falla cerrado).
+- **Parámetros**: |valor| ≤ 1e6 (`scaler_scale` en (0, 1e6]), hasta 256 columnas, archivos de hasta 262 144 bytes, solo clasificación binaria con clases `[0, 1]` y solo las dos familias de modelo descritas; cualquier otra configuración se rechaza.
+- **Versiones de scikit-learn**: el rango declarado en `requirements.txt` es `>=1.3,<1.7`, pero la paridad solo se verifica con la versión instalada (1.6.1); un cambio semántico en otra versión solo se detectaría al ejecutar las pruebas de paridad con ella.
+- **Procedencia y validez estadística**: el formato y el SHA-256 prueban estructura e identidad de bytes, no procedencia, calidad ni validez estadística. La raíz de confianza del hash esperado (registro o libro) depende de Git, branch protection y revisión del PR; unos parámetros maliciosos pero válidos con un hash legítimamente registrado no se detectan.
+- **Deuda heredada**: los cargadores `load_latest_tennis_artifact` y `load_latest_tennis_calibrator` todavía deserializan joblib (§0.43); B1 no los migra.
+
+### Estado operativo
+
+- `main` local, `origin/main` y el remoto real sincronizados en el merge commit `605589e55f681f991af43367c37718aa0cd927d0`; working tree limpio.
+- Las ramas local y remota `feat/safe-json-artifact-format` siguen presentes (ambas en `1bd0d9ca5a30424c6646aed9ad66ed84029da907`); su eliminación queda pendiente y no se ha realizado.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable, un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.43: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
