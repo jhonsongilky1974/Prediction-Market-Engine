@@ -4185,6 +4185,83 @@ El desbloqueo requiere una nueva decisión explícita (ver §0.38).
 
 PR-2: cablear el calibrador en producción con caché e invalidación seguras, y/o un informe de preparación de calibración de solo lectura. No empezado; requiere autorización.
 
+## 0.41 CIERRE FORMAL DEL PR #9: memoización del calibrador por corrida en `run_decision_pipeline` (2026-10-04)
+
+Registra la implementación y el cierre Git del PR #9 (el segundo paso del plan posterior al PR #7, tras el guardián del calibrador de §0.40; §0.38, §0.39 y §0.40 se conservan sin modificar). Es un cambio de rendimiento y coherencia **sin efecto en producción hoy**; **no desbloquea el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #9**: "Perf: memoize calibrator loads per pipeline run" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/9
+- **Rama**: `perf/calibrator-per-run-memo`. Dato histórico: al redactar este cierre, la rama existía todavía tanto localmente como en `origin`. Su eliminación operativa queda pendiente para después del commit documental. Eliminarla no cambia el merge ni la evidencia conservada: el head original `dfd30404…` y el merge commit `a85d1aba…` permanecen en el historial de `main`.
+- **Head original** (commit de implementación, único, "Perf: memoize calibrator loads per pipeline run"): `dfd30404b975ca4f6058799b9f9e3e630db40ed9`. 2 archivos, +348 −4: `src/orchestration/decision_pipeline.py` (+26 −4) y `tests/unit/test_decision_pipeline_calibrator_memo.py` (nuevo, 322 líneas, 11 pruebas).
+- **Merge commit** (merge real de 2 padres, sin squash ni rebase): `a85d1aba5fa2cc33a1909c8798fd235c1808b388` ("Merge pull request #9 from jhonsongilky1974/perf/calibrator-per-run-memo"). Padres: `a2fa0847f395681fdf609da058913d05b4c4d841` (tip anterior de `main`) y `dfd30404b975ca4f6058799b9f9e3e630db40ed9`.
+- **Fecha del merge**: 2026-10-04T18:45:58Z (2026-10-04 14:45:58 -0400). Fusionado manualmente en GitHub; la API reporta `merged: true`, `state: closed`, `merge_commit_sha` igual al merge commit.
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main`; `main`, `origin/main` y el remoto real idénticos en `a85d1ab…`; working tree limpio. El PR quedó integrado exactamente una vez (1 merge "pull request #9", `dfd3040` aparece 1 vez en el historial, un solo commit introduce `calibrator_memo`).
+- El PR no tenía checks automáticos (0 check-runs, 0 reviews; sin GitHub Actions configurado).
+
+### Qué hace
+
+`run_decision_pipeline` llamaba a `load_calibrator_fn` una vez por registro (`decision_pipeline.py`, `_build_record_context`). Ahora:
+
+- **Memo local únicamente por invocación**: `calibrator_memo` es una variable local creada dentro de cada invocación de `run_decision_pipeline` (tras `load_artifact_fn`) y pasada a `_build_record_context`. No es global ni de módulo, no persiste ni se comparte entre corridas, entre solicitudes ni entre procesos, y no hay argumento mutable por defecto (el parámetro es opcional con valor `None`; sin memo, las llamadas directas se comportan como antes). Una prueba fija que `decision_pipeline` no tiene dict/lista/set a nivel de módulo.
+- **Resultados válidos y `None` almacenados por `model_version`**: para cada `model_version` base, `load_calibrator_fn` se invoca como máximo una vez por corrida y su resultado, sea un calibrador válido o `None` (rechazo fail-closed del guardián), se reutiliza. Se distingue clave ausente de clave presente con `None` (`in`, no `.get`).
+- **Versiones distintas separadas**: cada `model_version` se resuelve de forma independiente; el resultado de una no contamina a otra.
+- **`model_version` ausente o vacío no invoca el cargador**: `None` (comportamiento previo) y `""` (tratada como ausente desde este PR) no invocan el cargador ni crean entrada en el memo. Cambio deliberado de un caso límite: antes `""` sí invocaba al cargador; ningún `predict_fn` real la produce y el guardián la rechazaría.
+- **Excepciones no almacenadas**: si `load_calibrator_fn` lanza, no se guarda nada; la excepción se propaga igual que antes (el registro se omite en `summary.skipped_errors`) y el siguiente registro vuelve a intentar. Un éxito posterior sí se memoiza.
+- **Guardián fail-closed preservado**: el memo envuelve la llamada al cargador y no evita ninguna comprobación (`ALLOWED`, SHA-256, `metadata_sha256`, vínculo de `base_model_version`, `file_path` de §0.40), que corren íntegras la primera vez por `model_version`. Sin fallback silencioso: un rechazo se reutiliza como `None`, nunca se sustituye por otro calibrador. No cambia selección, validación ni hashes: solo cuántas veces se invoca el cargador.
+
+### Decisión de diseño documentada del PR #9: sin caché entre corridas
+
+Decisión tomada en este PR y documentada aquí: la memoización es **solo por invocación**; no se añadió ni se prevé una caché con TTL, global, entre corridas, entre solicitudes ni entre procesos. Fundamentos:
+
+- La auditoría previa al PR midió que el costo de CPU de una llamada completa al guardián, con los artefactos reales de entonces, es despreciable frente al resto del pipeline por registro. Esa medición fue una fotografía del momento de la auditoría; **no se conserva aquí como cifra permanente**.
+- Los beneficios reales del memo son la coherencia dentro de una corrida (todos los registros de una corrida usan el mismo resultado) y evitar el ruido de log de un rechazo repetido por registro, no el rendimiento de CPU.
+- `run_e2e` es un proceso nuevo en cada ejecución del job horario, y `/analyze` vuelve a leer el registro y los artefactos en cada solicitud, de modo que una promoción manual rige sin reiniciar. Una caché entre corridas, solicitudes o procesos no aportaría beneficio y arriesgaría usar artefactos alterados o estado antiguo.
+
+### Validación
+
+Ejecutada sobre la rama antes del merge (`pytest -ra -p no:cacheprovider`), en todas con **0 failed, 0 skipped y 0 xfailed/xpassed**; único warning `NotOpenSSLWarning` de urllib3/LibreSSL (de entorno):
+
+- Memo + `decision_pipeline`: **21 passed**.
+- Pruebas pertinentes (memo, `decision_pipeline`, guardián del calibrador, registro, calibrador, baseline de tenis): **239 passed**.
+- Suite completa: **1731 passed**.
+- `git diff --check`: limpio.
+- **Evidencia de mutación** (código restaurado tras cada una): retirar el memo (no guardar) hace fallar **7 de 11** pruebas nuevas; volver a `is not None` (la cadena vacía invoca el cargador) hace fallar 1; no memoizar `None`, 3; clave que ignora `model_version`, 1; tragar la excepción y memoizar `None`, 2; memo global de módulo, 6 u 8.
+
+La suite no se volvió a ejecutar sobre `main` tras el merge; el merge commit no añade contenido propio más allá de unir ambas líneas. La suite de integración conserva su comportamiento previo de escribir archivos en `data/raw/` (gitignored, no aparecen en Git).
+
+### Producción, modelos y datos
+
+- **Producción todavía no cablea el calibrador**: `SPORT_ADAPTERS[Sport.MLB]` y `SPORT_ADAPTERS[Sport.TENNIS]` siguen con `load_calibrator_fn = None` y `scripts/run_e2e.py` no se modificó. El cambio es inerte hoy: el cargador solo se invoca cuando hay `model_version`, y no existe ningún modelo ni calibrador `ALLOWED`.
+- **El cableado queda para el GitHub PR #10** (no empezado): requiere un calibrador candidato que cumpla `CALIBRATION_SPEC.md` §6 y autorización explícita, y revertir la decisión documentada en `scripts/run_e2e.py`. Cambiará decisiones una vez exista un calibrador `ALLOWED`, porque `signal_builder` sustituye `p_model` por el calibrado.
+- **No se entrenó ni activó ningún modelo.** No se modificaron datos, base de datos, artefactos, `config/model_registry.json`, logs, LaunchAgents ni servicios. No se cambiaron umbrales ni criterios de reapertura. MLB, backtesting y fees sin cambios.
+- El PR #9 no modificó CONTINUITY.md; esta sección §0.41 constituye el cierre documental posterior al merge.
+
+### Riesgos y limitaciones conocidas
+
+- **Un rechazo (`None`) persiste durante la corrida**: si el registro cambia a mitad de una corrida, esa corrida conserva el resultado memoizado; la siguiente relee.
+- **Inconsistencia residual**: el modelo base (`load_artifact_fn`, al inicio de la corrida) y el calibrador (en el primer registro con `model_version`) leen el registro en momentos distintos. Un cambio del registro o del archivo del modelo base entre ambas lecturas es posible pero improbable y exige acceso de escritura; el guardián verifica lo que hay en disco en ese momento, no el modelo ya cargado en memoria. El memo congela el estado tras el primer registro.
+- La clave `model_version` basta mientras el cargador sea función de esa clave (`models_dir` y registro fijos por adaptador); un cargador con estado mutable quedaría congelado durante la corrida.
+- Sin CI configurado: ningún check automático respaldó el merge.
+- Rollback: `git revert` del merge; no hay estado persistente.
+- Pendientes ya documentados en §0.38, §0.39 y §0.40 y fuera de este PR: calibrador entrenado sin entrada de registro automática (promoción manual con hashes), `file_path` absolutas sensibles al traslado del repositorio, selección textual de versión, protección por registro de los cargadores MLB, filtro solo-`recorded_at` en `mlb_baseline.py:197` y `src/backtesting/dataset.py:107`, y uso de `build_event_pairs`/`compute_calibration_coverage` en diagnósticos reales.
+
+### Tramo 5A: PERMANECE BLOQUEADO
+
+Este PR **no desbloquea el Tramo 5A**: es un cambio de rendimiento y coherencia que no aporta evidencia de calibración ni cambia ningún criterio. Bloqueadores todavía vigentes:
+
+- **D-3**: la fórmula de fee de Kalshi sigue sin verificar → `net_ev_status` queda `UNKNOWN` y `ENTER` sigue inalcanzable.
+- **Sin modelo limpio entrenado y `ALLOWED`**: el único modelo de tenis es el defectuoso (`INVALID`); no hay ningún modelo o calibrador habilitado, y el modelo MLB tampoco existe.
+- **Sin medición de calibración válida**: no hay evidencia por evento, orientada correctamente, ni límite inferior/probabilidad conservadora calibrada.
+- **Datos etiquetados insuficientes**: el umbral n ≥ 30 por bucket se mantiene intacto (sin reducir, sin reinterpretar, sin combinar deportes ni agregar límites) y no hay garantía de que los datos lo alcancen.
+- **Fugas pendientes fuera de tenis**: MLB y el backtesting general conservan el filtro solo-`recorded_at` (PRs separados).
+
+El desbloqueo requiere una nueva decisión explícita (ver §0.38).
+
+### Siguiente paso previsto (sin iniciar)
+
+GitHub PR #10: cableado de `load_latest_tennis_calibrator` en `SPORT_ADAPTERS[Sport.TENNIS]`, sujeto a que exista un calibrador candidato que cumpla `CALIBRATION_SPEC.md` §6 y a autorización explícita. No empezado.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
