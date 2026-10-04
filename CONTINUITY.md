@@ -4291,6 +4291,85 @@ Sin cambios: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin
 
 ---
 
+## 0.43 CIERRE FORMAL DEL PR #10: gobernanza fail-closed de la evaluación del calibrador de tenis (2026-10-04)
+
+Registra la implementación y el cierre Git del PR #10. §0.42 (procedimiento de cierre y ancla del libro) y §0.38–§0.41 se conservan sin modificar. Este PR añade **gobernanza y evaluación**; **no entrena, no evalúa candidatos reales, no promueve, no cablea y no desbloquea el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #10**: "Feat: add fail-closed calibration governance" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/10
+- **Rama**: `feat/calibration-governance`. Dato histórico: al redactar este cierre, la rama existía todavía tanto localmente como en `origin` (ambas en el head `dd12f3c…`). Su eliminación operativa queda pendiente para después del commit documental. Eliminarla no cambia el merge ni la evidencia conservada: el head `dd12f3c…` y el merge commit `799b0ff…` permanecen en el historial de `main`.
+- **Head original** (commit único, "Feat: add fail-closed calibration governance"): `dd12f3c9564783d00d0856202c597f1b1f49861a`. **1 commit y 16 archivos: 13 nuevos y 3 modificados** (+4415 −11).
+- **Merge commit** (merge real de 2 padres, sin squash ni rebase): `799b0ff49a61215d56e8948982dd323ab1f2dc40` ("Merge pull request #10 from jhonsongilky1974/feat/calibration-governance"). Padres: **primer padre** `9a2e2e1fbe9005621f9f916c7715a4ddde81f7d3` (tip anterior de `main`) y **segundo padre/head** `dd12f3c9564783d00d0856202c597f1b1f49861a`.
+- **Fecha del merge**: 2026-10-04T22:01:42Z (2026-10-04 18:01:42 -0400; el commit del merge lleva 18:01:41 -0400). Fusionado manualmente en GitHub por `jhonsongilky1974`; la API reporta `merged: true`, `state: closed`, `merge_commit_sha` igual al merge commit.
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main`; `main`, `origin/main` y el remoto real idénticos en `799b0ff…`; working tree limpio. El head `dd12f3c…` aparece exactamente una vez en `main` y hay un solo merge "pull request #10". Los 16 blobs de `main` coinciden con los del head (el árbol de `main` es idéntico al del head).
+- Antes de fusionar, el PR figuraba `mergeable: true` y `mergeable_state: clean`, con 0 reviews, 0 comentarios y 0 check-runs. **El repositorio no tiene CI configurado**: ningún check automático respaldó el merge.
+
+### Archivos
+
+- **Nuevos (13)**: `governance/calibration/README.md`, `governance/calibration/preregistration_template.md`, `scripts/evaluate_tennis_calibrator.py`, `src/evaluation/calibration_governance.py`, `src/evaluation/calibration_verdict.py`, `src/evaluation/candidate_registry.py`, `tests/unit/calibration_governance_factories.py`, `tests/unit/test_calibration_governance.py`, `tests/unit/test_calibration_governance_regressions.py`, `tests/unit/test_calibration_verdict.py`, `tests/unit/test_candidate_registry.py`, `tests/unit/test_evaluate_tennis_calibrator_script.py`, `tests/unit/test_train_tennis_calibrator_script.py`.
+- **Modificados (3)**: `CALIBRATION_SPEC.md` (enmienda normativa de §6 y §2), `CONTINUITY.md` (solo §0.42, +29 líneas) y `scripts/train_tennis_calibrator.py` (+37 −11; opción `--candidate-registry`).
+
+### Alcance fusionado
+
+- **Veredicto determinista con ECE y Brier**, `tau = 1e-4` (`delta = crudo − calibrado`; menor es mejor), con comparaciones en `Decimal` exacto sobre la representación más corta de cada `float` para eliminar el ruido de coma flotante en los bordes de τ. Escalares NumPy admitidos de forma explícita (`numpy.floating`, `numpy.integer`); se rechazan `bool_`, `Decimal`, `Fraction`, texto, NaN e infinitos.
+- **Estados `ERROR`, `INCONCLUSO`, `RECHAZADO`, `ELEGIBLE_PRELIMINAR`, `ELEGIBLE` y `ATTEMPT_ABANDONED`** (este último, terminal del libro: exige motivo, autor, fecha e intento existente; sin métricas; nunca puede volverse `ELEGIBLE`). `n_validation < 30` o `n_test < 30` produce `INCONCLUSO`; `ERROR` queda reservado para datos inválidos o inconsistencias.
+- **El test se usa una sola vez como veto y nunca para elevar**: solo se lee tras `ELEGIBLE_PRELIMINAR`, con `TEST_READ` escrito antes de calcular y `TEST_RESULT` después; la lectura interrumpida queda consumida. `evaluate_test_veto` solo acepta un preliminar originado en `evaluate_validation`.
+- **Libro append-only verificable contra el prefijo aceptado en `main`** (`verify-ledger`): cadena de hashes más comparación byte a byte con el libro de `main`/`origin/main`; solo se pueden añadir entradas. `evaluate` solo opera con preregistro, snapshot, modelo base y calibrador del intento ya aceptados en `main`; sin base verificable falla cerrado. Un intento abierto debe cerrarse (`FINAL_VERDICT` o `ATTEMPT_ABANDONED`) antes de abrir otro; mínimo ≥ 30 eventos nuevos en validación y ≥ 150 en total entre intentos.
+- **Manifiesto, sidecars y `trained_at`**: `evaluate_attempt` queda atado al SHA-256 exacto del manifiesto registrado; `models_dir` explícito obligatorio; SHA-256 de artefacto y sidecar `.metadata.json` verificados sin `mtime`; `trained_at` debe ser el mismo instante en manifiesto, libro y sidecar (el preregistro solo debe preceder al entrenamiento).
+- **Registro candidato aislado bajo `candidate_models`** (estado `CANDIDATE_EVALUATION`), separado de `config/model_registry.json`; rechaza la clave `models`, el registro de producción y los symlinks.
+- **Detención antes de deserializar joblib/pickle**: el evaluador no importa ni invoca ningún deserializador; si una evaluación lo requiriera (veto del test de un `ELEGIBLE_PRELIMINAR`) lanza `SafeLoadRequiredError` sin escribir nada en el libro. Por eso **`ELEGIBLE` no es alcanzable hoy**: exige primero carga segura auditada y almacenamiento duradero verificable.
+- API pública sin atajos: `append_entry` pasó a interno (`_append_entry`); el bloqueo de archivo `fcntl` queda encapsulado y en plataformas no POSIX falla de forma clara sin escribir.
+- **Enmienda normativa**: el README de gobernanza sustituye, para toda evaluación posterior, el criterio de aceptación de `CALIBRATION_SPEC.md` §6 y amplía su §2; en caso de conflicto prevalece el README. Distinciones obligatorias: "cumple el mínimo operativo" ≠ `ELEGIBLE` ≠ "demuestra mejora estadística" (no definido ni alcanzable hoy) ≠ `PROMOVIDO` (solo por autorización humana vía PR sobre `config/model_registry.json`).
+
+### Validación
+
+Ejecutada sobre la rama antes del merge (`pytest -ra -p no:cacheprovider`); único warning `NotOpenSSLWarning` de urllib3/LibreSSL (de entorno):
+
+- **Pruebas focalizadas**: **287 passed**, 0 failed (governance 48, regresiones F1–F9 62, veredicto 115, registro candidato 33, script de evaluación 20, script de entrenamiento 9).
+- **Suite completa (`tests/unit`)**: **1994 passed, 0 failed, 0 skipped, 0 xfailed, 0 xpassed**. No se ejecutó `tests/integration` (escribe en `data/raw/`). La suite no se volvió a ejecutar sobre `main` tras el merge; el árbol de `main` es idéntico al del head probado.
+- **Evidencia de mutación (21 mutantes)**: **19 detectados, 1 equivalente y 1 que reveló un hueco posteriormente cubierto**. El equivalente es "sin comprobar menos entradas" (si el prefijo coincide byte a byte ya hay al menos tantas entradas). El hueco fue la comprobación de `trained_at` del sidecar al registrar `BASE_TRAINED`: se añadió una prueba y la mutación pasó a ser detectada. Código restaurado tras cada mutación.
+- **Harnesses adversariales previos**: `adv1` (veredicto) y `adv3` (registro candidato) reejecutados con código de salida 0; `adv2` solo corre hasta su escenario L3 y `adv4` usa la API retirada `append_entry`, por lo que sus escenarios restantes quedan cubiertos por las pruebas de regresión y las mutaciones, no por una repetición literal.
+- **`git diff --check`**: limpio.
+
+### Producción, modelos y datos
+
+- **`config/model_registry.json` y `data/raw` no fueron modificados** (el blob del registro es idéntico en el primer padre y en `main`; el único archivo rastreado bajo `data/raw` es `.gitkeep`, sin cambios). Tampoco se modificó código de producción heredado: ningún archivo de `src/models`, `src/calibration`, `src/orchestration`, `src/pipelines`, `src/api` ni `config`; el único script preexistente modificado es `scripts/train_tennis_calibrator.py`, solo para añadir `--candidate-registry` (sin cableado de producción).
+- **No se entrenó, no se promovió, no se cableó y no se produjeron artefactos, blobs, preregistros ficticios ni entradas reales del ledger**: no existe ningún `.joblib`, `.pkl`, `.db` ni `ledger.jsonl`; `governance/calibration/` contiene solo el README y la plantilla. `SPORT_ADAPTERS[...].load_calibrator_fn` sigue siendo `None` y `scripts/run_e2e.py` no se modificó.
+- La referencia secundaria de §0.42 (`seq` y `entry_sha256` de la última entrada aceptada) **no se registra aquí porque todavía no existe ninguna entrada del libro**. Este cierre no crea ningún cierre de intento.
+
+### Limitaciones conocidas
+
+- **SHA-256 demuestra identidad de bytes, no seguridad, procedencia, calidad ni validez estadística.**
+- **Los cargadores heredados `load_latest_tennis_artifact` y `load_latest_tennis_calibrator` todavía deserializan joblib** (hash verificado contra el registro, pero se deserializa). Es deuda separada heredada de los PR #7 y PR #8; este PR no los modificó.
+- **El ancla depende de la protección de `main` y de la revisión del PR**: quien pueda reescribir `main` puede reescribirlo todo; la referencia en este documento es evidencia de cierre, no un ancla criptográfica independiente.
+- **Todavía podrían calcularse métricas del test fuera del flujo gobernado**; la revisión del PR debe comprobar que no ocurrió.
+- **No existe CI**: ningún check automático respaldó el merge.
+- Sin pruebas de integración ni ejecución real: ningún calibrador real fue entrenado ni evaluado.
+- Pendientes ya documentados en §0.38–§0.41 y fuera de este PR: calibrador entrenado sin entrada de registro automática, `file_path` absolutas sensibles al traslado del repositorio, selección textual de versión, protección por registro de los cargadores MLB, filtro solo-`recorded_at` en `mlb_baseline.py:197` y `src/backtesting/dataset.py:107`.
+
+### Corrección de referencia sobre el "PR #10" previsto en §0.41
+
+§0.41 (sin modificar) anticipaba como "GitHub PR #10" el cableado de `load_latest_tennis_calibrator` en `SPORT_ADAPTERS[Sport.TENNIS]`. El número #10 lo asignó GitHub a **este** PR de gobernanza, no al cableado. El cableado **no se ha iniciado**, sigue sin autorizarse y requeriría un calibrador `ELEGIBLE` (hoy inalcanzable) y autorización explícita.
+
+### Entrenamiento y Tramo 5A: PERMANECEN BLOQUEADOS
+
+El **entrenamiento permanece BLOQUEADO** hasta que exista almacenamiento duradero y verificable para datasets congelados, modelos y demás blobs, y un mecanismo separado y auditado de carga segura. El **Tramo 5A permanece BLOQUEADO**; este PR no aporta evidencia de calibración ni cambia ningún criterio. Bloqueadores todavía vigentes:
+
+- **D-3**: la fórmula de fee de Kalshi sigue sin verificar → `net_ev_status` queda `UNKNOWN` y `ENTER` sigue inalcanzable.
+- **Sin modelo limpio entrenado y `ALLOWED`**: el único modelo de tenis es el defectuoso (`INVALID`); no hay ningún modelo o calibrador habilitado, y el modelo MLB tampoco existe.
+- **Sin medición de calibración válida**: no hay evidencia por evento, orientada correctamente, ni límite inferior/probabilidad conservadora calibrada.
+- **Datos etiquetados insuficientes**: el umbral n ≥ 30 por bucket se mantiene intacto (sin reducir, sin reinterpretar, sin combinar deportes ni agregar límites) y no hay garantía de que los datos lo alcancen.
+- **Fugas pendientes fuera de tenis**: MLB y el backtesting general conservan el filtro solo-`recorded_at` (PRs separados).
+
+El desbloqueo requiere una nueva decisión explícita (ver §0.38).
+
+### Siguiente paso previsto (sin iniciar)
+
+Ninguno autorizado. Cualquier entrenamiento, evaluación real o cableado exige primero resolver el almacenamiento duradero y la carga segura auditada, y una decisión explícita separada.
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
