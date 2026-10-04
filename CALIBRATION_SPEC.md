@@ -305,6 +305,24 @@ forma clara, se reporta en la auditoría final como hallazgo y se detiene
 para pedir instrucción explícita en vez de desplegar algo que la propia
 evidencia contradice -- no es una decisión que deba tomarse en silencio.
 
+> **Enmienda (gobernanza de la evaluación; sustitución normativa).** Para toda evaluación de
+> calibradores de tenis posterior a la incorporación a `main` de `governance/calibration/README.md`,
+> ese documento **sustituye el criterio de aceptación de este §6** (`calibrated_ece_oof <=
+> raw_ece_oof` o "diferencia marginal") y **amplía §2**: la partición de test del modelo base,
+> que §2 no utilizaba, se consulta exactamente una vez, solo como veto y solo tras
+> `ELEGIBLE_PRELIMINAR`. En caso de conflicto prevalece el README. Veredicto determinista con
+> τ = 1e-4 sobre ECE y Brier (menor es mejor): un empate o una diferencia dentro de τ es
+> `INCONCLUSO`; ni el ECE ni el Brier pueden empeorar más que τ; al menos una debe mejorar más que
+> τ; "marginal" queda definido como τ y solo para el no deterioro. Mínimo operativo `n ≥ 30` en
+> validación y test; libro append-only anclado en Git `main`.
+> **Distinciones obligatorias:** "cumple el mínimo operativo" ≠ `ELEGIBLE` ≠ "demuestra mejora
+> estadística" (no definido ni alcanzable hoy) ≠ `PROMOVIDO` (solo por autorización humana vía PR
+> sobre `config/model_registry.json`). `ELEGIBLE` solo permite *proponer* una promoción. El resto de
+> este §6 (persistir siempre el calibrador; reportar y detenerse ante un deterioro claro; no cablear
+> en silencio) se conserva. Ni el entrenamiento ni la evaluación real están autorizados mientras no
+> exista almacenamiento duradero y verificable y un mecanismo auditado de carga segura (el
+> evaluador no deserializa joblib/pickle). `scripts/run_e2e.py` sigue sin cablear el calibrador.
+
 ---
 
 ## 7. Pruebas
