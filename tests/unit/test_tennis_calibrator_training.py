@@ -18,7 +18,11 @@ from src.models.tennis_baseline import (
     train_tennis_baseline_model,
 )
 from src.storage.history_repository import HistoryRepository
-from tests.unit.tennis_preevent_factories import add_preevent_sample, promote_artifacts_for_test
+from tests.unit.tennis_preevent_factories import (
+    add_preevent_sample,
+    promote_artifacts_for_test,
+    promote_calibrators_for_test,
+)
 
 # Mínimos relajados SOLO para probar la mecánica con pocos eventos: el
 # modelo base resultante es REJECTED_CANDIDATE por política y solo se carga
@@ -89,11 +93,15 @@ def test_load_latest_tennis_calibrator_matches_exact_base_model_version(tmp_path
     assert base_status == ModelStatus.TRAINED
     train_tennis_calibrator(hist, models_dir=models_dir, cv_folds=5, registry=registry)
 
-    calibrator = load_latest_tennis_calibrator(base_artifact.model_version, models_dir=models_dir)
+    # Fail-closed (CONTINUITY.md §0.38): modelo base Y calibrador deben figurar ALLOWED.
+    full_registry = promote_calibrators_for_test(models_dir, registry)
+    calibrator = load_latest_tennis_calibrator(base_artifact.model_version, models_dir=models_dir, registry=full_registry)
     assert calibrator is not None
     assert calibrator.calibration_method == "PLATT_V1"
 
-    mismatched = load_latest_tennis_calibrator("some_other_model_version_never_trained", models_dir=models_dir)
+    mismatched = load_latest_tennis_calibrator(
+        "some_other_model_version_never_trained", models_dir=models_dir, registry=full_registry
+    )
     assert mismatched is None
 
 

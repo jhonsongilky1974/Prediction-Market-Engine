@@ -101,3 +101,23 @@ def promote_artifacts_for_test(models_dir: Path) -> ModelRegistryPolicy:
             model_version=data["model_version"], status=RegistryStatus.ALLOWED, reason="test", artifact_sha256=sha
         )
     return ModelRegistryPolicy(entries=entries)
+
+
+def promote_calibrators_for_test(models_dir: Path, base_policy: ModelRegistryPolicy) -> ModelRegistryPolicy:
+    """Extiende `base_policy` con una entrada `ALLOWED` por cada calibrador
+    Platt de `models_dir`: SHA-256 real del `.joblib`, `base_model_version`
+    del metadato y `metadata_sha256` real del `.metadata.json`. Solo para
+    tests (tmp_path); en producción la promoción exige editar
+    `config/model_registry.json` a mano."""
+    entries = dict(base_policy.entries)
+    for meta_path in sorted(Path(models_dir).glob("tennis_calibrator_platt_v1_*.metadata.json")):
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        entries[data["calibrator_version"]] = RegistryEntry(
+            model_version=data["calibrator_version"],
+            status=RegistryStatus.ALLOWED,
+            reason="test",
+            artifact_sha256=hashlib.sha256(Path(data["file_path"]).read_bytes()).hexdigest(),
+            base_model_version=data["base_model_version"],
+            metadata_sha256=hashlib.sha256(meta_path.read_bytes()).hexdigest(),
+        )
+    return ModelRegistryPolicy(entries=entries)
