@@ -44,7 +44,12 @@ from config.settings import DATA_MODELS_DIR
 from src.features.registry import CURRENT_FEATURE_SET_VERSION
 from src.features.tennis_features import TennisFeatureInputs, compute_tennis_features
 from src.models.base import ModelStatus, PModelOutput
-from src.models.model_registry_policy import ModelRegistryPolicy, load_model_registry
+from src.models.model_registry_policy import (
+    ModelRegistryPolicy,
+    load_model_registry,
+    read_bytes_once,
+    resolve_declared_path,
+)
 from src.models.preevent_snapshots import (
     MIN_SNAPSHOT_LEAD_MINUTES,
     PreeventViolation,
@@ -566,13 +571,6 @@ def _save_tennis_artifact_metadata(artifact: TennisTrainedArtifact, models_dir: 
     return path
 
 
-def _file_sha256(path: Path) -> Optional[str]:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
-
-
 def load_latest_tennis_artifact(
     models_dir: Path = DATA_MODELS_DIR, registry: Optional[ModelRegistryPolicy] = None
 ) -> Optional[Tuple[Any, TennisTrainedArtifact]]:
@@ -597,17 +595,31 @@ def load_latest_tennis_artifact(
 
     latest_data: Optional[dict] = None
     latest_trained_at: Optional[datetime] = None
+    latest_payload: Optional[bytes] = None
     for meta_path in sorted(models_dir.glob("tennis_baseline_*.metadata.json")):
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
             model_version = data["model_version"]
             trained_at = datetime.fromisoformat(data["trained_at"])
-            file_path = Path(data["file_path"])
+            data["file_path"]  # campo obligatorio de la metadata
         except (OSError, ValueError, KeyError) as exc:
             logger.error("metadata de modelo de tenis ilegible %s: %r -- se rechaza", meta_path, exc)
             continue
 
-        activable, reason = policy.check(model_version, _file_sha256(file_path))
+        # El artefacto se localiza por `metadata.file_path` (contrato previo),
+        # validado por `resolve_declared_path` (archivo regular DENTRO de
+        # `models_dir`, sin traversal ni symlinks) y se lee UNA sola vez: el
+        # SHA-256 verificado y la deserialización posterior usan exactamente
+        # estos bytes (sin ventana TOCTOU).
+        artifact_path = resolve_declared_path(models_dir, data["file_path"])
+        if artifact_path is None:
+            logger.warning(
+                "modelo de tenis %s RECHAZADO (no activable): file_path %r no válido, ausente o fuera de %s",
+                model_version, data["file_path"], models_dir,
+            )
+            continue
+        payload = read_bytes_once(artifact_path)
+        activable, reason = policy.check_bytes(model_version, payload)
         if not activable:
             logger.warning("modelo de tenis %s RECHAZADO (no activable): %s", model_version, reason)
             continue
@@ -622,13 +634,16 @@ def load_latest_tennis_artifact(
         if latest_trained_at is None or trained_at > latest_trained_at:
             latest_trained_at = trained_at
             latest_data = data
+            latest_payload = payload
 
-    if latest_data is None:
+    if latest_data is None or latest_payload is None:
         return None
+
+    import io
 
     import joblib
 
-    model = joblib.load(latest_data["file_path"])
+    model = joblib.load(io.BytesIO(latest_payload))
     artifact = TennisTrainedArtifact(
         model_version=latest_data["model_version"],
         sport=latest_data["sport"],

@@ -17,6 +17,10 @@ from src.models.model_registry_policy import (
     RegistryEntry,
     RegistryStatus,
     load_model_registry,
+    read_bytes_once,
+    resolve_declared_path,
+    resolve_in_dir,
+    sha256_hex,
 )
 from src.models.tennis_baseline import load_latest_tennis_artifact
 
@@ -227,3 +231,105 @@ def test_production_adapter_uses_the_fail_closed_loader():
     from src.models.schemas import Sport
 
     assert SPORT_ADAPTERS[Sport.TENNIS].load_artifact_fn is load_latest_tennis_artifact
+
+
+# --- helpers genéricos públicos y esquema de calibradores (CONTINUITY.md §0.38) ---
+
+
+def test_sha256_hex_matches_hashlib_and_read_bytes_once_returns_none_when_unreadable(tmp_path):
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"payload")
+    assert sha256_hex(b"payload") == hashlib.sha256(b"payload").hexdigest()
+    assert read_bytes_once(f) == b"payload"
+    assert read_bytes_once(tmp_path / "missing.bin") is None
+    assert read_bytes_once(tmp_path) is None  # un directorio no es legible como archivo
+
+
+def test_check_bytes_hashes_the_given_payload_and_rejects_missing_or_different_bytes():
+    policy = ModelRegistryPolicy(entries={"m": _allowed("m", sha256_hex(b"good"))})
+    assert policy.check_bytes("m", b"good")[0] is True
+    assert policy.check_bytes("m", b"other")[0] is False
+    ok, reason = policy.check_bytes("m", None)
+    assert ok is False and "SHA-256" in reason
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "../x", "a/b", "a\\b", "x\x00y", "/etc/passwd", "sub/../x.joblib"])
+def test_resolve_in_dir_rejects_unsafe_names(tmp_path, name):
+    assert resolve_in_dir(tmp_path, name) is None
+
+
+def test_resolve_in_dir_accepts_plain_file_names_and_rejects_symlinks_escaping_the_directory(tmp_path):
+    assert resolve_in_dir(tmp_path, "model.joblib") == tmp_path.resolve() / "model.joblib"
+    outside = tmp_path.parent / "outside.joblib"
+    outside.write_bytes(b"x")
+    (tmp_path / "link.joblib").symlink_to(outside)
+    assert resolve_in_dir(tmp_path, "link.joblib") is None
+
+
+def test_allowed_calibrators_for_base_returns_only_allowed_entries_bound_to_that_base():
+    def cal(version, status, base):
+        return RegistryEntry(version, status, "t", "s", base_model_version=base, metadata_sha256="m")
+
+    policy = ModelRegistryPolicy(entries={
+        "c_ok": cal("c_ok", RegistryStatus.ALLOWED, "base"),
+        "c_invalid": cal("c_invalid", RegistryStatus.INVALID, "base"),
+        "c_other": cal("c_other", RegistryStatus.ALLOWED, "other"),
+        "c_unbound": cal("c_unbound", RegistryStatus.ALLOWED, None),
+    })
+    assert [e.model_version for e in policy.allowed_calibrators_for_base("base")] == ["c_ok"]
+
+
+def test_registry_file_parses_calibrator_binding_and_metadata_hash(tmp_path):
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({"models": [{
+        "model_version": "tennis_calibrator_platt_v1_x", "status": "ALLOWED", "artifact_sha256": "a",
+        "base_model_version": "tennis_baseline_logreg_v1_y", "metadata_sha256": "b",
+    }, {"model_version": "tennis_baseline_logreg_v1_y", "status": "ALLOWED", "artifact_sha256": "c"}]}), encoding="utf-8")
+
+    policy = load_model_registry(path)
+
+    assert policy.load_error is None
+    entry = policy.entries["tennis_calibrator_platt_v1_x"]
+    assert (entry.base_model_version, entry.metadata_sha256) == ("tennis_baseline_logreg_v1_y", "b")
+    assert policy.entries["tennis_baseline_logreg_v1_y"].base_model_version is None  # campos opcionales
+
+
+def test_resolve_in_dir_require_regular_file_and_rejects_every_symlink(tmp_path):
+    (tmp_path / "real.joblib").write_bytes(b"x")
+    (tmp_path / "adir.joblib").mkdir()
+    (tmp_path / "link.joblib").symlink_to(tmp_path / "real.joblib")  # symlink interno hacia un archivo interno
+
+    assert resolve_in_dir(tmp_path, "real.joblib", require_regular_file=True) == tmp_path.resolve() / "real.joblib"
+    assert resolve_in_dir(tmp_path, "missing.joblib") == tmp_path.resolve() / "missing.joblib"  # sin exigir existencia
+    assert resolve_in_dir(tmp_path, "missing.joblib", require_regular_file=True) is None
+    assert resolve_in_dir(tmp_path, "adir.joblib", require_regular_file=True) is None
+    assert resolve_in_dir(tmp_path, "link.joblib") is None
+    assert resolve_in_dir(tmp_path, 7) is None  # type: ignore[arg-type]
+
+
+def test_resolve_declared_path_accepts_absolute_bare_and_relative_forms_inside_the_directory(tmp_path, monkeypatch):
+    (tmp_path / "m.joblib").write_bytes(b"x")
+    expected = tmp_path.resolve() / "m.joblib"
+
+    assert resolve_declared_path(tmp_path, str(tmp_path / "m.joblib")) == expected  # absoluta (formato real)
+    assert resolve_declared_path(tmp_path, "m.joblib") == expected  # solo el nombre
+    monkeypatch.chdir(tmp_path.parent)
+    assert resolve_declared_path(Path(tmp_path.name), f"{tmp_path.name}/m.joblib") == expected  # relativa al cwd
+
+
+@pytest.mark.parametrize("declared", ["", None, 5, "x\x00.joblib", "../m.joblib", "sub/../m.joblib", "/etc/passwd", "other/m.joblib"])
+def test_resolve_declared_path_rejects_unsafe_values(tmp_path, declared):
+    (tmp_path / "m.joblib").write_bytes(b"x")
+    assert resolve_declared_path(tmp_path, declared) is None
+
+
+def test_resolve_declared_path_rejects_files_outside_symlinks_and_other_directories(tmp_path):
+    inside = tmp_path / "models"
+    inside.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "m.joblib").write_bytes(b"x")
+    (inside / "link.joblib").symlink_to(outside / "m.joblib")
+
+    assert resolve_declared_path(inside, str(outside / "m.joblib")) is None
+    assert resolve_declared_path(inside, str(inside / "link.joblib")) is None
