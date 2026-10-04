@@ -4109,6 +4109,82 @@ El PR #7 corrige la metodología (dataset pre-evento, política fail-closed, ori
 
 Protección por registro de `load_latest_tennis_calibrator` antes de cablearlo; uso de `build_event_pairs`/`compute_calibration_coverage` en diagnósticos reales; PRs separados para MLB y backtesting general (filtro solo-`recorded_at` en `mlb_baseline.py:197` y `src/backtesting/dataset.py:107`).
 
+## 0.40 CIERRE FORMAL DEL PR #8 (PR-1): guardián fail-closed del calibrador de tenis conectado al registro de modelos (2026-10-04)
+
+Registra la implementación y el cierre Git del PR-1 del plan posterior al PR #7 (§0.38/§0.39, que se conservan sin modificar). Cierra la brecha señalada en la auditoría final del PR #7: el calibrador Platt defectuoso figuraba `INVALID` en `config/model_registry.json`, pero `load_latest_tennis_calibrator` no consultaba el registro. **Este PR no desbloquea el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #8**: "Enforce fail-closed calibrator registry guard" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/8
+- **Rama**: `fix/calibrator-registry-guard`. Al redactar esta sección §0.40, la rama todavía existe localmente y en `origin`.
+- **Commit de implementación** (único, "Fix: enforce fail-closed calibrator registry guard"): `951e67e933347d1c22269a4a868de3b91fb28c63`. 7 archivos, +1326 −36 (6 modificados y 1 nuevo).
+- **Merge commit** (merge real de 2 padres, sin squash ni rebase): `31a24a12393c9c9b9f5d1dbbe588f482d7c01b85` ("Merge pull request #8 from jhonsongilky1974/fix/calibrator-registry-guard"). Padres: `2b884a2dae66387406749585c113632420b8300b` (tip anterior de `main`) y `951e67e933347d1c22269a4a868de3b91fb28c63`.
+- **Fecha del merge**: 2026-10-04T17:59:29Z (2026-10-04 13:59:29 -0400). Fusionado manualmente en GitHub; la API reporta `merged: true`, `state: closed`.
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main`; `main` y `origin/main` idénticos en `31a24a1…`; working tree limpio.
+- El PR no tenía checks automáticos (0 check-runs, sin GitHub Actions configurado).
+
+### Guardián fail-closed implementado
+
+`load_latest_tennis_calibrator(base_model_version, models_dir, registry=None)` devuelve `None`, deja el motivo en el log y nunca lanza ni hace fallback hacia otro calibrador, salvo que se cumpla TODO lo siguiente:
+
+- **Modelo base y calibrador `ALLOWED`** en el registro, con **SHA-256 válido** calculado sobre los bytes leídos (también se rechaza un modelo base `REJECTED_CANDIDATE` en su metadata).
+- **Vínculo calibrador-modelo verificable**: la entrada del calibrador en el registro declara `base_model_version` y `metadata_sha256` (campos opcionales nuevos del esquema; solo código, `config/model_registry.json` no se modificó). `metadata_sha256` es obligatorio y debe igualar el SHA-256 del metadato; `base_model_version` debe coincidir en tres sitios: entrada del registro, metadato y modelo base solicitado. El metadato además debe ser coherente (`calibrator_version`, `artifact_sha256`, `trained_at`, `file_path`).
+- **`file_path` validada dentro de `models_dir`**: se preserva el contrato previo (el artefacto se localiza por `metadata.file_path`, absoluta como la escribe el entrenamiento, o relativa) y se valida con `resolve_declared_path`/`resolve_in_dir`: solo un archivo regular directamente dentro de `models_dir`. Se rechazan vacío o no texto, NUL, componentes `..`, otro directorio, separadores inválidos, symlinks (incluidos los internos), directorios e inexistentes.
+- **Lectura única y mismos bytes**: cada artefacto se lee una vez (`read_bytes_once`), el SHA-256 se calcula sobre esos bytes y se deserializa con `joblib.load(io.BytesIO(bytes))`, sin reabrir el archivo (sin ventana TOCTOU). Aplica al calibrador y también al cargador del modelo base (`load_latest_tennis_artifact`), que ahora usa los mismos helpers públicos de `model_registry_policy.py` (`sha256_hex`, `read_bytes_once`, `resolve_in_dir`, `resolve_declared_path`, `check_bytes`, `allowed_calibrators_for_base`) sin importar funciones privadas.
+- **Solo artefactos declarados en el registro**: los candidatos salen del registro (entradas `ALLOWED` atadas al modelo base), sin recorrer el directorio; archivos no registrados, antiguos, ajenos o corruptos no bloquean a un candidato válido. Entre varios, se elige el de mayor `calibrator_version` (texto). Si el candidato seleccionado falla cualquier validación, `None`: no se retrocede a otro calibrador.
+- **Decisión de endurecimiento añadida durante el PR-1** (no fue una condición original): el propio calibrador también debe estar `ALLOWED` en el registro, coherente con que el registro ya marcaba el calibrador defectuoso `INVALID` y con la regla de no usar artefactos no registrados.
+
+### Protección comprobada en la ruta real de `run_e2e`
+
+Las pruebas de integración usan el `SportAdapter` real de tenis (`SPORT_ADAPTERS[Sport.TENNIS]`, `scripts/run_e2e.py`) mediante `decision_pipeline._build_record_context`: con el par válido se aplica calibración; en 8 modos de fallo (calibrador no registrado, `INVALID`, SHA incorrecto, archivo alterado, metadato alterado, `metadata_sha256` ausente, vínculo con el base incorrecto, modelo base `INVALID`) `p_model_calibrated`, `calibration_version`, `calibration_method` y `calibrated_at` quedan en `None` y la probabilidad cruda se conserva.
+
+**Producción todavía no cablea el calibrador**: `SPORT_ADAPTERS[Sport.TENNIS].load_calibrator_fn` es `None` (fijado por una prueba) y `scripts/run_e2e.py` no se modificó. Este PR protege la ruta de calibración **cuando se cablee**; no activa calibración. El cableado en producción y el diseño de la caché (con invalidación segura) quedan para el **PR-2**.
+
+### Validación
+
+Ejecutada sobre la rama antes del merge (`pytest -ra -p no:cacheprovider`), en todas con 0 failed, 0 skipped y 0 xfailed/xpassed; único warning `NotOpenSSLWarning` de urllib3/LibreSSL (de entorno):
+
+- Pruebas focalizadas (registro, cargador base, calibrador, guardián, `decision_pipeline`): **228 passed**.
+- Guardián del calibrador (`test_tennis_calibrator_registry_guard.py`): **112 passed**.
+- Ruta real de `run_e2e` (`-k "e2e or production_adapter"`): **11 passed**.
+- Suite completa: **1720 passed**.
+- `git diff --check`: limpio.
+- Pruebas por mutación: al quitar cada defensa por separado (comprobaciones de registro y de `metadata_sha256`, vínculo triple, symlinks, componentes `..`, directorio declarado, archivo regular, reapertura por ruta en ambos cargadores, confianza ciega en `file_path`) fallaron pruebas en cada caso.
+
+La suite no se volvió a ejecutar sobre `main` tras el merge; el merge commit no añade contenido propio más allá de unir ambas líneas. La suite de integración conserva su comportamiento previo de escribir archivos en `data/raw/` (gitignored).
+
+### Modelos, datos y producción
+
+- **No se entrenó ni activó ningún modelo.** El registro real no declara ningún modelo ni calibrador `ALLOWED` (una prueba lo fija), por lo que hoy ningún calibrador es cargable.
+- No se modificaron datos, base de datos, artefactos de `data/models/`, `config/model_registry.json`, logs, LaunchAgents ni servicios. No se cambiaron umbrales ni criterios de reapertura.
+- El PR #8 no modificó CONTINUITY.md; esta sección §0.40 constituye el cierre documental posterior al merge.
+
+### Limitaciones conocidas
+
+- Un calibrador recién entrenado no queda habilitado: requiere una entrada manual en el registro con `artifact_sha256`, `metadata_sha256` y `base_model_version` (no hay script que la genere).
+- Las `file_path` absolutas que escribe el entrenamiento fallan cerrado si el repositorio se mueve de ubicación, hasta regenerar el metadato.
+- La selección entre calibradores `ALLOWED` usa `calibrator_version` como texto (el nombre lleva el timestamp de entrenamiento).
+- El metadato del modelo base no tiene hash (solo se usa para restringir, p. ej. `REJECTED_CANDIDATE`).
+- Una entrada más reciente marcada `INVALID` se ignora y puede cargarse otro calibrador más antiguo que siga `ALLOWED` (estado explícito del registro, probado).
+- Costo de lectura por evaluación (4 archivos y el registro por registro procesado) si se cablea: sin caché; diseño en el PR-2.
+- Pendientes ya documentados en §0.38/§0.39 y fuera de este PR: protección por registro de los cargadores MLB, filtro solo-`recorded_at` en `mlb_baseline.py:197` y `src/backtesting/dataset.py:107`.
+
+### Tramo 5A: PERMANECE BLOQUEADO
+
+Este PR **no desbloquea el Tramo 5A**: endurece la seguridad de la carga del calibrador, pero no aporta evidencia de calibración ni cambia ningún criterio. Bloqueadores todavía vigentes:
+
+- **D-3**: la fórmula de fee de Kalshi sigue sin verificar → `net_ev_status` queda `UNKNOWN` y `ENTER` sigue inalcanzable.
+- **Sin modelo limpio entrenado y `ALLOWED`**: el único modelo de tenis es el defectuoso (`INVALID`); no hay ningún modelo o calibrador habilitado, y el modelo MLB tampoco existe.
+- **Sin medición de calibración válida**: no hay evidencia por evento, orientada correctamente, ni límite inferior/probabilidad conservadora calibrada.
+- **Datos etiquetados insuficientes**: el umbral n ≥ 30 por bucket se mantiene intacto (sin reducir, sin reinterpretar, sin combinar deportes ni agregar límites) y no hay garantía de que los datos lo alcancen.
+- **Fugas pendientes fuera de tenis**: MLB y el backtesting general conservan el filtro solo-`recorded_at` (PRs separados).
+
+El desbloqueo requiere una nueva decisión explícita (ver §0.38).
+
+### Siguiente paso previsto (sin iniciar)
+
+PR-2: cablear el calibrador en producción con caché e invalidación seguras, y/o un informe de preparación de calibración de solo lectura. No empezado; requiere autorización.
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
