@@ -4262,6 +4262,35 @@ El desbloqueo requiere una nueva decisión explícita (ver §0.38).
 
 GitHub PR #10: cableado de `load_latest_tennis_calibrator` en `SPORT_ADAPTERS[Sport.TENNIS]`, sujeto a que exista un calibrador candidato que cumpla `CALIBRATION_SPEC.md` §6 y a autorización explícita. No empezado.
 
+## 0.42 Gobernanza de la evaluación del calibrador de tenis: procedimiento de cierre y ancla del libro (2026-10-04)
+
+Define el **procedimiento** de cierre y de ancla del libro append-only introducido por el PR de gobernanza/evaluación del calibrador (rama `feat/calibration-governance`; el número de PR lo asigna GitHub y no se reserva aquí). Este texto **no registra ninguna entrada real del libro, ningún preregistro, ningún intento ni ningún cierre de intento**: no existe ninguno. §0.38–§0.41 se conservan sin modificar. El contrato normativo vive en `governance/calibration/README.md`.
+
+### Ancla principal (obligatoria): historial de Git en `main`
+
+- `scripts/evaluate_tennis_calibrator.py verify-ledger` compara el libro propuesto con el aceptado en `main`/`origin/main`: lo ya aceptado debe coincidir **byte a byte** y solo pueden añadirse entradas; valida la cadena de hashes de ambos y la integridad de los preregistros y manifiestos registrados.
+- `evaluate` solo opera si el preregistro, el snapshot, el modelo base y el calibrador del intento ya están aceptados en `main` y `verify-ledger` valida cadena y prefijo. Sin base verificable, sin referencia en `main` o sin preregistro previamente aceptado, **falla cerrado**.
+- Toda entrada del libro y todo preregistro firmado entra por PR revisable; nunca directamente a `main`.
+
+### Referencia secundaria en cada cierre (este documento)
+
+Al cerrar cada PR que añada entradas al libro, esta sección de continuidad (o la que corresponda) registrará **`seq` y `entry_sha256` de la última entrada aceptada** y el commit de `main` correspondiente, tal como los imprime `verify-ledger` ("cabecera aceptada"). Es **evidencia de cierre y de revisión**: **no es un ancla criptográfica independiente** y no protege frente a quien pueda reescribir `main` (el propio CONTINUITY.md vive en el mismo repositorio). Su utilidad es dar una referencia legible y fechada para detectar divergencias en una revisión posterior.
+
+### Cierre de un intento
+
+Todo intento abierto termina en `FINAL_VERDICT` o en `ATTEMPT_ABANDONED` (motivo, autor, fecha; sin métricas; nunca puede volverse `ELEGIBLE`) antes de que pueda abrirse otro snapshot. Un cierre solo se documenta aquí una vez que exista realmente y haya sido aceptado en `main`.
+
+### Seguridad y deuda
+
+- El evaluador **no deserializa joblib/pickle**; si una evaluación lo requiriera (veto del test de un `ELEGIBLE_PRELIMINAR`) se detiene con error explícito sin escribir en el libro. SHA-256 confirma identidad de bytes, no seguridad, procedencia, calidad ni validez estadística.
+- **Deuda separada**: los cargadores de producción heredados de los PR #7 y PR #8 (`load_latest_tennis_artifact`, `load_latest_tennis_calibrator`) comparten esa exposición; no se modifican en este PR. Requiere un mecanismo de carga segura auditado y almacenamiento duradero.
+
+### Tramo 5A: PERMANECE BLOQUEADO
+
+Sin cambios: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto), y MLB/backtesting con fuga pendiente. Este PR no entrena, no evalúa candidatos reales, no genera artefactos ni modifica `config/model_registry.json`.
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de

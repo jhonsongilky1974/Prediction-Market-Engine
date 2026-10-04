@@ -16,9 +16,20 @@ entrenamiento del modelo base, o si no hay suficientes eventos/clases
 para la validación cruzada agrupada, el script termina con éxito
 (exit 0) reportando el motivo -- nunca fabrica un calibrador.
 
+Registro candidato (opcional, CONTINUITY.md §0.42): `--candidate-registry PATH`
+permite calibrar un modelo base AÚN NO promovido, sin tocar
+`config/model_registry.json`. El archivo debe vivir en
+`governance/calibration/candidates/`, usar la clave `candidate_models` y declarar los
+SHA-256 del modelo base, que se verifican contra los archivos y contra el libro
+(`--ledger`). Cualquier discrepancia termina con código 2 (fail-closed). Sin la
+opción, el script usa el registro real (hoy sin ningún modelo `ALLOWED`, por lo que
+no ajusta nada). Este script NUNCA emite un veredicto ni promueve: el veredicto lo
+emite `scripts/evaluate_tennis_calibrator.py`.
+
 Uso:
     source .venv/bin/activate
-    python scripts/train_tennis_calibrator.py [--cv-folds 5] [--models-dir data/models]
+    python scripts/train_tennis_calibrator.py [--cv-folds 5] [--models-dir data/models] \\
+        [--candidate-registry governance/calibration/candidates/<id>.json] [--ledger governance/calibration/ledger.jsonl]
 """
 from __future__ import annotations
 
@@ -30,6 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import DATA_MODELS_DIR
 from src.calibration.tennis_calibrator_training import DEFAULT_CV_FOLDS, train_tennis_calibrator
+from src.evaluation.calibration_governance import DEFAULT_LEDGER_PATH, GovernanceError
+from src.evaluation.candidate_registry import load_candidate_registry
 from src.models.base import ModelStatus
 from src.storage.history_repository import HistoryRepository
 
@@ -38,13 +51,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cv-folds", type=int, default=DEFAULT_CV_FOLDS)
     parser.add_argument("--models-dir", type=Path, default=DATA_MODELS_DIR)
+    parser.add_argument(
+        "--candidate-registry", type=Path, default=None,
+        help="registro candidato explícito (clave candidate_models); sin él se usa el registro real de producción",
+    )
+    parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER_PATH)
     args = parser.parse_args()
+
+    registry = None
+    if args.candidate_registry is not None:
+        try:
+            registry = load_candidate_registry(args.candidate_registry, models_dir=args.models_dir, ledger_path=args.ledger)
+        except GovernanceError as exc:
+            print(f"ERROR (fail-closed): registro candidato rechazado -- {exc}", file=sys.stderr)
+            return 2
+        print(f"Registro candidato verificado: {args.candidate_registry}")
 
     hist = HistoryRepository()
     print(f"History DB: {hist.db_path}")
     print(f"Ajustando calibrador Platt de tenis (cv_folds={args.cv_folds})...")
 
-    status, artifact, warnings = train_tennis_calibrator(hist, models_dir=args.models_dir, cv_folds=args.cv_folds)
+    status, artifact, warnings = train_tennis_calibrator(
+        hist, models_dir=args.models_dir, cv_folds=args.cv_folds, registry=registry
+    )
 
     print(f"\nstatus: {status.value}")
     for w in warnings:
@@ -65,15 +94,12 @@ def main() -> int:
     print(f"raw_brier (modelo SIN calibrar):      {artifact.raw_brier}")
     print(f"calibrated_brier_oof (Platt, OOF):      {artifact.calibrated_brier_oof}")
 
-    if artifact.calibrated_ece_oof is not None and artifact.raw_ece is not None:
-        if artifact.calibrated_ece_oof <= artifact.raw_ece:
-            print("\nCriterio de aceptación (CALIBRATION_SPEC.md §6): calibrated_ece_oof <= raw_ece -- CUMPLIDO.")
-        else:
-            print(
-                "\nCriterio de aceptación (CALIBRATION_SPEC.md §6): calibrated_ece_oof > raw_ece -- "
-                "NO CUMPLIDO. El artefacto se persistió como evidencia, pero NO debe cablearse en "
-                "producción sin instrucción explícita."
-            )
+    print(
+        "\nEste script NO declara cumplido ni incumplido el criterio de aceptación: el veredicto "
+        "(ERROR/INCONCLUSO/RECHAZADO/ELEGIBLE_PRELIMINAR/ELEGIBLE, tau=1e-4, test como veto único) "
+        "lo emite scripts/evaluate_tennis_calibrator.py según governance/calibration/README.md. "
+        "El artefacto se persiste solo como evidencia; no queda promovido ni cableado."
+    )
 
     print(f"\nartifact_sha256: {artifact.artifact_sha256}")
     print(f"artefacto: {artifact.file_path}")
