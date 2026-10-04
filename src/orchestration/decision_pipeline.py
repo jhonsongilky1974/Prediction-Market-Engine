@@ -79,6 +79,7 @@ def _build_record_context(
     adapter: SportAdapter,
     loaded_artifact: Optional[Tuple[Any, Any]],
     now: datetime,
+    calibrator_memo: Optional[Dict[str, Any]] = None,
 ) -> _RecordContext:
     logger.info("-> _build_record_context event_id=%r", record.event_id)
     fn_started = time.monotonic()
@@ -90,10 +91,27 @@ def _build_record_context(
     # opcional -- `None` (MLB hoy, sin calibrador) preserva exactamente el
     # comportamiento anterior (calibrator=None). Nunca se invoca si no hay
     # model_version (modelo no entrenado) -- no hay nada que emparejar.
+    #
+    # `calibrator_memo` (opcional) es un diccionario LOCAL a UNA invocación de
+    # `run_decision_pipeline`: para cada `model_version` base se llama a
+    # `load_calibrator_fn` como máximo una vez por corrida y se reutiliza su
+    # resultado, tanto un calibrador válido como `None` (fail-closed: un
+    # rechazo no se reintenta por registro, sin ruido de log ni lecturas
+    # repetidas). Una EXCEPCIÓN de `load_calibrator_fn` nunca se guarda:
+    # se propaga igual que sin memo (el registro se omite en
+    # `summary.skipped_errors`) y el siguiente registro vuelve a intentarlo.
+    # Sin `calibrator_memo` (llamadas directas) no hay ninguna memoización.
     calibrator = None
-    if adapter.load_calibrator_fn is not None and model_output.model_version is not None:
-        with log_step(logger, "_build_record_context.load_calibrator_fn", model_version=model_output.model_version):
-            calibrator = adapter.load_calibrator_fn(model_output.model_version)
+    # Una `model_version` vacía ("") se trata como ausente: no hay versión base que emparejar.
+    if adapter.load_calibrator_fn is not None and model_output.model_version:
+        model_version = model_output.model_version
+        if calibrator_memo is not None and model_version in calibrator_memo:
+            calibrator = calibrator_memo[model_version]
+        else:
+            with log_step(logger, "_build_record_context.load_calibrator_fn", model_version=model_version):
+                calibrator = adapter.load_calibrator_fn(model_version)
+            if calibrator_memo is not None:
+                calibrator_memo[model_version] = calibrator
     with log_step(logger, "_build_record_context.calibrate", event_id=record.event_id):
         calibration_output = calibrate(model_output, calibrator=calibrator, now=now)
     logger.info(
@@ -240,6 +258,10 @@ def run_decision_pipeline(
     with log_step(logger, "run_decision_pipeline.load_artifact_fn", sport=sport.value):
         loaded_artifact = adapter.load_artifact_fn()
 
+    # Memo del calibrador con la duración exclusiva de ESTA invocación (variable
+    # local: sin estado de módulo, global, entre corridas ni entre procesos).
+    calibrator_memo: Dict[str, Any] = {}
+
     for record_index, (record, feature_inputs, data_cutoff_timestamp) in enumerate(
         zip(records, feature_inputs_list, feature_cutoffs)
     ):
@@ -254,7 +276,7 @@ def run_decision_pipeline(
 
         try:
             context = _build_record_context(
-                record, feature_inputs, data_cutoff_timestamp, adapter, loaded_artifact, now
+                record, feature_inputs, data_cutoff_timestamp, adapter, loaded_artifact, now, calibrator_memo
             )
         except Exception as exc:  # noqa: BLE001 -- aislamiento deliberado, ver docstring
             summary.skipped_errors.append((record.event_id, "pre-side", repr(exc)))
