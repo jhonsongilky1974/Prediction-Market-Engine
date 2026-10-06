@@ -4498,6 +4498,99 @@ Estado por decisión tal como lo consigna `ARTIFACT_STORAGE_DECISION.md`, sin re
 
 ---
 
+## 0.46 CIERRE FORMAL DEL PR #13: almacén de artefactos local direccionado por contenido (PR-1) (2026-10-06)
+
+Registra la implementación y el cierre Git del PR #13 (PR-1): el contrato `ArtifactStore` y un backend local direccionado por SHA-256, la primera pieza de código de la secuencia de `ARTIFACT_STORAGE_DECISION.md` (§8). §0.38–§0.45 se conservan sin modificar. Este PR añade **un contrato y un backend, sin conectarlos a nada**; **no entrena, no evalúa, no publica artefactos reales, no modifica cargadores, no promueve, no cablea, no hace alcanzable `ELEGIBLE` y no desbloquea el entrenamiento ni el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #13**: "feat: add local content-addressed artifact store (PR-1)" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/13
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-10-06T04:08:03Z. Antes de fusionar: `mergeable: true`, `mergeable_state: clean`, `rebaseable: true`, 0 reviews, 0 comentarios (de conversación y de código) y 0 check-runs.
+- **Rama**: `feat/local-artifact-store`. Dato histórico: al redactar este cierre, la rama existía todavía tanto localmente como en `origin` (ambas en el head `a70fa9b…`). Su eliminación operativa requiere una autorización separada y no se ha realizado. Eliminarla no cambia el merge ni la evidencia conservada: el head y el merge commit permanecen en el historial de `main`.
+- **Commit implementado** (commit único, "feat: add local content-addressed artifact store (PR-1)", autor `jhonson Gil`, 2026-10-05 23:35:05 -0400): `a70fa9bd7218f1f32ca2e495adf54abafde3b733`. **1 commit y 4 archivos nuevos: +2044 −0**.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `16e5b5b13c83af724af191a9c09f6d0cb2667b7a` ("Merge pull request #13 from jhonsongilky1974/feat/local-artifact-store"). Padres: **primer padre** `07334b3b250e87dac9860576b5d5fdfec1d10006` (tip anterior de `main`, cierre documental del PR #12) y **segundo padre/head** `a70fa9bd7218f1f32ca2e495adf54abafde3b733`.
+- **Fecha del merge**: `merged_at` de la API = 2026-10-06T04:15:20Z (2026-10-06 00:15:20 -0400); el commit del merge lleva 00:15:19 -0400 (un segundo menos que el registro de la API).
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main` (fast-forward `07334b3..16e5b5b`); `main`, `origin/main` y el remoto real idénticos en `16e5b5b13c83af724af191a9c09f6d0cb2667b7a`; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental). El head `a70fa9b…` aparece exactamente una vez en `main` y hay un solo merge "pull request #13". El merge introduce 2 commits (el head y el propio merge). El merge de prueba que GitHub mostró antes de fusionar (`82b4fff…`) tenía el mismo árbol que el head.
+
+### Archivos fusionados
+
+Cuatro archivos nuevos (+2044 −0), sin ningún archivo preexistente modificado:
+
+- `src/storage/artifact_store.py` (+121)
+- `src/storage/local_filesystem_store.py` (+462)
+- `tests/unit/test_artifact_store.py` (+195)
+- `tests/unit/test_local_filesystem_store.py` (+1266)
+
+El árbol de `main` (`19c8a32360bd431ec8d1b1cd678b5f0108f3ddfe`) es idéntico al del head auditado. Los cuatro archivos coinciden con el head por blob (`fae6ed01ab…`, `165a126178…`, `0204458099…` y `4eaae65540…`, en el orden de la lista) y por SHA-256 (primeros 16 caracteres: `16e8957585f714b7`, `8b5880575512a262`, `10d62080b59f8564` y `b850dee3c2d309df`). Frente al primer padre, el merge cambia exactamente esos cuatro archivos. No cambia `config/`, `data/`, `scripts/`, `src/models/`, `src/evaluation/`, `src/orchestration/`, `.gitignore` ni ningún `.md`.
+
+### Funcionalidad
+
+- **Contrato** (`artifact_store.py`, solo `hashlib`, `re` y `abc`; no toca el sistema de archivos): `ArtifactReader` (`get`, `exists`, `verify`), `ArtifactStore` (añade `put`), `compute_key`, `validate_key` y los errores tipados bajo `ArtifactStoreError`: `ArtifactNotFoundError`, `ArtifactIntegrityError`, `InvalidArtifactKeyError`, `StoreConfigurationError` y `ArtifactPublishError`. **`put(data: bytes) -> str`**: devuelve la clave; no existe `PutResult` ni `created`.
+- **Backend** (`local_filesystem_store.py`): `LocalFilesystemStore(root, *, max_blob_bytes)`, `LocalFilesystemStore.from_environment`, `resolve_store_root_from_environment` y `reader()`. Claves `sha256/<2 hex>/<64 hex>` en minúsculas y sin extensión (D4).
+- **Publicación** (D5, D7): temporal en `tmp/` (mismo sistema de archivos, comprobado), escritura completa, sincronización, `link` sin sobrescribir y `fsync` del directorio. Es idempotente: publicar bytes ya presentes los verifica y devuelve la misma clave. Un blob existente corrupto o distinto se rechaza sin repararlo ni sobrescribirlo. Nunca se usa `rename` ni `replace`.
+- **Lecturas verificadas**: `get` hashea exactamente los bytes que devuelve y los compara con la clave; también se comprueban tamaño y tipo de entrada. `verify` re-calcula el hash completo; `exists` solo informa de la presencia de un archivo regular.
+- **Raíz y límite**: raíz absoluta, preexistente y directorio; el almacén no la crea. `max_blob_bytes` es obligatorio, entero positivo y sin valor por defecto; se aplica al escribir y al leer. El límite de B1 (`MAX_ARTIFACT_BYTES`) no se reutiliza.
+- **Variable de entorno** `PME_ARTIFACT_STORE_ROOT`, leída en cada llamada y sin valor por defecto; ausente o vacía lanza `StoreConfigurationError`.
+- **Lector de solo lectura** (D9, local): `reader()` entrega una vista con `get`, `exists` y `verify`, sin `put`. Directorios internos `0700` y blobs `0444`.
+- **Sin rutas absolutas** en los errores ni accesor de ruta (D12). El módulo no importa `config.settings`, `model_registry_policy`, `src.models`, joblib, pickle ni sklearn, y no lee configuración al importarse. Ningún archivo de `src/`, `scripts/` ni `config/` lo importa; `src/storage/__init__.py` sigue vacío.
+
+### Decisiones aplicadas
+
+- **Las cinco decisiones confirmadas para planificar PR-1**:
+  1. **D18**: la réplica y la auditoría periódica por re-hash quedan para PR-1b; PR-1 solo verifica la integridad de cada blob al leerlo.
+  2. **Límite de tamaño**: `max_blob_bytes` explícito, obligatorio y positivo, sin valor global implícito; las pruebas usan límites pequeños; el límite de B1 sigue siendo exclusivo de B1.
+  3. **"Dentro del repositorio"**: tras resolver la ruta real, se rechaza una raíz igual a la raíz del repositorio actual o dentro de ella, sin eludir la regla con symlinks; PR-1 no descubre ni examina otros worktrees.
+  4. **Variable de entorno**: `PME_ARTIFACT_STORE_ROOT`.
+  5. **Sin `ARTIFACT_STORE_SPEC.md`**: la autoridad son `ARTIFACT_STORAGE_DECISION.md` y `DATA_RETENTION_POLICY.md`, complementadas con tipos, docstrings y pruebas.
+- **N1–N6 tal como quedaron aprobadas**:
+  - **N1 (aceptada)**: exclusión por ascendencia física `(st_dev, st_ino)` de la raíz y de sus ancestros, en lugar de comparar el texto de la ruta; una raíz o un ancestro inaccesible se rechaza de forma cerrada. La comparación por texto es eludible en este equipo (otra capitalización y firmlink de macOS no se normalizan con `realpath`).
+  - **N2 (aceptada con corrección)**: `F_FULLFSYNC`, cuando está disponible, **solo en el archivo temporal regular**; si no está disponible o devuelve EINVAL, ENOTSUP o EOPNOTSUPP, `os.fsync`; **los descriptores de directorio usan `os.fsync` directamente**; los demás errores producen `ArtifactPublishError`; cada rama se prueba sin depender de que el anfitrión sea macOS.
+  - **N3 (rechazada)**: `put(data: bytes) -> str`, sin `PutResult` ni `created` en la API pública; la concurrencia se comprueba con claves idénticas, blob íntegro, sin temporales y sin sobrescrituras (el único ganador se verifica internamente con un espía de `os.link`, sin convertirlo en contrato).
+  - **N4 (aceptada)**: errores tipados bajo `ArtifactStoreError`; `exists` devuelve `bool` para una clave válida y rechaza las inválidas.
+  - **N5 (aceptada)**: raíz absoluta, explícita, preexistente y directorio; no se expande `~` ni se aceptan rutas relativas; el constructor no crea la raíz; los directorios internos se crean de forma perezosa con `0700` sin alterar silenciosamente los permisos de los preexistentes.
+  - **N6 (aceptada con condición)**: cada operación abre la raíz, comprueba con `fstat` que conserva la identidad registrada y mantiene ese descriptor como ancla; el acceso a descendientes es relativo al descriptor verificado (`dir_fd`, `O_NOFOLLOW`); tras verificarla no se vuelve a usar la ruta textual.
+- **T33b** se incluyó como prueba de regresión portátil de la exclusión por identidad física (repo falso y symlink en `tmp_path`, con un resolvedor que no colapsa el alias). T33 (rutas reales por capitalización y firmlink) se ejecutó en sus dos variantes; se omite, con motivo, si el sistema no ofrece la ruta alternativa.
+- **Correcciones de la revisión previa al commit** (aplicadas por autorización expresa, solo en los cuatro archivos): `intercept()` de las pruebas identifica exclusivamente el archivo exacto del backend (antes comparaba un sufijo que también cumplía el propio archivo de pruebas) y se añadió una prueba con un módulo ajeno de nombre parecido; `StoreConfigurationError` se documentó en el contrato con sus causas (raíz cambiada o no disponible; directorios internos preexistentes con permisos para grupo u otros, que **se rechazan sin modificar sus permisos**, rechazo aceptado expresamente por el propietario).
+- **Interpretaciones señaladas en el plan corregido antes de autorizar su implementación**: los rechazos de tamaño o tipo en `put` son `ArtifactPublishError` y un blob en disco que excede el límite es `ArtifactIntegrityError`; `exists` devuelve `False` ante una entrada anómala del blob pero un problema de configuración sigue lanzando `StoreConfigurationError`; `resolve_store_root_from_environment` devuelve `str` sin transformarlo. Además, el informe de la implementación (no el plan) señaló que `compute_key`, un auxiliar público fuera de las operaciones del almacén, lanza `TypeError` ante algo que no sea exactamente `bytes`, de modo que queda fuera de los cinco errores tipados.
+- **Decisiones de PR-0 delegadas y ya implementadas**: D4 (estructura de claves), D5 (escritura única e idempotente), D7 (publicación atómica), D9 local (escritor y lector separados, `0700` y `0444`) y D12 (sin rutas absolutas en los errores). Los tres detalles que §3.1 delegaba a PR-1 quedaron así: (a) el nombre es `PME_ARTIFACT_STORE_ROOT`; (b) el criterio de "dentro del repositorio" es la ascendencia física descrita en N1, sin examinar otros worktrees; (c) sin raíz suministrada, `from_environment` lanza `StoreConfigurationError` y el constructor exige una raíz explícita.
+
+### Validación
+
+Cifras de la ejecución más reciente, repetida sobre `main` tras el merge (el árbol es idéntico al del head aprobado); único warning `NotOpenSSLWarning` de urllib3/LibreSSL (de entorno):
+
+- **Pruebas focalizadas**: **189 passed**, 0 failed, 0 skipped (38 del contrato y 151 del backend).
+- **Suite completa (`tests/unit`)**: **2448 passed**, 0 failed, 0 skipped (2259 previas + 189 nuevas). No se ejecutó `tests/integration` (escribe en `data/raw/`).
+- **Estilo y diff**: `pyflakes` sin avisos en los cuatro archivos (también repetido sobre `main`); `git diff --cached --check` limpio antes del commit y comprobación equivalente sin índice limpia; escaneo de BOM, CR, NUL, tabulaciones, espacios finales y caracteres invisibles limpio.
+- **Mutaciones sobre los dos módulos** (en una copia fuera del repositorio, restaurada y verificada por SHA-256; el repositorio no se modificó): 51 definidas; **51 aplicadas**; 0 patrones no aplicados; **50 detectadas**; **1 no detectada, clasificada como equivalente por análisis** (`existing != data`, redundante porque `_read_blob` ya garantiza que el hash del contenido existente es la clave); 0 sobrevivientes reales. En una ronda previa dos supervivientes revelaron defensas sin prueba específica; se reforzaron las pruebas antes del commit. El mutante que sustituye la ascendencia física por una comparación de texto lo detecta T33b por sí sola.
+- **Repeticiones y caídas simuladas**: 20 repeticiones seguidas de las pruebas de concurrencia, anclaje, FIFO, descriptores, `fsync` y T33 sin fallos. Caídas simuladas del proceso en tres puntos (escritura a medias, antes del `link` y tras el `link`): nunca queda un blob parcial visible; tras el `link` el blob es íntegro y su temporal huérfano comparte inodo con él (`nlink=2`); en los tres casos un reintento de `put` termina bien.
+- **Todo lo anterior son pruebas locales. No existe CI configurado**: para el head `a70fa9b…` GitHub muestra 0 check-runs, estado combinado `pending` con 0 estados, 0 workflows de Actions y 0 ejecuciones, y no existe carpeta `.github`. **"0 checks" significa que no hay CI, no que haya checks aprobados**: ningún check automático respaldó el merge. La protección de rama de `main` no se pudo consultar sin autenticación (HTTP 401).
+
+### Límites y fuera de alcance
+
+- **No se conectó ningún flujo.** No se tocaron cargadores (los de tenis siguen con joblib y el de MLB sigue sin guardián), entrenadores, `scripts/`, registro de producción (`config/model_registry.json`, hash `a1662c88…`, sin cambios), libro, evaluador ni `src/orchestration/`. Publicar un blob no promueve ningún modelo (P7). No se publicó ningún artefacto real; las pruebas usan bytes sintéticos y directorios temporales.
+- **Plataforma**: solo POSIX (el constructor falla cerrado en otras). Verificado únicamente en macOS con APFS y Python 3.9.6. El comportamiento en otros sistemas de archivos y la estabilidad de `st_ino` en montajes de red no están verificados.
+- **Durabilidad**: el almacén local no es almacenamiento duradero suficiente para producción (D1 parcial). La durabilidad ante un corte de energía no es verificable en pruebas, y `F_FULLFSYNC` solo se comprobó sobre archivos regulares en APFS. No hay respaldo, réplica, retención ni limpieza (D10 y D11 aplazadas).
+- **Temporales tras una caída**: pueden quedar archivos `.part` huérfanos en `tmp/`; no se limpian. Si el proceso muere entre el enlace y el borrado del temporal, este comparte inodo con el blob publicado (el blob sigue íntegro).
+- **Permisos y dueño**: `0444` y `0700` evitan errores, no frenan al dueño del proceso; la mutación la detecta el re-hash de cada lectura. Un atacante con los mismos privilegios que mueva el directorio raíz dejando en un ancestro un symlink que conduzca al mismo directorio no se detecta, porque la identidad coincide (§6.3 de la decisión); en cambio, la identidad comprobada en cada operación sí detecta que la raíz pase a ser otro directorio.
+- **Errores de configuración**: cualquier operación, incluida `exists`, puede lanzar `StoreConfigurationError` (raíz cambiada o no disponible; directorio interno preexistente con permisos abiertos).
+- **Alcance de diseño**: el blob se lee y se hashea completo en memoria (acotado por `max_blob_bytes`; sin lectura en flujo), y un `put` repetido vuelve a leer y verificar el blob existente (coste no medido). No hay operaciones de listado, borrado ni limpieza.
+- **Pruebas**: usan los ganchos privados `_REPO_ROOT`, `_resolve_root` y `_fcntl`, que no son contrato público, y `sys._getframe` (propio de CPython). No hay verificación de tipos (no existe mypy en el repositorio).
+- **Siguen sin decidir** (aplazadas en `ARTIFACT_STORAGE_DECISION.md`): D1 (selección del backend duradero), D6, D8, D9 remoto, D10, D11, D13, D14, D15, D16, D19, D20, D21, D22 y D23. **D18 queda aplazada a PR-1b**: la réplica y la auditoría periódica por re-hash no están en PR-1, y PR-1b además depende de D11.
+
+### Referencias históricas desactualizadas
+
+`ARTIFACT_STORAGE_DECISION.md` **no se modificó** (su único commit es `28b7f0b`, el del PR #12) y varias de sus frases son ahora históricas: §3.1 (línea 75), "Detalles de D3 que quedan delegados a PR-1 (no decididos)", sigue diciendo que el nombre de la variable, el criterio de "dentro del repositorio" y el comportamiento sin raíz no están decididos, cuando PR-1 los fijó (ver "Decisiones aplicadas"); la fila de D18 en §4 (línea 102) y el punto de §9 "Antes de cerrar PR-1: decidir D18" (línea 227) siguen presentándola como pendiente antes de cerrar PR-1, cuando el propietario la resolvió durante la planificación a favor de PR-1b. Actualizar ese documento requeriría un PR documental aparte, no autorizado; mientras tanto, este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- `main` local, `origin/main` y el remoto real sincronizados en el merge commit `16e5b5b13c83af724af191a9c09f6d0cb2667b7a`; working tree limpio en la verificación posterior al merge y anterior a preparar este cierre documental.
+- Las ramas local y remota `feat/local-artifact-store` siguen presentes (ambas en `a70fa9bd7218f1f32ca2e495adf54abafde3b733`); su eliminación queda pendiente de una autorización separada y no se ha realizado.
+- **PR-1b y PR-2 no se han iniciado.** Cada uno requiere autorización explícita y una auditoría previa de solo lectura, y PR-2 exige antes decidir D6 y D20.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y PR-1 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada; PR-1 solo aporta un almacén local sin cablear. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.45: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
