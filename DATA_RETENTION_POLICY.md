@@ -147,3 +147,16 @@ y que el backup de `engine.db` no interfiere con un lock activo de `run_e2e.py`
 - `CONTINUITY.md`: nueva entrada `§0.19` (ver commit de cierre).
 - `TEMPORAL_REPRODUCIBILITY_SPEC.md`: sin cambios — este documento reafirma,
   no modifica, su invariante de inmutabilidad.
+
+## 8. Adenda (2026-10-05): artefactos de modelo y datasets congelados
+
+Esta política cubre únicamente los recursos de §2: `event_snapshots`/`feature_snapshots`/`event_results`,
+`data/raw/*.json`, los logs de `run_e2e` y el respaldo de `data/engine.db`. **No cubre** los artefactos de
+modelo ni los datasets congelados:
+
+- `data/models/` está ignorado por git y **no tiene retención, rotación ni respaldo**:
+  `scripts/data_maintenance.py` solo respalda `data/engine.db` (§2.4), y esa copia es local.
+- El almacenamiento, la retención y el respaldo de artefactos de modelo y datasets congelados se rigen por
+  `ARTIFACT_STORAGE_DECISION.md`. Sus decisiones de retención (D10) y de respaldo (D11) siguen **pendientes**;
+  hasta que se tomen, esta política no se extiende a esos recursos.
+- Esta adenda no modifica ninguna cláusula: §1 a §7 permanecen sin cambios.
