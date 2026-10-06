@@ -4439,6 +4439,65 @@ Cifras de la ejecución más reciente, repetida sobre `main` tras el merge (el �
 
 ---
 
+## 0.45 CIERRE FORMAL DEL PR #12: gobernanza del almacenamiento de artefactos (PR-0) (2026-10-05)
+
+Registra el cierre Git del PR #12 (PR-0), un PR **exclusivamente documental** que deja por escrito qué decisiones humanas sobre el almacenamiento de artefactos de modelo están aceptadas, cuáles se delegan para su auditoría en PR-1 y cuáles siguen aplazadas. §0.38–§0.44 se conservan sin modificar. Este PR **no implementa almacenamiento, no publica artefactos, no modifica cargadores, no entrena, no evalúa, no promueve, no cablea, no hace alcanzable `ELEGIBLE` y no desbloquea el entrenamiento ni el Tramo 5A** (ver más abajo).
+
+### PR y merge
+
+- **PR #12**: "Docs: define artifact storage governance (PR-0)" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/12
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-10-06T00:16:29Z. Antes de fusionar: `mergeable: true`, `mergeable_state: clean`, 0 reviews, 0 comentarios y 0 check-runs.
+- **Rama**: `docs/artifact-storage-governance`. Dato histórico: al redactar este cierre, la rama existía todavía tanto localmente como en `origin` (ambas en el head `28b7f0b…`). Su eliminación operativa requiere una autorización separada y no se ha realizado. Eliminarla no cambia el merge ni la evidencia conservada: el head y el merge commit permanecen en el historial de `main`.
+- **Head original** (commit único, "docs: record artifact storage governance decisions", 2026-10-05 20:05:20 -0400): `28b7f0bb5a10e060a96493f46ed953dcc4096387`. **1 commit y 2 archivos: +270 −0**.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `1cbdc2ddfe29853ab8049cabbd4cf84657c8f08a` ("Merge pull request #12 from jhonsongilky1974/docs/artifact-storage-governance"). Padres: **primer padre** `33044819f0a885a58964983aec36362084eb3415` (tip anterior de `main`, cierre documental del PR #11) y **segundo padre/head** `28b7f0bb5a10e060a96493f46ed953dcc4096387`. Hashes abreviados: `1cbdc2d` y `28b7f0b`.
+- **Fecha del merge**: `merged_at` de la API = 2026-10-06T00:23:53Z (2026-10-05 20:23:53 -0400); el commit del merge lleva 20:23:52 -0400 (un segundo menos que el registro de la API).
+- **Cierre local verificado**: `git fetch --prune`, `git pull --ff-only origin main` (fast-forward `3304481..1cbdc2d`); `main`, `origin/main` y el remoto real idénticos en `1cbdc2ddfe29853ab8049cabbd4cf84657c8f08a`; working tree limpio y sin stashes. El head `28b7f0b…` aparece exactamente una vez en `main` y hay un solo merge "pull request #12". El merge introduce 2 commits (el head y el propio merge).
+
+### Archivos fusionados
+
+Un archivo nuevo y uno modificado (+270 −0), sin ningún otro archivo tocado:
+
+- `ARTIFACT_STORAGE_DECISION.md` (nuevo, +257)
+- `DATA_RETENTION_POLICY.md` (modificado, +13 −0): adenda fechada 2026-10-05 al final del documento. Declara que la política cubre solo los recursos de su §2, que `data/models/` no tiene retención, rotación ni respaldo definidos, que `scripts/data_maintenance.py` respalda únicamente `data/engine.db`, y que el almacenamiento, la retención y el respaldo de artefactos los gobierna `ARTIFACT_STORAGE_DECISION.md`, con D10 y D11 pendientes. El inventario histórico del §1 (por ejemplo, los 6.1 MB de `engine.db`) no se corrigió.
+
+El árbol de `main` es idéntico al del head aprobado (`d49a4bf6bd913308b70b17d2fc69d56f7d2fd491`). Los dos archivos coinciden con el head por blob (`2e8139a186cb…` y `349401538f05…`) y por SHA-256 (primeros 16 caracteres: `f1a7dc01e1be4b2a` y `def54aaea07cd218`, en el orden de la lista). Frente al primer padre, el merge cambia exactamente esos dos archivos.
+
+### Decisiones registradas
+
+Estado por decisión tal como lo consigna `ARTIFACT_STORAGE_DECISION.md`, sin reinterpretarlas ni convertir pendientes en decisiones:
+
+- **ACEPTADAS (4)**:
+  - **D17**: PR-0 es exclusivamente documental y es el primer paso.
+  - **D2**: los blobs, los artefactos y los datasets son privados; Git solo puede contener hashes, metadatos no sensibles y referencias gobernadas.
+  - **D3**: autorizado explícitamente que el almacén local esté fuera del repositorio, que su raíz se suministre explícitamente mediante configuración o variable de entorno y que se rechacen las raíces ubicadas dentro del repositorio. Nada más está decidido.
+  - **D1 (parcial)**: se aplaza la selección del backend remoto; el uso local inicial no autoriza tratar el disco local como almacenamiento duradero suficiente para producción.
+- **DELEGADAS A PR-1 (5)**, aceptadas como decisiones de diseño sujetas a la auditoría de ese PR: **D4** (estructura de claves), **D5** (inmutabilidad y escritura única), **D7** (publicación atómica), **D9 (local)** (escritor y lector separados) y **D12** (sin rutas absolutas en artefactos y metadatos nuevos). Además, el §3.1 delega a PR-1, **sin decidirlos**, tres detalles de D3: el nombre de la variable de entorno o clave de configuración, el criterio exacto de "dentro del repositorio" y el comportamiento cuando no se suministra la raíz.
+- **APLAZADAS (16)**: **D1** (selección del backend duradero), **D6**, **D8**, **D9 (remoto)**, **D10**, **D11**, **D13**, **D14**, **D15**, **D16**, **D18**, **D19**, **D20**, **D21**, **D22** y **D23**. Solo se documenta la pregunta, de qué depende y qué PR bloquea; ninguna se da por decidida.
+- **D14, D21, D22 y D23 permanecen aplazadas**: D14 (cómo se migra desde joblib/pickle), D21 (si se autoriza un PR que haga alcanzable `ELEGIBLE`), D22 (cuándo se cablean los cargadores nuevos a producción, se retiran los de joblib de tenis y qué se hace con el cargador MLB sin guardián) y D23 (si se implementa el backend remoto).
+- El documento incluye además una arquitectura objetivo provisional, el análisis de amenazas, los límites, una secuencia de PR **propuesta** (PR-1 en adelante, **no autorizada**) y los puntos de parada humana. Ninguna decisión registrada autoriza entrenamiento, evaluación real, promoción, `ELEGIBLE`, cableado productivo ni el Tramo 5A.
+
+### Validación
+
+- **Es un PR documental: no hay código que probar.** No se ejecutaron pruebas nuevas, ni mutaciones, ni la suite completa para este cierre. La verificación fue de identidad y alcance: dos archivos, +270 −0, `git diff --check` limpio, rama basada directamente en `main`, un único commit documental, árbol idéntico al del head, blobs idénticos, registro de producción con el mismo hash.
+- **No existe CI configurado**: `check-runs` 0, 0 workflows de GitHub Actions y sin carpeta `.github` en `main`. **"0 checks" significa que no hay CI, no que haya checks aprobados**: ningún check automático respaldó el merge.
+
+### Límites y fuera de alcance
+
+- **No se modificaron** código, pruebas, configuración, scripts, datos, registros de producción ni modelos. El registro de producción (`config/model_registry.json`, hash `a1662c88…`) no cambió. El PR tampoco modificó `CONTINUITY.md`.
+- **Las correcciones opcionales C6–C10 no se aplicaron.** Siguen pendientes y requieren autorización separada.
+- **No se implementó ningún almacén**, ni se publicó ningún blob o artefacto, ni se tocaron los cargadores heredados: siguen vigentes sus deudas descritas en §0.43 y §0.44 (cargadores de tenis con joblib; cargador MLB que deserializa sin hash ni registro).
+- Almacenamiento duradero, respaldo y retención siguen sin decidir (D1, D10, D11).
+
+### Estado operativo
+
+- `main` local, `origin/main` y el remoto real sincronizados en el merge commit `1cbdc2ddfe29853ab8049cabbd4cf84657c8f08a`; working tree limpio.
+- Las ramas local y remota `docs/artifact-storage-governance` siguen presentes (ambas en `28b7f0bb5a10e060a96493f46ed953dcc4096387`); su eliminación queda pendiente de una autorización separada y no se ha realizado.
+- **PR-1 no se ha iniciado.** Requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y PR-0 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable, un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.44: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
