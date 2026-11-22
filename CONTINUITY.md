@@ -4783,6 +4783,56 @@ Siguen visibles en la fila «D8 (pendientes)» de §4 de `ARTIFACT_STORAGE_DECIS
 
 ---
 
+## 0.51 CIERRE FORMAL DEL PR #18: decisión D14, migración de artefactos solo hacia adelante (2026-11-22)
+
+Registra el cierre Git del PR #18, un cambio **solo documental** sobre `ARTIFACT_STORAGE_DECISION.md`. §0.38–§0.50 se conservan sin modificar. Este PR **no añade código, pruebas, configuración ni artefactos, no inicia PR-4, no modifica el registro de producción, no entrena, no promueve y no desbloquea el entrenamiento ni el Tramo 5A**.
+
+### PR y merge
+
+- **PR #18**: "docs: decide forward-only model artifact migration" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/18
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T21:34:31Z (2026-11-22 16:34:31 -0500) y fusionado el 2026-11-22T21:35:25Z (2026-11-22 16:35:25 -0500). 1 commit, 1 archivo cambiado, +6 −4, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `0f596b9abf7bb27cfe3d6d70f32c9c31f96e9527` ("Merge pull request #18 from jhonsongilky1974/docs/d14-migration-decision", 2026-11-22 16:35:25 -0500). **Primer padre** `a4e8e2c86a1de2b023cc665c1ea101951bbfda0e` (tip anterior de `main`, cierre §0.50) y **segundo padre/head** `e3af95d51a7cafa2cbcb39a8659ebe11bd186a57`.
+- **Commit revisado** (ancestro de `main`): `e3af95d51a7cafa2cbcb39a8659ebe11bd186a57`, "docs: decide forward-only model artifact migration" (2026-11-22 16:28:34 -0500).
+- **Alcance del merge**: frente a su primer padre cambia únicamente `ARTIFACT_STORAGE_DECISION.md` (**+6 −4**). Su árbol (`e88a3162c911edd7912053cce1ac1b28b7a91ccc`) y el blob del documento (`9cbb9c5252f5fdb778a6fd110ba1eb20ca28eaed`) son idénticos a los del commit revisado: el merge no añade cambios propios. `CONTINUITY.md`, `src/`, `tests/`, `config/`, `data/`, `scripts/` y `governance/` no cambian.
+- **Cierre local verificado**: `git fetch origin` y `git merge --ff-only origin/main` (fast-forward `a4e8e2c..0f596b9`); `main`, `origin/main` y el remoto real idénticos en `0f596b9abf7bb27cfe3d6d70f32c9c31f96e9527`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `e3af95d…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Decisión registrada (aprobada por el propietario)
+
+D14 pasa a la tabla de §2 de `ARTIFACT_STORAGE_DECISION.md` con fecha 2026-11-22 (opción A, migración solo hacia adelante) y sale de la tabla de §4.
+
+- **Sin conversión ni deserialización.** No se convierten ni se deserializan artefactos heredados como parte de la migración, y los cargadores seguros no recurren a ellos. Los dos artefactos existentes son `INVALID` y siguen solo como evidencia.
+- **PR-4.** Añade cargadores seguros de tenis (modelo base y calibrador) desde el almacén, **sin conectarlos a producción**. Devuelven el modelo y los metadatos verificados, sin adaptar la interfaz de inferencia.
+- **Cargadores heredados.** Quedan intactos en PR-4. Su retiro, el cableado de los cargadores nuevos y el tratamiento de MLB quedan para D22.
+- **Fallos esperados.** Los fallos esperados de configuración, selección, lectura, validación o concordancia con el registro devuelven «sin modelo» y dejan un motivo en el log, **sin recurrir al formato heredado** (sin fallback entre formatos). No se capturan indiscriminadamente los errores inesperados de programación.
+
+### Pendientes que D14 no decide
+
+- **D22 sigue pendiente**: cuándo se cablean los cargadores nuevos a producción, cuándo se retiran los heredados de tenis y qué se hace con el cargador MLB sin guardián.
+- **Metadatos de inferencia (esquema v2, sin ID)**: la inferencia de tenis consume `feature_set_version` y `round_categories`, y los metadatos v1 no los representan (`ARTIFACT_PACKAGE_SPEC.md` §4, aplazados a `schema_version` 2). **Su representación debe definirse antes de que PR-7 publique modelos nuevos**; PR-4 no los inventa ni los deduce. **D14 no aprueba un esquema v2.** Sigue como fila propia en §4 y como requisito aparte en §9 de `ARTIFACT_STORAGE_DECISION.md`.
+- **Requisitos previos de PR-7 ya existentes**: decidir D11, D15 y D1 (sin cambios). D11 no bloquea PR-4.
+- Siguen también los tres pendientes de D8 (§0.50).
+
+### Límites y fuera de alcance
+
+- **No se modificó ningún código ni prueba**: no se tocaron los cargadores, los entrenadores, el registro ni el formato seguro. Los cargadores nuevos son trabajo de PR-4, que no se ha iniciado.
+- **No se modificó `config/model_registry.json`**. Aprobar D14 no promueve, no activa ni hace activable ningún modelo.
+- No se ejecutaron pruebas para este PR: es solo documental y ninguna prueba abre `ARTIFACT_STORAGE_DECISION.md` (una prueba lo menciona solo en un docstring).
+
+### Referencias históricas desactualizadas
+
+§0.50 se conserva sin modificar y algunas de sus frases quedan históricas: la lista de decisiones pendientes que incluye «D14 (necesaria antes de PR-4)» (D14 está decidida); y «La rama `feat/registry-v2-validation` aún existe en local y en `origin`» (ya fue eliminada en ambos lados tras ese cierre). Su afirmación de que PR-4 no se ha iniciado sigue siendo cierta. Este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47 a §0.50; sin `package_models`.
+- **La rama `docs/d14-migration-decision` aún existe en local y en `origin`** (ambas en `e3af95d51a7cafa2cbcb39a8659ebe11bd186a57`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-4 aún no se ha iniciado**, ni PR-1b (sigue dependiendo de D11) ni PR-5 en adelante. Decisiones pendientes: D1 (parcial), los tres pendientes de D8, D9 (remoto), D10, D11, D13, D15 (necesaria antes de PR-7), D19, D21, D22 y D23, además de la definición de los metadatos de inferencia. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #18 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.50: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
