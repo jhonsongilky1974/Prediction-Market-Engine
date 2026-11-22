@@ -899,17 +899,21 @@ def test_importing_the_safe_modules_does_not_import_scikit_learn_or_numpy():
 
 
 def test_nothing_in_src_scripts_or_config_imports_the_safe_modules_automatically():
-    own = {SRC_FORMAT.resolve(), SRC_EXPORT.resolve()}
+    repo_root = Path(__file__).resolve().parents[2]  # anclada a la raíz: no depende del directorio de trabajo
+    own = {
+        (repo_root / "src" / "models" / name).resolve()
+        for name in ("safe_artifact_format.py", "safe_artifact_export.py", "artifact_package.py")
+    }
     offenders = []
     for root in ("src", "scripts", "config"):
-        for path in Path(root).rglob("*.py"):
+        for path in (repo_root / root).rglob("*.py"):
             if path.resolve() in own:
                 continue
             text = path.read_text(encoding="utf-8")
             if "safe_artifact_format" in text or "safe_artifact_export" in text:
                 offenders.append(str(path))
     assert offenders == []
-    assert "safe_artifact" not in Path("src/models/__init__.py").read_text(encoding="utf-8")
+    assert "safe_artifact" not in (repo_root / "src" / "models" / "__init__.py").read_text(encoding="utf-8")
 
 
 HOSTILE_SCRIPT = """
