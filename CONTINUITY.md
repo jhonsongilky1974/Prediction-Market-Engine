@@ -4679,6 +4679,59 @@ Registra el cierre Git del PR #15 (PR-2 de la serie de almacenamiento de artefac
 
 ---
 
+## 0.49 CIERRE FORMAL DEL PR #16: decisiones D8 y D16 del registro v2 para el alcance de PR-3 (2026-11-22)
+
+Registra el cierre Git del PR #16, un cambio **solo documental** sobre `ARTIFACT_STORAGE_DECISION.md`. §0.38–§0.48 se conservan sin modificar. Este PR **no añade código, pruebas, configuración ni artefactos, no inicia PR-3, no modifica el registro de producción, no entrena, no promueve y no desbloquea el entrenamiento ni el Tramo 5A**.
+
+### PR y merge
+
+- **PR #16**: "docs: decide registry v2 format and rollback policy" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/16
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T18:40:45Z (2026-11-22 13:40:45 -0500) y fusionado el 2026-11-22T18:44:49Z (2026-11-22 13:44:49 -0500). 1 commit, 1 archivo cambiado, +9 −8, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `0a300c8733bd59883dea092cd8aef00f7aee4c09` ("Merge pull request #16 from jhonsongilky1974/docs/registry-v2-decisions", 2026-11-22 13:44:48 -0500). **Primer padre** `8b031d88158d434513521727190f371bc7db2d0d` (tip anterior de `main`, cierre §0.48) y **segundo padre/head** `dacc7433b3ccf934de45152bb363e4e9796c5150`.
+- **Commit revisado** (ancestro de `main`): `dacc7433b3ccf934de45152bb363e4e9796c5150`, "docs: decide registry v2 format and rollback policy" (2026-11-22 13:29:11 -0500).
+- **Alcance del merge**: frente a su primer padre cambia únicamente `ARTIFACT_STORAGE_DECISION.md` (**+9 −8**). Su árbol (`c25d4fdb11617f7dded21b135e2a125fff07175b`) y el blob del documento (`2da2f4313f90c27fe4508a73ab4be252660d88f2`) son idénticos a los del commit revisado: el merge no añade cambios propios. `CONTINUITY.md`, `src/`, `tests/`, `config/`, `data/`, `scripts/` y `governance/` no cambian.
+- **Cierre local verificado**: `git fetch origin` y `git merge --ff-only origin/main` (fast-forward `8b031d8..0a300c8`); `main`, `origin/main` y el remoto real idénticos en `0a300c8733bd59883dea092cd8aef00f7aee4c09`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `dacc7433…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Decisiones registradas (aprobadas por el propietario para el alcance de PR-3)
+
+D8 y D16 pasan a la tabla de §2 de `ARTIFACT_STORAGE_DECISION.md` con fecha 2026-11-22 y salen de la tabla de §4 (que conserva una fila «D8 (pendientes)»).
+
+- **D8, reversión y recuperación.** Si una promoción se revierte porque el modelo no debe seguir activo, otro PR marca su entrada `INVALID`, registra el motivo en `reason` y enlaza la promoción citando en ese texto su PR o commit. La entrada se conserva y su `model_version` no se reutiliza para otro artefacto. Reactivar un modelo anterior exige un PR explícito; nunca hay retorno automático. Git permite recuperar el estado del registro, no los archivos del modelo. Los estados siguen siendo los tres existentes (`ALLOWED`, `INVALID` y `REJECTED_CANDIDATE`); D15 sigue pendiente.
+- **D8, selección v2 (alcance actual de tenis).** Como máximo un modelo base `ALLOWED` en total y un calibrador `ALLOWED` por cada versión de modelo base. Dos o más candidatos `ALLOWED` bien formados en el grupo aplicable producen «sin modelo» solo para ese grupo: es un resultado de la selección, no un error de formato. PR-3 prueba esta regla como lógica aislada; PR-4 la integra en los cargadores. PR-3 no cambia la selección heredada.
+- **D16, forma del registro v2 (opción B).** Una lista opcional `package_models` en el mismo archivo `config/model_registry.json`, separada de `models`. Cada entrada lleva `model_version`, `status`, `reason`, `package_manifest_key` y `role` (obligatorio; valores exactos `base` y `calibrator`). Una entrada `calibrator` exige `base_model_version`; una `base` lo prohíbe. Un rol ausente o inválido, o una combinación incorrecta, es un error de validación y nunca se reclasifica la entrada como base. `model_version` es único dentro de `package_models` y entre ambas listas.
+- **D16, rechazo de toda la lista.** Si `package_models` está presente pero no es una lista válida, o si alguna entrada incumple el esquema, los estados permitidos o la unicidad, el analizador rechaza toda la lista v2 con un error de validación, sin descartar entradas sueltas ni devolver resultados parciales. Solo la ausencia de la clave se interpreta como lista vacía. El lector heredado sigue ignorando `package_models` (comprobado sobre `8b031d8`; aún sin prueba que lo fije: PR-3 debe añadirla).
+- **Alcance de PR-3 aprobado**: solo valida el registro v2; deja intacto el JSON de producción, no lee el almacén y no conecta el analizador a los cargadores. PR-4 contrastará el rol declarado y, para un calibrador, su referencia al modelo base con el paquete verificado. **D11 no bloquea este alcance de PR-3.**
+
+### Pendientes de D8 (no se deciden con esta aprobación)
+
+- **Retiro de un modelo sano**: cómo retirar un modelo no defectuoso antes de sustituirlo. Se necesita antes de la primera promoción real que sustituya a otro modelo.
+- **Agrupación de otros deportes**: a qué grupo pertenecen los modelos de otros deportes en la selección v2 (la regla aprobada se limita a tenis).
+- **Requisitos de la referencia del calibrador**: si `base_model_version` debe apuntar a una entrada v2 del propio registro y en qué estado.
+
+Siguen visibles en la fila «D8 (pendientes)» de §4 y en §9 de `ARTIFACT_STORAGE_DECISION.md`. Sin plazo fijado.
+
+### Límites y fuera de alcance
+
+- **No se modificó ningún código ni prueba**: no existe ninguna mención de `package_models` en `src/`, `tests/`, `scripts/` ni `config/`. El analizador v2 y su prueba de compatibilidad con el lector heredado son trabajo de PR-3, que no se ha iniciado.
+- **No se modificó `config/model_registry.json`** ni ningún cargador, entrenador, libro o evaluador. Aprobar D8 y D16 no promueve, no activa ni hace activable ningún modelo.
+- **D20 se ajustó solo en una referencia**: una model card real exige una promoción real (ver D8) y PR-3 no promueve ningún modelo; la decisión de D20 no cambia.
+- No se ejecutaron pruebas para este PR: es solo documental y ninguna prueba lee `ARTIFACT_STORAGE_DECISION.md`.
+
+### Referencias históricas desactualizadas
+
+§0.48 se conserva sin modificar y algunas de sus frases quedan históricas: «Decisiones pendientes: D1, D8, D9 (remoto), D10, D11, D13, D14, D15…, D16, D19, D21, D22 y D23» (D16 está decidida y D8 solo conserva los tres pendientes anteriores); su mención de que «PR-1b y PR-3 en adelante no se han iniciado» sigue siendo cierta, pero PR-3 ya cuenta con D8 y D16 aprobadas; y «La rama `feat/artifact-package-format` aún existe en local y en `origin`» (ya fue eliminada en ambos lados tras ese cierre). Este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47 y §0.48; 0 modelos `ALLOWED`.
+- **La rama `docs/registry-v2-decisions` aún existe en local y en `origin`** (ambas en `dacc7433b3ccf934de45152bb363e4e9796c5150`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-3 aún no se ha iniciado**; tampoco PR-1b (sigue dependiendo de D11) ni PR-4 en adelante. Decisiones pendientes: D1 (parcial), los tres pendientes de D8, D9 (remoto), D10, D11, D13, D14, D15 (necesaria antes de PR-7), D19, D21, D22 y D23. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #16 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.48: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
