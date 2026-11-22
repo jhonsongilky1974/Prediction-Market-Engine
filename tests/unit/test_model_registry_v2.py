@@ -595,10 +595,12 @@ def test_the_module_does_not_touch_the_legacy_reader_or_the_registry_file():
 
 
 def test_nothing_in_src_scripts_or_config_references_the_module_and_the_package_init_stays_empty():
+    # Exentos: el propio módulo y, por su ruta exacta, los cargadores seguros de PR-4 (único consumidor autorizado).
+    own = {MODULE_PATH.resolve(), (REPO_ROOT / "src" / "models" / "package_loaders.py").resolve()}
     offenders = []
     for top in ("src", "scripts", "config"):
         for path in (REPO_ROOT / top).rglob("*.py"):
-            if path.resolve() == MODULE_PATH.resolve():
+            if path.resolve() in own:
                 continue
             if "model_registry_v2" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path.relative_to(REPO_ROOT)))

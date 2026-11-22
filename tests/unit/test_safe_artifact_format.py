@@ -902,7 +902,7 @@ def test_nothing_in_src_scripts_or_config_imports_the_safe_modules_automatically
     repo_root = Path(__file__).resolve().parents[2]  # anclada a la raíz: no depende del directorio de trabajo
     own = {
         (repo_root / "src" / "models" / name).resolve()
-        for name in ("safe_artifact_format.py", "safe_artifact_export.py", "artifact_package.py")
+        for name in ("safe_artifact_format.py", "safe_artifact_export.py", "artifact_package.py", "package_loaders.py")
     }
     offenders = []
     for root in ("src", "scripts", "config"):
