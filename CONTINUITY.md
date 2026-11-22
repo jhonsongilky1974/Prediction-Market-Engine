@@ -4591,6 +4591,46 @@ Cifras de la ejecución más reciente, repetida sobre `main` tras el merge (el �
 
 ---
 
+## 0.47 CIERRE FORMAL DEL PR #14: decisiones D6, D18 y D20 del paquete de metadatos de artefactos (2026-11-21)
+
+Registra el cierre Git del PR #14, un cambio **solo documental** sobre `ARTIFACT_STORAGE_DECISION.md`. §0.38–§0.46 se conservan sin modificar. Este PR **no añade código, pruebas, configuración ni artefactos, no inicia PR-1b ni PR-2, no entrena, no promueve y no desbloquea el entrenamiento ni el Tramo 5A**.
+
+### PR y merge
+
+- **PR #14**: "docs: decide artifact package metadata governance (D6, D18, D20)" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/14
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T01:59:23Z (2026-11-21 20:59:23 -0500) y fusionado el 2026-11-22T02:05:17Z (2026-11-21 21:05:17 -0500). 2 commits, 1 archivo cambiado, +20 −20, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `ae260bc4b8766e93eb5ff80b82edf61fec44c089` ("Merge pull request #14 from jhonsongilky1974/docs/artifact-package-decisions", 2026-11-21 21:05:16 -0500, un segundo menos que el `merged_at` de la API). **Primer padre** `e72b407b45c09a03b4b709e2d4f6b2a131031e34` (tip anterior de `main`, cierre §0.46) y **segundo padre/head** `3465a64c0b32d461b789ac5d088a8a65d2ad6214`.
+- **Commits integrados** (ambos son ancestros de `main`):
+  - `4724692b60c838158ea28df2f4c7e8fc669050e5`, "docs: decide artifact package metadata governance" (2026-11-21 20:22:43 -0500).
+  - `3465a64c0b32d461b789ac5d088a8a65d2ad6214`, "docs: clarify governed model statuses" (2026-11-21 20:36:24 -0500).
+- **Alcance del merge**: frente a su primer padre cambia únicamente `ARTIFACT_STORAGE_DECISION.md` (**+20 −20**). Su árbol (`901ba9ff7e1b6348e7f85257a40da49512bfac96`) es idéntico al del head de la rama: el merge no añade cambios propios. Frente a `e72b407`, `CONTINUITY.md`, `src/`, `tests/`, `config/`, `data/`, `scripts/`, `governance/` y `browser-extension/` no cambian.
+- **Cierre local verificado**: `git fetch --prune` y `git merge --ff-only origin/main` (fast-forward `e72b407..ae260bc`); `main`, `origin/main` y el remoto real idénticos en `ae260bc4b8766e93eb5ff80b82edf61fec44c089`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **No existe CI configurado**: para el head `3465a64…` GitHub muestra 0 check-runs y 0 estados. **"0 checks" significa que no hay CI, no que haya checks aprobados**: ningún check automático respaldó el merge.
+
+### Decisiones registradas
+
+- **D6 y D20, resueltas el 2026-11-21**, ahora filas de §2 de `ARTIFACT_STORAGE_DECISION.md` (y fuera de §4). D6 fija la relación entre artefacto, metadatos, manifiesto de paquete (`artifact_package_manifest`), registro y libro; distingue la *clave del almacén* del *hash SHA-256*; y establece qué puede contener Git (identificación, esquemas, procedencia pública, uso previsto, limitaciones, conteos, rangos, hashes, referencias y métricas agregadas con su partición; **nunca** listas completas ni resultados por `event_id`; las métricas de test solo las escribe el evaluador en el libro). D20 establece que `governance/models/MODEL_CARD_TEMPLATE.md` es prerrequisito de PR-2 y que PR-2 crea únicamente la plantilla, no una model card de producción.
+- **Consecuencia de D6 que sigue vigente**: hasta que PR-5 resuelva el manifiesto de instantánea desde el almacén, **no se registra ningún `SNAPSHOT_FROZEN` real**, porque la herramienta actual exige ese manifiesto, con las listas completas, bajo `governance/calibration/snapshots/`.
+- **D18, asignada a PR-1b** (decisión histórica de la planificación de PR-1, §0.46, «Decisiones aplicadas», punto 1); ahora fila de §2. **PR-1b sigue dependiendo de D11.**
+- **D8, D11 y D15 siguen pendientes.** **D15 se necesita antes de PR-7**, el primer PR cuyos entrenadores publican artefactos y metadatos (§8 y §9 de la decisión). `REJECTED_CANDIDATE` es un estado actual del registro (`ALLOWED`, `INVALID` y `REJECTED_CANDIDATE`), que el registro y los cargadores de tenis ya tratan como no activable; la existencia del estado no resuelve D15.
+- **Reconciliaciones aplicadas** en el mismo documento: D2, D3/§3.1 (detalles que PR-1 fijó), D4, D5, §5, §8 y §9. Con ello quedan corregidas las tres referencias que §0.46 señalaba como desactualizadas: §3.1 (detalles de D3), la fila de D18 en §4 y el punto de §9 sobre D18.
+
+### Aclaración sobre las claves (§0.46)
+
+- **La clave pública de un blob son 64 caracteres hexadecimales en minúsculas**, validada con `validate_key` (que acepta ese formato y rechaza `sha256/<2 hex>/<64 hex>`). **`sha256/<2 hex>/<64 hex>` es solo la disposición interna del backend local**: ningún consumidor entrega una ruta.
+- §0.46 (sección «Funcionalidad», viñeta del backend) escribe «Claves `sha256/<2 hex>/<64 hex>`»; debe leerse con esta aclaración. §0.46 se conserva sin modificar.
+- **La redacción histórica de PR-0 sigue en `ARTIFACT_STORAGE_DECISION.md`**: la cabecera («Estado: REGISTRO DE DECISIONES, SOLO DOCUMENTAL (2026-10-05)»), las frases «en este PR» de la introducción y de §7 y la fila «PR-0 (este)» de §8 (líneas 3, 6, 193 y 206 de la versión fusionada) no se modificaron: describen PR-0 y no deben leerse como referidas al PR #14.
+
+### Estado operativo
+
+- **El registro de producción conserva su hash**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), sin cambios.
+- **La rama `docs/artifact-package-decisions` aún existe en local y en `origin`** (ambas en `3465a64c0b32d461b789ac5d088a8a65d2ad6214`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-1b y PR-2 no se han iniciado.** `ARTIFACT_PACKAGE_SPEC.md` y `governance/models/MODEL_CARD_TEMPLATE.md` **no existen todavía**: PR-2 los crearía. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #14 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.46: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
