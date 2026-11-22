@@ -4732,6 +4732,57 @@ Siguen visibles en la fila «D8 (pendientes)» de §4 y en §9 de `ARTIFACT_STOR
 
 ---
 
+## 0.50 CIERRE FORMAL DEL PR #17: validador del registro v2 `package_models` (PR-3) (2026-11-22)
+
+Registra el cierre Git del PR #17 (PR-3 de la serie de almacenamiento de artefactos). §0.38–§0.49 se conservan sin modificar. Este PR añade un validador y una selección aislados **que no están conectados a producción**; **no modifica el registro de producción, el lector heredado ni los cargadores, no promueve, no entrena y no desbloquea el entrenamiento ni el Tramo 5A**. Un `ALLOWED` v2 bien formado no activa ningún modelo.
+
+### PR y merge
+
+- **PR #17**: "feat: add registry v2 package_models validation" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/17
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T21:01:04Z (2026-11-22 16:01:04 -0500) y fusionado el 2026-11-22T21:03:57Z (2026-11-22 16:03:57 -0500). 1 commit, 2 archivos cambiados, +836 −0, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `9b27d7871abf9f1f1c0ee41c07aa1c6d37256274` ("Merge pull request #17 from jhonsongilky1974/feat/registry-v2-validation", 2026-11-22 16:03:56 -0500). **Primer padre** `d1c2f2949475ca076c1eb26eea11d6fb64b031f5` (tip anterior de `main`, cierre §0.49) y **segundo padre/head** `75b9b672ff385d41be0c1acd53d903f83720879c`.
+- **Commit revisado** (ancestro de `main`): `75b9b672ff385d41be0c1acd53d903f83720879c`, "feat: add registry v2 package_models validation" (2026-11-22 15:52:41 -0500).
+- **Alcance del merge**: frente a su primer padre **solo añade** `src/models/model_registry_v2.py` (230 líneas) y `tests/unit/test_model_registry_v2.py` (606 líneas): **+836 −0**, ambos archivos nuevos. Su árbol (`67ef11ececf44ce0770f584794b842f5a1d1071c`) es idéntico al del commit revisado: el merge no añade cambios propios. `config/`, `src/` (salvo el módulo nuevo), `tests/` (salvo la prueba nueva), `scripts/`, `data/` y `governance/` no cambian.
+- **Cierre local verificado**: `git fetch origin` y `git merge --ff-only origin/main` (fast-forward `d1c2f29..9b27d78`); `main`, `origin/main` y el remoto real idénticos en `9b27d7871abf9f1f1c0ee41c07aa1c6d37256274`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `75b9b672…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Alcance
+
+- **Analizador** (`parse_package_registry`): analiza la lista opcional `package_models` del objeto JSON de nivel superior ya decodificado, sin E/S. Clave ausente o lista vacía: registro v2 vacío. Cada entrada lleva exactamente `model_version`, `status`, `reason`, `package_manifest_key` y `role` (`base` o `calibrator`); `base_model_version` es obligatorio en un calibrador y está prohibido en un modelo base. `status` solo admite `ALLOWED`, `INVALID` y `REJECTED_CANDIDATE`, enumerados explícitamente (sin recorrer el enum heredado). `reason` es texto no vacío ni solo espacios, de hasta 500 caracteres y sin caracteres de control. `model_version` es único dentro de la lista y frente a `models`; un calibrador no puede referenciarse a sí mismo. No resuelve ni comprueba la existencia o el estado del modelo base, y no rechaza dos versiones por compartir `package_manifest_key`.
+- **Selección** (`select_base`, `select_calibrator`): como máximo un modelo base `ALLOWED` en total y un calibrador `ALLOWED` por versión de modelo base (alcance actual de tenis). El resultado distingue `SELECTED`, `NO_CANDIDATE` y `AMBIGUOUS`; los dos últimos devuelven `entry=None`.
+- **Dos reglas separadas.** (1) **Una entrada inválida rechaza toda la lista `package_models`** con `PackageRegistryError`, sin descartar entradas sueltas ni devolver resultados parciales. (2) **Varios candidatos `ALLOWED` bien formados dejan sin modelo solo al grupo afectado**: es un resultado de la selección, no un error de formato, y no altera a los demás grupos.
+- **Intactos**: `config/model_registry.json`, el lector heredado (`load_model_registry`, que sigue ignorando `package_models`, ahora con pruebas que lo fijan), los cargadores de tenis y MLB, las guardas existentes y los entrenadores.
+- **No conectado**: ningún módulo de `src/`, `scripts/` ni `config/` importa o menciona `model_registry_v2`. El módulo no lee archivos ni el almacén y no importa el verificador de paquetes.
+
+### Validación (anterior a la fusión)
+
+- **279 pruebas de PR-3 aprobadas** (`tests/unit/test_model_registry_v2.py`), ejecutadas sobre los dos archivos tal como quedaron en el commit revisado.
+- **Suite completa: 3246 aprobadas y 14 omitidas**, también antes de la fusión, sobre el árbol de la rama. La base previa sobre `main` (`d1c2f29`) era 2967 aprobadas y 14 omitidas: la diferencia son las 279 pruebas nuevas, sin fallos ni omisiones nuevas.
+- **El árbol fusionado es idéntico al revisado** (`67ef11ec…`), así que esas ejecuciones corresponden al contenido que hay hoy en `main`. **La suite no se repitió sobre `main` después de la fusión.**
+- Control de calidad previo: 18 de 19 mutaciones del módulo fueron detectadas por las pruebas; la restante (quitar `re.ASCII` de la expresión de versión) es equivalente, porque el patrón usa rangos ASCII explícitos.
+
+### Pendientes de D8 (no se deciden con este PR)
+
+- **Retiro de un modelo sano**: cómo retirar un modelo no defectuoso antes de sustituirlo (se necesita antes de la primera promoción real que sustituya a otro).
+- **Agrupación de otros deportes**: a qué grupo pertenecen los modelos de otros deportes en la selección v2 (la regla implementada se limita a tenis).
+- **Requisitos de la referencia del calibrador**: si `base_model_version` debe apuntar a una entrada v2 del propio registro y en qué estado. El validador no lo comprueba.
+
+Siguen visibles en la fila «D8 (pendientes)» de §4 de `ARTIFACT_STORAGE_DECISION.md`.
+
+### Referencias históricas desactualizadas
+
+§0.49 se conserva sin modificar y algunas de sus frases quedan históricas: «PR-3 aún no se ha iniciado» y «El analizador v2 y su prueba de compatibilidad con el lector heredado son trabajo de PR-3, que no se ha iniciado» (PR-3 está fusionado); «no existe ninguna mención de `package_models` en `src/`, `tests/`, `scripts/` ni `config/`» (existe en el módulo y en la prueba nuevos); «aún sin prueba que lo fije: PR-3 debe añadirla» (la prueba existe); y «La rama `docs/registry-v2-decisions` aún existe en local y en `origin`» (ya fue eliminada en ambos lados). Este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47, §0.48 y §0.49; sin `package_models`.
+- **La rama `feat/registry-v2-validation` aún existe en local y en `origin`** (ambas en `75b9b672ff385d41be0c1acd53d903f83720879c`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-4 aún no se ha iniciado**, ni PR-1b (sigue dependiendo de D11) ni PR-5 en adelante. Decisiones pendientes: D1 (parcial), los tres pendientes de D8, D9 (remoto), D10, D11, D13, D14 (necesaria antes de PR-4), D15 (necesaria antes de PR-7), D19, D21, D22 y D23. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #17 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.49: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
