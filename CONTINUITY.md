@@ -4631,6 +4631,54 @@ Registra el cierre Git del PR #14, un cambio **solo documental** sobre `ARTIFACT
 
 ---
 
+## 0.48 CIERRE FORMAL DEL PR #15: formato canónico y verificación del paquete de artefacto (PR-2) (2026-11-22)
+
+Registra el cierre Git del PR #15 (PR-2 de la serie de almacenamiento de artefactos). §0.38–§0.47 se conservan sin modificar. Este PR añade un formato canónico y un verificador **que no está conectado a producción**; **no entrena, no promueve, no modifica el registro de modelos y no desbloquea el entrenamiento ni el Tramo 5A**. **Verificar un paquete no aprueba ni activa el modelo.**
+
+### PR y merge
+
+- **PR #15**: "feat: add canonical model artifact package verification" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/15
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T11:59:01Z (2026-11-22 06:59:01 -0500) y fusionado el 2026-11-22T12:10:01Z (2026-11-22 07:10:01 -0500). 1 commit, 6 archivos cambiados, +2142 −4, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `34e41697e1b11bbdcbb09a85cdb97338ded0e1b0` ("Merge pull request #15 from jhonsongilky1974/feat/artifact-package-format", 2026-11-22 07:10:01 -0500). **Primer padre** `178fdc321f86074d0065d20cb3161a15e238b5b8` (tip anterior de `main`, cierre §0.47) y **segundo padre/head** `4d822535e3b95c17c9472aaef2bf214e27918748`.
+- **Commit revisado** (ancestro de `main`): `4d822535e3b95c17c9472aaef2bf214e27918748`, "feat: add canonical model artifact package verification" (2026-11-22 06:50:08 -0500).
+- **Alcance del merge**: frente a su primer padre cambian únicamente los seis archivos del commit revisado (+2142 −4). Su árbol (`5f8d4138aab92b5e104d3dced943bad40bbcf917`) es idéntico al del commit revisado: el merge no añade cambios propios.
+- **Cierre local verificado**: `git fetch` y fast-forward de `main` local a `34e4169`; `main`, `origin/main` y el remoto real idénticos en `34e41697e1b11bbdcbb09a85cdb97338ded0e1b0`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `4d82253…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Alcance
+
+- **Formato canónico de metadatos y de manifiesto de paquete**: `src/models/artifact_package.py` define los documentos `model_artifact_metadata` y `artifact_package_manifest` (versión de esquema 1) como JSON canónico (claves ordenadas, sin espacios, `ensure_ascii`, sin `NaN`/infinitos, un único `\n` final), con límites de tamaño (metadatos 65 536 bytes, manifiesto 4 096 bytes), tipos y rangos estrictos, sin números de coma flotante en v1, reglas por rol (`platt` exige `base_model_ref` y prohíbe `training`; `imputed` al revés) y rechazo de claves prohibidas por D6/D12 (listas de `event_id`, rutas absolutas o de ubicación, métricas de test y estados de gobernanza). La especificación está en `ARTIFACT_PACKAGE_SPEC.md`.
+- **Verificación de los tres componentes**: `verify_package(reader, manifest_key, *, expected_model_version)` lee del almacén, **en este orden: manifiesto → artefacto → metadatos** (el hash se comprueba antes de analizar; el artefacto se carga con `safe_json_b1`), y exige coherencia entre los tres y con la versión esperada; los fallos son cerrados (excepciones tipadas, sin resultados parciales). **Se rechaza la autorreferencia del calibrador por dos vías**: por `model_version`, cuando `base_model_ref.model_version` coincide con el `model_version` del propio calibrador (al cargar los metadatos, `PackageSchemaError`), y por clave, cuando `base_model_ref.package_manifest_key` es la clave de su propio manifiesto (en `verify_package`, `PackageConsistencyError`).
+- **Plantilla de ficha de modelo**: `governance/models/MODEL_CARD_TEMPLATE.md`, solo plantilla (D20): **no es una model card de producción**.
+- **Archivos del PR** (6): `src/models/artifact_package.py`, `tests/unit/test_artifact_package.py`, `ARTIFACT_PACKAGE_SPEC.md`, `governance/models/MODEL_CARD_TEMPLATE.md` y dos guardas existentes (`tests/unit/test_local_filesystem_store.py`, `tests/unit/test_safe_artifact_format.py`), que ahora admiten la ruta exacta de `artifact_package.py` como único módulo adicional autorizado a mencionar B1 y el almacén.
+
+### Límites y fuera de alcance
+
+- **El verificador no está conectado a producción**: ningún módulo de `src/`, `scripts/` ni `config/` lo importa ni lo menciona. Solo lo ejercitan sus pruebas.
+- **Verificar un paquete no aprueba ni activa el modelo**: un paquete verificado **no** es `ALLOWED`. El registro de modelos y su gobernanza no intervienen.
+- **No resuelve `base_model_ref` ni `dataset_manifest_ref`**: PR-2 valida el formato de las referencias (`base_model_ref` solo en un calibrador; `dataset_manifest_ref` con `key` y `schema_version`) **sin resolverlas**: no comprueba que el manifiesto base ni el blob del manifiesto de datos existan, ni los lee.
+- No se introducen entrenadores (PR-7), registro v2 (PR-3; D8/D16), cargadores (PR-4; D14), libro/evaluador sobre el almacén ni manifiesto de instantánea como blob (PR-5), ni `--db-path`/congelación (PR-6). Hasta PR-5 sigue sin registrarse ningún `SNAPSHOT_FROZEN` real (§0.47).
+
+### Validación
+
+- **2957 pruebas aprobadas antes de la fusión**: suite completa ejecutada sobre el árbol de la rama revisada, cuyo árbol (`5f8d4138…`) es idéntico al de `main` tras la fusión.
+- **864 pruebas aprobadas sobre `main` después de la fusión**: subconjunto enfocado de tres archivos (`tests/unit/test_artifact_package.py`, `tests/unit/test_safe_artifact_format.py`, `tests/unit/test_local_filesystem_store.py`), ejecutado sobre `34e4169`. **La suite completa no se volvió a ejecutar sobre `main`**; las dos cifras no son comparables ni acumulables.
+- GitHub no registró check-runs ni estados automáticos para el commit revisado: ninguna de estas ejecuciones la respaldó un check automático registrado.
+
+### Referencias históricas desactualizadas
+
+§0.47 se conserva sin modificar y tres de sus frases quedan históricas: «PR-1b y PR-2 no se han iniciado» (PR-2 está fusionado; PR-1b sigue sin iniciar); «`ARTIFACT_PACKAGE_SPEC.md` y `governance/models/MODEL_CARD_TEMPLATE.md` no existen todavía» (existen desde el PR #15); y «La rama `docs/artifact-package-decisions` aún existe en local y en `origin`» (ya fue eliminada en ambos lados). Este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47; 0 modelos `ALLOWED`.
+- **La rama `feat/artifact-package-format` aún existe en local y en `origin`** (ambas en `4d822535e3b95c17c9472aaef2bf214e27918748`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-1b y PR-3 en adelante no se han iniciado.** PR-1b sigue dependiendo de D11. Decisiones pendientes: D1, D8, D9 (remoto), D10, D11, D13, D14, D15 (necesaria antes de PR-7), D16, D19, D21, D22 y D23. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #15 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.47: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
