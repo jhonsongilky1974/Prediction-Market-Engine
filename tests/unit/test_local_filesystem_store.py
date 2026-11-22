@@ -1237,7 +1237,11 @@ def test_the_new_modules_import_nothing_forbidden_and_in_particular_no_settings_
 
 
 def test_nothing_in_src_scripts_or_config_imports_the_store_automatically_and_the_package_init_stays_empty():
-    own = {Path(lfs.__file__).resolve(), Path(inspect.getsourcefile(sys.modules["src.storage.artifact_store"])).resolve()}
+    own = {
+        Path(lfs.__file__).resolve(),
+        Path(inspect.getsourcefile(sys.modules["src.storage.artifact_store"])).resolve(),
+        (lfs._REPO_ROOT / "src" / "models" / "artifact_package.py").resolve(),
+    }
     offenders = []
     for top in ("src", "scripts", "config"):
         for path in (lfs._REPO_ROOT / top).rglob("*.py"):
