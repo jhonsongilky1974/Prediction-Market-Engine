@@ -4833,6 +4833,55 @@ D14 pasa a la tabla de §2 de `ARTIFACT_STORAGE_DECISION.md` con fecha 2026-11-2
 
 ---
 
+## 0.52 CIERRE FORMAL DEL PR #19: cargadores seguros de tenis desde el almacén de paquetes (PR-4) (2026-11-22)
+
+Registra el cierre Git del PR #19 (PR-4 de la serie de almacenamiento de artefactos). §0.38–§0.51 se conservan sin modificar. Este PR añade cargadores seguros **que no están conectados a producción**; **no modifica el registro de producción ni los cargadores heredados, no adapta la inferencia, no promueve, no entrena y no desbloquea el entrenamiento ni el Tramo 5A**.
+
+### PR y merge
+
+- **PR #19**: "feat: add safe tennis model package loaders" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/19
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-22T23:00:22Z (2026-11-22 18:00:22 -0500) y fusionado el 2026-11-22T23:01:52Z (**22 de noviembre de 2026, 18:01:52 ET**, -0500). 1 commit, 7 archivos cambiados, +919 −3, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `375d42bb0ed5dc22319dfb847120cb5f5ee2ffae` ("Merge pull request #19 from jhonsongilky1974/feat/tennis-safe-package-loaders", 2026-11-22 18:01:52 -0500). **Primer padre** `0186a7270f68f808ea39177f457cdc745d99c9f8` (tip anterior de `main`, cierre §0.51) y **segundo padre/head** `2d190f5bf078fe94f5bf170c4acef28e00b19bf3`.
+- **Commit revisado** (ancestro de `main`): `2d190f5bf078fe94f5bf170c4acef28e00b19bf3`, "feat: add safe tennis model package loaders" (2026-11-22 17:55:14 -0500).
+- **Alcance del merge**: frente a su primer padre incorpora **7 archivos (+919 −3)**: tres nuevos (`src/models/package_loaders.py`, 160 líneas; `tests/unit/package_loader_factories.py`, 111; `tests/unit/test_package_loaders.py`, 640) y cuatro guardas existentes (`tests/unit/test_artifact_package.py`, `tests/unit/test_local_filesystem_store.py`, `tests/unit/test_model_registry_v2.py` y `tests/unit/test_safe_artifact_format.py`), modificadas solo para exceptuar la ruta exacta del módulo nuevo. Su árbol (`13b5d343b24b24ccbd7fabd25141996dd0c45a90`) **coincide con el del commit revisado**: el merge no añade cambios propios. `config/`, `scripts/`, `data/`, `governance/`, los cargadores heredados y el resto de `src/` no cambian.
+- **Cierre local verificado**: `git fetch origin` y `git merge --ff-only origin/main` (fast-forward `0186a72..375d42b`); `main`, `origin/main` y el remoto real idénticos en `375d42bb0ed5dc22319dfb847120cb5f5ee2ffae`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `2d190f5…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Alcance
+
+- **Cargadores** (`load_base`, `load_calibrator`): reciben el registro v2 **ya analizado** (`PackageRegistry`) y un lector **ya construido**, y devuelven el `VerifiedPackage` de la verificación de paquetes (modelo y metadatos verificados, tal cual: sin adaptar la interfaz de inferencia ni añadir campos) o `None` («sin modelo»). El modelo base se elige con `select_base`; el calibrador, con `select_calibrator` por la versión de la base que recibe.
+- **El calibrador debe corresponder a la base.** Recibe un paquete base previamente verificado y exige que `base_model_ref` de sus metadatos coincida con él **en versión y en clave del manifiesto**. Un paquete base con la misma versión pero distinta clave se rechaza. **No se exige que la base figure en el registro v2 ni se le atribuye un estado**: ese punto de D8 sigue pendiente.
+- **Fallos esperados → «sin modelo».** Selección vacía o ambigua, configuración, lectura, validación y discordancia de rol, versión o referencia con el registro devuelven `None` y dejan **un solo motivo** en el log, sin rutas ni contenido del paquete. Solo se captura una **lista cerrada** de excepciones (`ArtifactNotFoundError`, `ArtifactIntegrityError`, `StoreConfigurationError`, `ArtifactPackageError`); los errores inesperados y de uso se propagan. **No hay fallback al formato heredado.**
+- **Ayudante explícito** (`open_store_reader_from_environment`): único punto que consulta `PME_ARTIFACT_STORE_ROOT`; devuelve una vista de solo lectura o `None` con motivo. Importar el módulo y llamar a los cargadores con un lector inyectado no consulta el entorno ni abre otro almacén.
+- **Intactos**: `config/model_registry.json`, los cargadores heredados (tenis y MLB), el registro v2 (`model_registry_v2.py`), el verificador de paquetes y el almacén. Ningún otro archivo de `src/`, `scripts/` ni `config/` importa o menciona `package_loaders`.
+
+### Validación (anterior a la fusión)
+
+- **65 pruebas nuevas** (`tests/unit/test_package_loaders.py`), con paquetes sintéticos en un almacén temporal.
+- **Suite completa: 3311 aprobadas y 14 omitidas**, antes del commit, sobre los archivos tal como quedaron en el commit revisado. La base previa sobre `main` (`0186a72`) era 3246 aprobadas y 14 omitidas: la diferencia son las 65 pruebas nuevas, sin fallos ni omisiones nuevas.
+- **El árbol fusionado es idéntico al revisado** (`13b5d343…`), así que esas ejecuciones corresponden al contenido que hay hoy en `main`. **La suite no se repitió sobre `main` después de la fusión.**
+- Control de calidad previo: en la primera pasada se probaron 22 mutaciones y 4 sobrevivieron. Se simplificó una comprobación redundante y se reforzaron tres pruebas. Las cuatro guardas siguen detectando a cualquier otro archivo que mencione los módulos vetados.
+
+### Fuera de este PR
+
+- **D22 sigue pendiente**: cuándo se cablean los cargadores nuevos a producción, cuándo se retiran los heredados de tenis y qué se hace con el cargador MLB sin guardián. **MLB queda fuera.**
+- **Los tres pendientes de D8** (retiro de un modelo sano, agrupación de otros deportes y requisitos de la referencia del calibrador) siguen sin decidir; el cargador no comprueba que la base sea una entrada v2 ni su estado.
+- **Esquema v2 de metadatos**: la representación de los metadatos de inferencia (`feature_set_version`, `round_categories` y los demás) sigue pendiente y debe definirse antes de que PR-7 publique modelos nuevos; PR-4 no los inventa ni los deduce.
+
+### Referencias históricas desactualizadas
+
+§0.51 se conserva sin modificar y algunas de sus frases quedan históricas: «PR-4 aún no se ha iniciado» y «Los cargadores nuevos son trabajo de PR-4, que no se ha iniciado» (PR-4 está fusionado; PR-1b y PR-5 en adelante siguen sin iniciar); y «La rama `docs/d14-migration-decision` aún existe en local y en `origin`» (ya fue eliminada en ambos lados). Este cierre es la referencia vigente de esos puntos.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47 a §0.51; sin `package_models`.
+- **La rama `feat/tennis-safe-package-loaders` aún existe en local y en `origin`** (ambas en `2d190f5bf078fe94f5bf170c4acef28e00b19bf3`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-1b (sigue dependiendo de D11) y PR-5 en adelante no se han iniciado.** Decisiones pendientes: D1 (parcial), los tres pendientes de D8, D9 (remoto), D10, D11, D13, D15 (necesaria antes de PR-7), D19, D21, D22 y D23, además de la definición de los metadatos de inferencia. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #19 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.51: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
