@@ -1241,6 +1241,7 @@ def test_nothing_in_src_scripts_or_config_imports_the_store_automatically_and_th
         Path(lfs.__file__).resolve(),
         Path(inspect.getsourcefile(sys.modules["src.storage.artifact_store"])).resolve(),
         (lfs._REPO_ROOT / "src" / "models" / "artifact_package.py").resolve(),
+        (lfs._REPO_ROOT / "src" / "models" / "package_loaders.py").resolve(),
     }
     offenders = []
     for top in ("src", "scripts", "config"):

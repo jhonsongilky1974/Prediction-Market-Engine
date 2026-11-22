@@ -1103,10 +1103,12 @@ def test_a_fresh_interpreter_verifies_a_package_without_loading_any_deserializer
 
 
 def test_nothing_in_src_scripts_or_config_imports_the_package_module_automatically_and_the_package_inits_stay_empty():
+    # Exentos: el propio módulo y, por su ruta exacta, los cargadores seguros de PR-4 (único consumidor autorizado).
+    own = {MODULE_PATH.resolve(), (REPO_ROOT / "src" / "models" / "package_loaders.py").resolve()}
     offenders = []
     for top in ("src", "scripts", "config"):
         for path in (REPO_ROOT / top).rglob("*.py"):
-            if path.resolve() == MODULE_PATH.resolve():
+            if path.resolve() in own:
                 continue
             if "artifact_package" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path.relative_to(REPO_ROOT)))
