@@ -4882,6 +4882,54 @@ Registra el cierre Git del PR #19 (PR-4 de la serie de almacenamiento de artefac
 
 ---
 
+## 0.53 CIERRE FORMAL DEL PR #20: alcance documental de PR-5, resolución de manifiestos de instantánea desde el almacén (2026-11-24)
+
+Registra el cierre Git del PR #20, un cambio **solo documental** sobre `ARTIFACT_PACKAGE_SPEC.md` y `ARTIFACT_STORAGE_DECISION.md`. §0.38–§0.52 se conservan sin modificar. Este PR **fija por escrito el alcance de PR-5; no añade código, pruebas, configuración ni artefactos, no inicia la implementación de PR-5, no autoriza registrar ningún `SNAPSHOT_FROZEN` real, no modifica el registro de producción, no entrena y no desbloquea el entrenamiento ni el Tramo 5A**.
+
+### PR y merge
+
+- **PR #20**: "docs: clarify PR-5 snapshot manifest scope" — https://github.com/jhonsongilky1974/Prediction-Market-Engine/pull/20
+- **Estado según la API**: `state: closed`, `merged: true`, `merged_by`: `jhonsongilky1974`. Creado el 2026-11-25T02:31:21Z (2026-11-24 21:31:21 -0500) y fusionado el 2026-11-25T02:34:31Z (**24 de noviembre de 2026, 21:34:31 ET**, -0500; 25 de noviembre, 02:34:31 UTC). 1 commit, 2 archivos cambiados, +44 −4, 0 comentarios de conversación y de código y 0 check-runs.
+- **Merge commit** (merge real de 2 padres, **sin squash ni rebase**): `95432e42f6430feff5bd0eb54d7c18079eefe494` ("Merge pull request #20 from jhonsongilky1974/docs/pr-5-snapshot-scope", 2026-11-24 21:34:31 -0500). **Primer padre** `5cf889743a801377aa2131e9acd0bf747aba8b5c` (tip anterior de `main`, cierre §0.52) y **segundo padre/head** `be7a5c32c7625906c34fb91b3b530aa3e074b688`.
+- **Commit revisado** (ancestro de `main`): `be7a5c32c7625906c34fb91b3b530aa3e074b688`, "docs: clarify PR-5 snapshot manifest scope" (2026-11-24 21:26:46 -0500).
+- **Alcance del merge**: frente a su primer padre cambia **únicamente** `ARTIFACT_PACKAGE_SPEC.md` y `ARTIFACT_STORAGE_DECISION.md` (**+44 −4**). Su árbol (`3ff721ebec67faf7ad3e1d76f564b4c1f875a0ee`) **coincide con el del commit revisado**: el merge no añade cambios propios. **La fila de PR-6 y el registro de producción quedaron intactos**; `CONTINUITY.md`, `src/`, `tests/`, `scripts/`, `config/`, `data/` y `governance/` no cambian.
+- **Cierre local verificado**: `git fetch origin` y `git merge --ff-only origin/main` (fast-forward `5cf8897..95432e4`); `main`, `origin/main` y el remoto real idénticos en `95432e42f6430feff5bd0eb54d7c18079eefe494`; ahead/behind 0/0; working tree limpio y sin stashes (verificación posterior al merge y anterior a preparar este cierre documental).
+- **GitHub no registró check-runs ni estados automáticos para el commit revisado** `be7a5c3…` (0 check-runs y 0 estados). **"0 checks" no equivale a checks aprobados**: ningún check automático registrado respaldó el merge.
+
+### Alcance documentado de PR-5
+
+Queda escrito en `ARTIFACT_STORAGE_DECISION.md` §8 (fila de PR-5) y §8.1, y en `ARTIFACT_PACKAGE_SPEC.md` §8.
+
+- **PR-5 queda limitado a resolver manifiestos de instantánea desde el almacén**, en el libro de calibración y en el evaluador, mediante una abstracción de resolución y **conservando el comportamiento heredado por ruta**.
+- **Una sola referencia.** `SNAPSHOT_FROZEN` admite exactamente uno de `manifest_path` o `manifest_key`, sin recurrir al otro modo si la resolución falla. En el modo por clave, `manifest_sha256` es obligatorio e igual a `manifest_key`.
+- **Blob por clave.** Los bytes deben coincidir byte por byte con `manifest_bytes()` del manifiesto validado; límite de 262 144 bytes inclusive, comprobado antes de analizar; se rechazan claves JSON duplicadas, `NaN` e `Infinity`, solo en ese modo.
+- **Fallo por falta de acceso al almacén.** Si el libro contiene manifiestos referenciados por clave y no hay acceso al almacén, la verificación completa falla e identifica los manifiestos sin verificar. Es un fallo distinto de una cadena de hashes rota y de un blob ausente, corrupto o inválido; solo afirma que la cadena o el prefijo se verificaron si esas comprobaciones se ejecutaron y pasaron.
+- **Se conserva** que el evaluador no importa `package_loaders`, `BASE_TRAINED` y `CALIBRATOR_TRAINED` con sus comprobaciones actuales (sidecar y artefacto heredados), y que `ELEGIBLE` sigue bloqueado por `SafeLoadRequiredError`.
+
+### Comprobaciones aplazadas
+
+La validación de `dataset_manifest_ref` desde un paquete y las demás comprobaciones enumeradas en `ARTIFACT_PACKAGE_SPEC.md` §8 **siguen aplazadas**, sin trabajo concreto asignado ni fecha: paquetes de base y calibrador por el libro, métricas, `trained_at`, `git_commit` y estado en el registro. PR-5 sí valida el contenido del manifiesto al resolverlo desde el libro; lo aplazado es comprobarlo a partir del `dataset_manifest_ref` de un paquete. La spec explica la dependencia de cada una por separado, y **solo la de métricas requiere el esquema v2 de metadatos**. La construcción y publicación del manifiesto conserva su alcance en PR-6.
+
+### Límites y fuera de alcance
+
+- **Esta fusión solo fija el alcance documental.** No inicia la implementación de PR-5, que sigue requiriendo autorización explícita y una auditoría previa de solo lectura.
+- **No autoriza registrar ningún `SNAPSHOT_FROZEN` real.** Las reglas vigentes y los requisitos propuestos para un registro real (no aprobados) figuran en `ARTIFACT_STORAGE_DECISION.md` §8.1.
+- **No se ejecutó la suite para este cambio documental:** no toca código, pruebas ni configuración. La última ejecución completa de referencia es la de §0.52 (3311 aprobadas y 14 omitidas), sobre un código idéntico al actual.
+
+### Referencias históricas desactualizadas
+
+§0.52 se conserva sin modificar y una de sus frases queda histórica: «La rama `feat/tennis-safe-package-loaders` aún existe en local y en `origin`» (ya fue eliminada en ambos lados tras ese cierre). Su afirmación de que PR-5 no se ha iniciado sigue siendo cierta. Este cierre es la referencia vigente de ese punto.
+
+### Estado operativo
+
+- **El registro de producción no cambió**: `config/model_registry.json`, SHA-256 `a1662c882a81a94cf4d5189a71d71a86e50d6d2fce2919ad6367a47484f46ec9` (prefijo `a1662c88`), idéntico al de §0.47 a §0.52; sin `package_models`.
+- **La rama `docs/pr-5-snapshot-scope` aún existe en local y en `origin`** (ambas en `be7a5c32c7625906c34fb91b3b530aa3e074b688`), totalmente integrada; su eliminación requiere una autorización separada y no se ha realizado.
+- **PR-5 (implementación), PR-1b (sigue dependiendo de D11) y PR-6 en adelante no se han iniciado.** Decisiones pendientes: D1 (parcial), los tres pendientes de D8, D9 (remoto), D10, D11, D13, D15 (necesaria antes de PR-7), D19, D21, D22 y D23, además de la definición de los metadatos de inferencia. Cada PR requiere autorización explícita y una auditoría previa de solo lectura.
+- **El entrenamiento y el Tramo 5A permanecen BLOQUEADOS, y el PR #20 no cambia esa condición.** El entrenamiento sigue bloqueado hasta que exista almacenamiento duradero y verificable (D1 y D11 pendientes), un mecanismo auditado de carga segura integrado en los flujos y una decisión explícita separada. El Tramo 5A sigue bloqueado por los motivos de §0.38–§0.52: D-3 (fee de Kalshi sin verificar), sin modelo limpio `ALLOWED`, sin medición de calibración válida, datos etiquetados insuficientes (umbral n ≥ 30 por bucket intacto) y fugas pendientes en MLB y backtesting.
+- **No se autoriza iniciar el siguiente tramo.**
+
+---
+
 ## 0. CIERRE FORMAL DE FASE 2 (2026-07-26)
 
 **Fase 2 queda declarada oficialmente cerrada.** Los 13 pasos de
