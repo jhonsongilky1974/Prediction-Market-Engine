@@ -135,9 +135,14 @@ consulta el registro, no activa ningún modelo y no decide nada sobre su calidad
 | `base_model_ref`: formato, presencia solo en un calibrador, no autorreferencia directa (mismo `model_version`) ni por clave (la del propio manifiesto) | Sí | — |
 | `base_model_ref`: que el manifiesto base exista, verifique como paquete, tenga el `model_version` declarado, sea un modelo base y esté aprobado; ciclos | **No** | PR-3 (registro) y PR-4 (cargadores) |
 | `dataset_manifest_ref`: formato de `key` y de `schema_version`, **sin leer el blob** | Sí | — |
-| `dataset_manifest_ref`: existencia del blob, su formato, los hashes de las listas y el `snapshot_id` | **No** | PR-5 y PR-6 |
-| Coherencia de `trained_at` con el libro; existencia de `git_commit` en el repositorio | No | PR-5 |
-| Estado en el registro y referencias desde el libro | No | PR-3 y PR-5 |
+| Resolución del manifiesto de instantánea desde el libro (`SNAPSHOT_FROZEN` por `manifest_key`): PR-5 valida el contenido del manifiesto al resolverlo (existencia del blob, formato y versión de esquema, límite de tamaño, hashes de las listas y `snapshot_id` del propio manifiesto) | **No** | PR-5 |
+| Construcción y publicación del manifiesto de instantánea (congelado de datos y herramienta del manifiesto) | No | PR-6 (alcance documentado en `ARTIFACT_STORAGE_DECISION.md` §8, sin cambios) |
+| `dataset_manifest_ref` comprobado desde un paquete: existencia del blob, formato y versión de esquema esperados, hashes de las listas y `snapshot_id`, y que la clave concuerde con el manifiesto registrado en el libro. PR-5 valida ese contenido al resolver el manifiesto desde el libro, pero no lo comprueba a partir del `dataset_manifest_ref` de un paquete | **No** | Fuera de PR-5. **Aplazada** |
+| Verificación de paquetes de base y calibrador por el libro (referencias de paquetes) | No | **Aplazada** |
+| Cruce de las métricas de validación del calibrador con el artefacto | No | **Aplazada** |
+| Coherencia de `trained_at` entre los metadatos de un paquete y el libro | No | **Aplazada** |
+| Existencia de `git_commit` en el repositorio | No | **Aplazada** |
+| Estado en el registro y referencias desde el libro | No | **Aplazada** |
 | Que los entrenadores produzcan estos documentos | No | PR-7 |
 
 La autorreferencia se rechaza por dos vías. Por `model_version`, al cargar los metadatos (`PackageSchemaError`). Por clave
@@ -145,6 +150,21 @@ La autorreferencia se rechaza por dos vías. Por `model_version`, al cargar los 
 (`PackageConsistencyError`), que es el único lugar donde se conoce esa clave. Esta segunda comprobación es **defensa en
 profundidad**. Construirla exigiría encontrar un punto fijo de la composición de hashes, lo que se considera
 computacionalmente inviable. Por eso las pruebas la ejercitan simulando la igualdad.
+
+### Dependencias de lo aplazado
+
+Cada comprobación aplazada depende de cosas distintas. **De todas ellas, solo la de métricas requiere el esquema v2 de metadatos.** Las filas «Aplazada» no tienen asignado ningún trabajo concreto ni fecha.
+
+- **`dataset_manifest_ref` desde un paquete.** Depende de que los paquetes pasen por la verificación del libro (siguiente punto) y de definir cómo se compara su `key` con el manifiesto registrado en el libro. No requiere el esquema v2.
+- **Paquetes de base y calibrador.** Depende de cambiar el esquema de `BASE_TRAINED` y `CALIBRATOR_TRAINED` (hoy con `*_artifact_sha256` y `*_metadata_sha256` del artefacto y del sidecar heredados), que PR-5 no toca, y de adaptar `src/evaluation/candidate_registry.py`, que casa esos campos. No requiere el esquema v2.
+- **Métricas.** Es la única que requiere el esquema v2: los metadatos v1 no tienen la sección `validation`, aplazada a `schema_version` 2 (§4), y hoy `CALIBRATOR_TRAINED` cruza las métricas con el sidecar heredado.
+- **`trained_at`.** Los metadatos v1 ya incluyen `trained_at`. Depende de que los paquetes pasen por la verificación del libro. No requiere el esquema v2. La comprobación actual contra el sidecar heredado se conserva.
+- **`git_commit`.** Los metadatos v1 ya incluyen `provenance.git_commit`. Depende de lo mismo, de definir qué significa «existe» (cualquier objeto del repositorio o ancestro de `main`) y de que `git` esté disponible donde se verifica. No requiere el esquema v2.
+- **Estado en el registro.** No requiere el esquema v2. Un candidato se evalúa antes de promoverse, así que no figura `ALLOWED` al evaluarse, y ningún documento define todavía qué referencia concreta enlaza una entrada del libro con una del registro v2. Depende de los pendientes de D8 (requisitos de la referencia del calibrador) y de que `ELEGIBLE` sea alcanzable (D21). La forma y la selección del registro v2 ya se validan (PR-3).
+
+### Registro real de un `SNAPSHOT_FROZEN`
+
+La resolución del manifiesto desde el libro (PR-5) no autoriza registrar ningún `SNAPSHOT_FROZEN` real. Los requisitos propuestos para un registro real son **propuestas, no reglas aprobadas**, y figuran en `ARTIFACT_STORAGE_DECISION.md` §8.1.
 
 ## 9. Errores
 
