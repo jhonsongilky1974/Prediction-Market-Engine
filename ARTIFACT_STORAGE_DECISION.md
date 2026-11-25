@@ -211,12 +211,32 @@ cargadores heredados ni los scripts de entrenamiento salvo que su alcance lo dig
 | PR-2 | Formato canónico del documento de metadatos y del manifiesto de paquete, verificación del paquete artefacto-metadatos y plantilla `governance/models/MODEL_CARD_TEMPLATE.md` (D6 y D20 resueltas, ver §2; D12 confirmada). |
 | PR-3 | Registro v2 aditivo que permite entradas por hash y formato sin cambiar el comportamiento heredado (D8 y D16 decididas para este alcance, ver §2). Solo valida el registro v2: no toca el JSON de producción, no lee el almacén y no se conecta a los cargadores. |
 | PR-4 | Cargadores seguros desde el almacén, sin cablear (D14 decidida, ver §2). No convierte ni deserializa artefactos heredados, no recurre a ellos y no modifica los cargadores heredados. |
-| PR-5 | El libro y el evaluador verifican desde el almacén mediante una abstracción de resolución. |
+| PR-5 | El libro y el evaluador resuelven los manifiestos de instantánea desde el almacén mediante una abstracción de resolución, conservando el comportamiento heredado por ruta (alcance en §8.1). |
 | PR-6 | `--db-path`, modo gobernado, congelado de datos y herramienta del manifiesto (depende de D13, D19). |
 | PR-7 | Los entrenadores publican artefactos B1 y metadatos en el almacén, solo con pruebas sintéticas (depende de D11, D15). |
 | PR-8 | Proveedor de métricas del test. Haría alcanzable `ELEGIBLE`; requiere decisión explícita (D21). |
 | PR-9 | Cableado a producción y retiro de cargadores joblib de tenis, solo con un modelo ya promovido (D22). |
 | PR-B | Backend remoto privado, solo tras D1 y D23. |
+
+### 8.1 Alcance de PR-5
+
+Este apartado delimita el contenido de PR-5. Como todo PR de §8, requiere autorización explícita y una auditoría de solo lectura previa: **este texto no las concede**.
+
+**Qué hace PR-5.** El libro de calibración y el evaluador resuelven los manifiestos de instantánea desde el almacén, además de por ruta. El comportamiento heredado por ruta se conserva sin cambios.
+
+**Reglas del alcance**
+
+- **Una sola referencia.** `SNAPSHOT_FROZEN` admite exactamente uno de `manifest_path` o `manifest_key`. Una referencia por clave se resuelve solo en el almacén y una por ruta solo en el repositorio: si la resolución falla, no se recurre al otro modo. En el modo por clave, `manifest_sha256` es obligatorio e igual a `manifest_key`.
+- **Blob por clave.** Los bytes del blob deben coincidir byte por byte con `manifest_bytes()` del manifiesto validado. El límite es de 262 144 bytes inclusive (un blob de exactamente 262 144 bytes se acepta y uno de 262 145 se rechaza) y se comprueba antes de analizar. La lectura rechaza claves JSON duplicadas, `NaN` e `Infinity`. Estas exigencias de lectura se aplican solo al modo por clave: la lectura por ruta no cambia.
+- **Fallo de verificación por falta de acceso al almacén.** Si el libro contiene manifiestos referenciados por clave y no hay acceso al almacén, la verificación completa falla e identifica los manifiestos que quedaron sin verificar. Es un fallo distinto de una cadena de hashes rota y de un blob ausente, corrupto o inválido en un almacén accesible. El mensaje solo afirma que la cadena de hashes o el prefijo con la base se verificaron si esas comprobaciones se ejecutaron y pasaron.
+- **Lo que se conserva.** El evaluador no importa `package_loaders`. `BASE_TRAINED`, `CALIBRATOR_TRAINED` y sus comprobaciones actuales (sidecar y artefacto heredados) no cambian. `ELEGIBLE` sigue sin ser alcanzable: el evaluador se detiene con `SafeLoadRequiredError`.
+
+**Fuera de PR-5.** La validación de `dataset_manifest_ref` desde un paquete, la verificación de paquetes de base y calibrador por el libro, las métricas, `trained_at`, `git_commit` y el estado en el registro quedan aplazadas; `ARTIFACT_PACKAGE_SPEC.md` §8 explica la dependencia de cada una. La construcción y publicación del manifiesto de instantánea conserva su alcance en PR-6.
+
+**Registro real.** La fusión de PR-5 no autoriza registrar ningún `SNAPSHOT_FROZEN` real.
+
+- *Reglas vigentes ya documentadas:* D6 impide registrar ninguno hasta que el manifiesto se resuelva desde el almacén; `governance/calibration/README.md` y `CONTINUITY.md` §0.42–§0.43 exigen preregistro firmado antes del entrenamiento, el intento anterior cerrado, un mínimo de eventos nuevos y el ancla en `main`; y D1 (parcial) establece que ningún artefacto destinado a producción puede depender únicamente del almacén local.
+- *Requisitos propuestos, no aprobados:* que D13 y D19 estén decididas, que el manifiesto se publique en el almacén con una herramienta o un procedimiento documentado, y que el manifiesto no dependa únicamente del almacén local (aplicación propuesta de D1 al libro).
 
 ---
 
